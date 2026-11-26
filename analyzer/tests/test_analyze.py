@@ -101,6 +101,107 @@ def standard(): pass
     }
 
 
+def test_snapshot_detects_openfeature_calls_and_guards(make_repo, tmp_path):
+    repo = make_repo(
+        [
+            {
+                "api.py": """\
+def checkout(ctx, name):
+    client = get_openfeature_client()
+    enabled = client.get_boolean_value(default_value=False, flag_key="local")
+    client.get_string_value(name, default_value="fallback")
+    client.get_boolean_value(flag_key=name, default_value=False)
+    if get_openfeature_client().get_boolean_value(
+        "chained", default_value=False, evaluation_context=ctx
+    ):
+        return chained()
+    elif not enabled:
+        return disabled()
+    elif client.get_boolean_details(flag_key="details", default_value=False):
+        return details()
+    else:
+        return fallback()
+
+def chained(): pass
+def disabled(): pass
+def details(): pass
+def fallback(): pass
+"""
+            }
+        ]
+    )
+    out = tmp_path / "output"
+    (result,) = analyze_repo(repo.path, out)
+    graph = load_snapshot(out, result.commit.sha)
+
+    assert [(flag.name, flag.file, flag.line, flag.call) for flag in graph.flags] == [
+        ("chained", "api.py", 6, "get_boolean_value"),
+        ("details", "api.py", 12, "get_boolean_details"),
+        ("local", "api.py", 3, "get_boolean_value"),
+    ]
+    assert {edge.target: edge.guard for edge in graph.edges} == {
+        "api:chained": Guard("chained", "on"),
+        "api:disabled": Guard("local", "off"),
+        "api:details": Guard("details", "on"),
+        "api:fallback": Guard("details", "off"),
+    }
+
+
+def test_progress_precedes_each_listed_snapshot_including_cached_ones(make_repo, tmp_path):
+    repo = make_repo([{"first.py": ""}, {"second.py": ""}, {"third.py": ""}])
+    out = tmp_path / "output"
+    progress = []
+
+    def on_progress(current, total, commit):
+        already_exists = (out / "snapshots" / f"{commit.sha}.json").exists()
+        progress.append((current, total, commit, already_exists))
+
+    first, second = analyze_repo(repo.path, out, max_commits=2, on_progress=on_progress)
+    assert progress == [(1, 2, first.commit, False), (2, 2, second.commit, False)]
+
+    progress.clear()
+    analyze_repo(repo.path, out, max_commits=2, on_progress=on_progress)
+    assert progress == [(1, 2, first.commit, True), (2, 2, second.commit, True)]
+
+
+def test_capped_history_writes_and_backfills_unlisted_parent(make_repo, tmp_path):
+    repo = make_repo(
+        [{"api.py": "def old(): pass\n"}, {"api.py": "def new(): pass\n"}, {"notes.md": "Notes"}]
+    )
+    out = tmp_path / "output"
+
+    (head,) = analyze_repo(repo.path, out, max_commits=1)
+    (base_sha,) = head.commit.parents
+    base = load_snapshot(out, base_sha)
+    assert [node.id for node in base.nodes] == ["api:new"]
+    assert load_commits(out) == [head.commit]
+    assert len(list((out / "snapshots").glob("*.json"))) == 2
+
+    (out / "snapshots" / f"{base_sha}.json").unlink()
+    (cached_head,) = analyze_repo(repo.path, out, max_commits=1)
+    assert not cached_head.written
+    assert load_snapshot(out, base_sha) == base
+
+
+def test_shallow_history_gets_a_base_when_the_parent_becomes_available(make_repo, tmp_path):
+    repo = make_repo([{"api.py": "def old(): pass\n"}, {"api.py": "def new(): pass\n"}])
+    shallow = tmp_path / "shallow"
+    repo.git("clone", "--quiet", "--depth=1", "--no-local", str(repo.path), str(shallow))
+    out = tmp_path / "output"
+
+    (head,) = analyze_repo(shallow, out, max_commits=1)
+    assert load_snapshot(out, head.commit.sha).commit.parents == []
+    assert list((out / "snapshots").glob("*.json")) == [head.snapshot_path]
+
+    repo.git("-C", str(shallow), "fetch", "--quiet", "--deepen=1", "origin")
+    (updated,) = analyze_repo(shallow, out, max_commits=1)
+    base_sha = repo.git("rev-parse", "HEAD^")
+    assert updated.commit.sha == head.commit.sha
+    assert load_snapshot(out, updated.commit.sha).commit.parents == [base_sha]
+    assert [node.id for node in load_snapshot(out, base_sha).nodes] == ["api:old"]
+    assert load_commits(out) == [updated.commit]
+
+
 def test_source_root_selection_and_options(make_repo, tmp_path):
     repo = make_repo(
         [

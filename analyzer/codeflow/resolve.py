@@ -7,6 +7,7 @@ from codeflow.parse_python import ParsedFile
 class _Resolver:
     def __init__(self, files: list[ParsedFile], keep_external: bool):
         self.files = {file.module: file for file in files}
+        self.packages = {module.partition(".")[0] for module in self.files}
         self.definitions = {
             f"{file.module}:{definition.qualname}": definition
             for file in files
@@ -33,16 +34,19 @@ class _Resolver:
         if not imported:
             return None
         full_name = imported + (f".{tail}" if separator else "")
-        for module in sorted(self.files, key=len, reverse=True):
-            if full_name.startswith(module + "."):
+        module, dot, _ = full_name.rpartition(".")
+        # The longest matching module owns the name, even if the symbol is absent.
+        while dot:
+            if module in self.files:
                 target = f"{module}:{full_name[len(module) + 1 :]}"
                 if target in self.definitions:
                     return target
                 break
-        package = imported.split(".")[0]
-        internal = any(module.split(".")[0] == package for module in self.files)
-        if self.keep_external and not internal:
-            return f"external:{package}"
+            module, dot, _ = module.rpartition(".")
+        if self.keep_external:
+            package = imported.partition(".")[0]
+            if package not in self.packages:
+                return f"external:{package}"
         return None
 
     def enclosing_class(self, file: ParsedFile, caller: str) -> str | None:

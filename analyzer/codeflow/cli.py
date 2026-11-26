@@ -34,7 +34,7 @@ def _analyze(args: argparse.Namespace) -> None:
     for result in results:
         commit = result.commit
         head = load_snapshot(args.out, commit.sha)
-        nodes = diff_graphs(previous or head.empty_base(), head).nodes
+        nodes = diff_graphs(previous or _first_parent(args.out, head), head).nodes
         added, removed, changed = len(nodes.added), len(nodes.removed), len(nodes.changed)
         print(f"{commit.sha[:7]} +{added} −{removed} ~{changed} {commit.message}")
         total_added += added

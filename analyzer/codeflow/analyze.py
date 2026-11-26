@@ -1,13 +1,13 @@
 """Build, store, and load per-commit call graphs for a Git repository."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
 from codeflow.build import build_graph
-from codeflow.git_history import list_commits, list_python_files, read_blob
+from codeflow.git_history import batch_blobs, list_commits, list_python_files
 from codeflow.graph import Commit, Graph
 from codeflow.parse_python import ParsedFile, parse_file
 
@@ -54,10 +54,15 @@ def analyze_repo(
     exclude: Sequence[str] | None = None,
     source_root: str = "",
     keep_external: bool = False,
+    on_progress: Callable[[int, int, Commit], None] | None = None,
 ) -> list[CommitResult]:
-    """Write missing snapshots and the commit index, then report results oldest first."""
+    """Write missing snapshots and report progress before each indexed commit, oldest first."""
     repo = Path(repo).resolve()
-    commits = list_commits(repo, branch, max_commits)
+    # Reserve one extra first-parent commit as the base for the oldest indexed commit.
+    limit = max_commits + 1 if max_commits is not None and max_commits > 0 else max_commits
+    snapshot_commits = list_commits(repo, branch, limit)
+    has_base = max_commits is not None and len(snapshot_commits) > max_commits
+    commits = snapshot_commits[1:] if has_base else snapshot_commits
     repo_name = repo.name
     out_dir = Path(out_dir)
     snapshots = out_dir / "snapshots"
@@ -66,44 +71,57 @@ def analyze_repo(
     cache: dict[tuple[str, str], ParsedFile | None] = {}
     results = []
 
-    for commit in commits:
-        snapshot_path = snapshots / f"{commit.sha}.json"
-        written = not snapshot_path.exists()
-        skipped = []
-        if written:
-            parsed_files = []
-            for path, blob_sha in list_python_files(repo, commit.sha, include, exclude):
-                if not PurePosixPath(path).is_relative_to(root):
-                    continue
-                key = (path, blob_sha)
-                if key not in cache:
-                    source = read_blob(repo, blob_sha)
-                    try:
-                        source.decode("utf-8")
-                        cache[key] = parse_file(path, source, source_root)
-                    except (UnicodeDecodeError, RecursionError):
-                        cache[key] = None
-                parsed = cache[key]
-                if parsed is None:
-                    skipped.append(path)
-                else:
-                    parsed_files.append(parsed)
-            graph = build_graph(parsed_files, repo_name, commit, keep_external)
-            _write_json(snapshot_path, graph.to_json())
-        else:
-            graph = load_snapshot(out_dir, commit.sha)
+    with batch_blobs(repo) as read_blob:
+        for current, commit in enumerate(snapshot_commits, start=0 if has_base else 1):
+            if current and on_progress is not None:
+                on_progress(current, len(commits), commit)
+            snapshot_path = snapshots / f"{commit.sha}.json"
+            written = not snapshot_path.exists()
+            if current == 0 and not written:
+                continue
+            skipped = []
+            if written:
+                parsed_files = []
+                for path, blob_sha in list_python_files(repo, commit.sha, include, exclude):
+                    if not PurePosixPath(path).is_relative_to(root):
+                        continue
+                    key = (path, blob_sha)
+                    if key not in cache:
+                        source = read_blob(blob_sha)
+                        try:
+                            source.decode("utf-8")
+                            cache[key] = parse_file(path, source, source_root)
+                        except (UnicodeDecodeError, RecursionError):
+                            cache[key] = None
+                    parsed = cache[key]
+                    if parsed is None:
+                        skipped.append(path)
+                    else:
+                        parsed_files.append(parsed)
+                data = build_graph(parsed_files, repo_name, commit, keep_external).to_json()
+                _write_json(snapshot_path, data)
+            else:
+                data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                # A shallow boundary can gain visible parents after the clone is deepened.
+                metadata = asdict(commit)
+                if data["commit"] != metadata:
+                    data["commit"] = metadata
+                    _write_json(snapshot_path, data)
+                    written = True
 
-        results.append(
-            CommitResult(
-                commit,
-                snapshot_path,
-                len(graph.nodes),
-                len(graph.edges),
-                len(graph.flags),
-                written,
-                skipped,
+            if current == 0:
+                continue
+            results.append(
+                CommitResult(
+                    commit,
+                    snapshot_path,
+                    len(data["nodes"]),
+                    len(data["edges"]),
+                    len(data["flags"]),
+                    written,
+                    skipped,
+                )
             )
-        )
 
     _write_json(
         out_dir / "commits.json",

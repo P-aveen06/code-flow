@@ -2,7 +2,8 @@
 
 import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -108,3 +109,41 @@ def list_python_files(
 def read_blob(repo: str | Path, blob_sha: str) -> bytes:
     """Read the exact bytes stored in a Git blob."""
     return _git(repo, "cat-file", "blob", blob_sha)
+
+
+@contextmanager
+def batch_blobs(repo: str | Path) -> Iterator[Callable[[str], bytes]]:
+    """Read blobs by SHA through a single Git process for this analysis."""
+    try:
+        process = subprocess.Popen(
+            ["git", "-C", str(repo), "cat-file", "--batch"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise GitHistoryError("Git executable not found") from exc
+
+    with process:
+        request, response = process.stdin, process.stdout
+        assert request is not None and response is not None
+
+        def read(blob_sha: str) -> bytes:
+            try:
+                request.write(f"{blob_sha}\n".encode())
+                request.flush()
+            except BrokenPipeError as exc:
+                raise GitHistoryError(f"git cat-file failed while reading blob {blob_sha}") from exc
+
+            # Git sends an object header, the exact payload bytes, then a newline.
+            header = response.readline().split()
+            if len(header) != 3:
+                raise GitHistoryError(f"Cannot read Git blob {blob_sha} in {repo}")
+            size = int(header[2])
+            source = response.read(size)
+            if len(source) != size or response.read(1) != b"\n":
+                raise GitHistoryError(f"Incomplete Git blob {blob_sha} in {repo}")
+            if header[1] != b"blob":
+                raise GitHistoryError(f"Git object {blob_sha} in {repo} is not a blob")
+            return source
+
+        yield read

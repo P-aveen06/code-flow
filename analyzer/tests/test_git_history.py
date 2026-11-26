@@ -2,7 +2,13 @@
 
 import pytest
 
-from codeflow.git_history import GitHistoryError, list_commits, list_python_files, read_blob
+from codeflow.git_history import (
+    GitHistoryError,
+    batch_blobs,
+    list_commits,
+    list_python_files,
+    read_blob,
+)
 from codeflow.graph import Commit
 
 
@@ -88,3 +94,18 @@ def test_repository_and_branch_errors(make_repo, tmp_path):
     repo = make_repo([{"cart.py": ""}])
     with pytest.raises(GitHistoryError, match="Unknown Git branch or ref 'missing'"):
         list_commits(repo.path, "missing")
+
+
+def test_batch_reader_keeps_blob_boundaries(make_repo):
+    repo = make_repo([{"data.py": b"\x00\xff\r\n", "empty.py": b"", "text.py": b"no newline"}])
+    head = repo.git("rev-parse", "HEAD")
+    files = dict(list_python_files(repo.path, "HEAD"))
+
+    with batch_blobs(repo.path) as read:
+        assert read(files["data.py"]) == b"\x00\xff\r\n"
+        assert read(files["empty.py"]) == b""
+        with pytest.raises(GitHistoryError, match="Cannot read Git blob"):
+            read("0" * 40)
+        with pytest.raises(GitHistoryError, match="is not a blob"):
+            read(head)
+        assert read(files["text.py"]) == b"no newline"

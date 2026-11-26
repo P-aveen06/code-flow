@@ -106,7 +106,7 @@ def test_missing_directory_and_non_git_repo_report_errors(tmp_path):
         assert "Traceback" not in result.stderr
 
 
-def test_analyze_options_and_missing_parent(make_repo, tmp_path):
+def test_analyze_options_and_capped_parent(make_repo, tmp_path):
     repo = make_repo(
         [
             {"src/main.py": "def run(): pass\n"},
@@ -143,12 +143,17 @@ def test_analyze_options_and_missing_parent(make_repo, tmp_path):
     )
     assert result.returncode == 0, result.stderr
     (commit,) = load_commits(out)
-    assert result.stdout.splitlines()[-1] == "Total: 1 commit, +2 −0 ~0"
+    assert result.stdout.splitlines()[-1] == "Total: 1 commit, +1 −0 ~1"
     head = commit.sha
     snapshot = json.loads((out / "snapshots" / f"{head}.json").read_text())
     assert [node["id"] for node in snapshot["nodes"]] == ["external:requests", "main:run"]
 
-    missing_parent = code_flow("diff", out, "--head", head)
-    assert missing_parent.returncode == 2
-    assert f"No snapshot for first parent {commit.parents[0]}" in missing_parent.stderr
-    assert "Traceback" not in missing_parent.stderr
+    diff = code_flow("diff", out, "--head", head)
+    assert diff.returncode == 0, diff.stderr
+    report = json.loads(diff.stdout)
+    assert report["base"] == commit.parents[0]
+    assert report["nodes"] == {
+        "added": ["external:requests"],
+        "removed": [],
+        "changed": ["main:run"],
+    }

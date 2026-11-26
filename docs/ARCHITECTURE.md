@@ -123,6 +123,11 @@ dotted module names. An empty string uses the repo root. An output directory
 reuses snapshots by SHA, so use a fresh directory when changing include or
 exclude patterns, `source_root`, or `keep_external`.
 
+With a commit cap, the analyzer also writes the oldest listed commit's first
+parent snapshot when that parent is available in the Git history. The parent
+serves as the diff base and stays out of `commits.json`. At a root commit or
+shallow history boundary, the oldest commit uses an empty graph as its base.
+
 ## Diff JSON (`code-flow/diff@1`)
 
 ```json
@@ -240,9 +245,12 @@ Detects Flagsmith flag checks in the analyzed Python code and overlays live
 flag state from Flagsmith.
 
 Detection (analyzer, `codeflow/flags.py`):
-- Calls whose method name is one of `is_feature_enabled`, `get_feature_value`,
-  `has_feature`, `feature_enabled`, `get_value` with a string-literal first
-  argument. The list is configurable.
+- The configurable method list includes `is_feature_enabled`,
+  `get_feature_value`, `has_feature`, `feature_enabled`, `get_value`, and the
+  OpenFeature `get_{boolean,string,integer,float,object}_value` and `_details`
+  methods. Detection matches the method name on a variable or a chained
+  receiver such as `get_openfeature_client()`. It reads a string-literal first
+  argument or a string-literal `flag_key=` keyword.
 - Direct, negated, or local-variable flag checks guard their branch body
   with `on` or `off` as appropriate, and chains starting with a flag check
   carry the opposite of the latest flag guard into later `elif` and `else`

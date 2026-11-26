@@ -152,3 +152,15 @@ def test_comments_in_flag_arguments_and_parentheses():
     )
     assert [flag.name for flag in parsed.flags] == ["x"]
     assert calls["do_yes"] == Guard("x", "on")
+
+
+def test_multiline_concatenated_flag_key():
+    parsed, calls = guarded_calls(
+        "if flags.get_boolean_value(\n"
+        " flag_key=('new_'\n"
+        "           'checkout'),\n"
+        " default_value=False,\n"
+        "):\n do_yes()"
+    )
+    assert [flag.name for flag in parsed.flags] == ["new_checkout"]
+    assert calls["do_yes"] == Guard("new_checkout", "on")

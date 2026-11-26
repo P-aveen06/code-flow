@@ -12,6 +12,7 @@ from tree_sitter import Language, Node, Parser
 from codeflow.flags import (
     DEFAULT_FLAG_METHODS,
     dotted_name,
+    flag_check_of_call,
     flag_name_of_call,
     guard_from_condition,
     opposite,
@@ -280,12 +281,11 @@ class _Walker:
 
     def call(self, node: Node, caller: str, guard: Guard | None) -> None:
         callee = dotted_name(node.child_by_field_name("function"))
-        flag = flag_name_of_call(node, self.flag_methods)
+        check = flag_check_of_call(node, self.flag_methods)
         line = node.start_point.row + 1
-        if flag is not None:
-            self.parsed.flags.append(
-                FlagCheck(flag, self.parsed.path, line, caller, callee.rsplit(".", 1)[-1])
-            )
+        if check:
+            method, flag = check
+            self.parsed.flags.append(FlagCheck(flag, self.parsed.path, line, caller, method))
         if caller and callee:
             self.parsed.calls.append(CallSite(caller, callee, line, guard))
 
