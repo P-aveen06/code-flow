@@ -1,10 +1,7 @@
-import { useEffect, useRef } from "react";
-import type { KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { TimelineCommit } from "../types";
 import { statusLabels } from "./styles";
-import { formatStats, moveSelection } from "./timelineHelpers";
-
-const commitDate = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" });
+import { filterTimeline, formatCommitDate, formatStats, moveSelection } from "./timelineHelpers";
 
 interface TimelineProps {
   commits: TimelineCommit[];
@@ -13,9 +10,14 @@ interface TimelineProps {
 }
 
 export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
+  const [hideUnchanged, setHideUnchanged] = useState(true);
   const listRef = useRef<HTMLOListElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
-  const selectedIndex = commits.findIndex(({ sha }) => sha === selectedSha);
+  const { visible, hiddenCount } = useMemo(
+    () => filterTimeline(commits, selectedSha, hideUnchanged),
+    [commits, selectedSha, hideUnchanged],
+  );
+  const selectedIndex = visible.findIndex(({ sha }) => sha === selectedSha);
 
   useEffect(() => {
     const list = listRef.current;
@@ -25,16 +27,28 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
     const bounds = row.getBoundingClientRect();
     if (bounds.top < viewport.top) list.scrollTop += bounds.top - viewport.top;
     if (bounds.bottom > viewport.bottom) list.scrollTop += bounds.bottom - viewport.bottom;
-  }, [selectedSha]);
+  }, [selectedSha, visible]);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLOListElement>) {
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-    event.preventDefault();
-    const nextIndex = moveSelection(selectedIndex, event.key, commits.length);
-    if (nextIndex === selectedIndex || nextIndex === -1) return;
-    onSelect(commits[nextIndex].sha);
-    event.currentTarget.querySelectorAll("button")[nextIndex]?.focus({ preventScroll: true });
-  }
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
+
+      const nextIndex = moveSelection(selectedIndex, event.key, visible.length);
+      if (nextIndex === -1) return;
+      event.preventDefault();
+      if (nextIndex === selectedIndex) return;
+      const list = listRef.current;
+      if (list?.contains(document.activeElement)) {
+        list.querySelectorAll("button")[nextIndex]?.focus({ preventScroll: true });
+      }
+      onSelect(visible[nextIndex].sha);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIndex, visible, onSelect]);
 
   return (
     <aside className="sidebar timeline" aria-labelledby="timeline-title">
@@ -44,8 +58,15 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
       </div>
       {commits.length ? (
         <>
-          <ol className="timeline__list" ref={listRef} onKeyDown={handleKeyDown}>
-            {commits.map((commit, index) => {
+          <div className="timeline__filter">
+            <label>
+              <input type="checkbox" checked={hideUnchanged} onChange={(event) => setHideUnchanged(event.target.checked)} />
+              Hide commits with no flow change
+            </label>
+            <p className="muted" aria-live="polite">{hiddenCount} hidden</p>
+          </div>
+          <ol className="timeline__list" ref={listRef}>
+            {visible.map((commit, index) => {
               const selected = index === selectedIndex;
               const stats = formatStats(commit.stats);
               return (
@@ -60,7 +81,7 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
                   >
                     <span className="timeline__meta">
                       <code title={commit.sha}>{commit.sha.slice(0, 7)}</code>
-                      <time dateTime={commit.date}>{commitDate.format(new Date(commit.date))}</time>
+                      <time dateTime={commit.date}>{formatCommitDate(commit.date)}</time>
                     </span>
                     <span className="timeline__message">{commit.message}</span>
                     <span className="timeline__stats">
@@ -68,7 +89,8 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
                         <span
                           key={status}
                           className={`timeline__badge timeline__badge--${status}`}
-                          aria-label={`${statusLabels[status]} ${stats[status].slice(1)}`}
+                          title={`${stats[status].slice(1)} functions ${statusLabels[status].toLowerCase()}`}
+                          aria-label={`${stats[status].slice(1)} functions ${statusLabels[status].toLowerCase()}`}
                         >{stats[status]}</span>
                       ))}
                     </span>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildReviewEvent, formatElapsed, recordDiffViewed } from "../events";
+import { buildReviewEvent, recordDiffViewed } from "../events";
 import type { ReviewContext, ReviewEvent, ReviewOutcome } from "../events";
 
 interface ReviewBarProps {
@@ -10,31 +10,22 @@ interface ReviewBarProps {
 export function ReviewBar({ context, onReview }: ReviewBarProps) {
   const startedAt = useRef<number | null>(null);
   const recorded = useRef(false);
-  const [elapsed, setElapsed] = useState<number | null>(null);
-  const [recordedMs, setRecordedMs] = useState<number | null>(null);
-  const started = elapsed !== null;
-  const canReview = started && recordedMs === null && context !== null;
+  const [started, setStarted] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const canReview = started && !answered && context !== null;
 
   useEffect(() => {
     if (!context || startedAt.current !== null) return;
     startedAt.current = performance.now();
-    setElapsed(0);
+    setStarted(true);
     recordDiffViewed(context);
   }, [context]);
-
-  useEffect(() => {
-    if (!started || recordedMs !== null) return;
-    const timer = window.setInterval(() => {
-      if (startedAt.current !== null) setElapsed(performance.now() - startedAt.current);
-    }, 100);
-    return () => window.clearInterval(timer);
-  }, [started, recordedMs]);
 
   const submit = useCallback((event: ReviewOutcome) => {
     if (!context || startedAt.current === null || recorded.current) return;
     recorded.current = true;
     const payload = buildReviewEvent(context, event, startedAt.current, performance.now());
-    setRecordedMs(payload.ms);
+    setAnswered(true);
     onReview(payload);
   }, [context, onReview]);
 
@@ -60,33 +51,37 @@ export function ReviewBar({ context, onReview }: ReviewBarProps) {
   }, [canReview, submit]);
 
   return (
-    <div className="review-bar">
-      <button
-        type="button"
-        className="btn btn--primary"
-        aria-keyshortcuts="U"
-        disabled={!canReview}
-        onClick={() => submit("diff_understood")}
-      >
-        Understood / Approve <kbd>U</kbd>
-      </button>
-      <button
-        type="button"
-        className="btn"
-        aria-keyshortcuts="C"
-        disabled={!canReview}
-        onClick={() => submit("diff_confusing")}
-      >
-        Confusing <kbd>C</kbd>
-      </button>
-      {recordedMs === null && (
-        <span className="muted review-bar__timer" role="timer" aria-label="Review time">
-          {elapsed === null ? "—" : formatElapsed(elapsed)}
-        </span>
-      )}
-      <span className="muted" role="status">
-        {recordedMs !== null && `Recorded after ${formatElapsed(recordedMs)}`}
-      </span>
-    </div>
+    <section className="review-bar" aria-labelledby="review-question">
+      <div className="review-bar__prompt">
+        <h3 id="review-question">Did this diagram help you understand the change?</h3>
+        <p className="muted">Your answer feeds a Flagsmith A/B test of how code-flow shows diffs.</p>
+      </div>
+      <div className="review-bar__actions">
+        {answered ? (
+          <p role="status">Thanks — recorded.</p>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              aria-keyshortcuts="U"
+              disabled={!canReview}
+              onClick={() => submit("diff_understood")}
+            >
+              Yes, I understand it <kbd>U</kbd>
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              aria-keyshortcuts="C"
+              disabled={!canReview}
+              onClick={() => submit("diff_confusing")}
+            >
+              No, it's confusing <kbd>C</kbd>
+            </button>
+          </>
+        )}
+      </div>
+    </section>
   );
 }

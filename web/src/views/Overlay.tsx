@@ -17,7 +17,6 @@ export function Overlay({ layout, selectedNodeId, onNodeClick, onReady }: DiffVi
       selectedNodeId={selectedNodeId}
       onNodeClick={onNodeClick}
       onReady={onReady}
-      emptyMessage={layout.nodes.length ? undefined : "No flow changes in this comparison."}
     />
   );
 }

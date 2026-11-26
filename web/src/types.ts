@@ -1,7 +1,36 @@
+export type RepoStatus = "queued" | "cloning" | "analyzing" | "ready" | "error";
+
 export interface Repo {
+  id: string;
   name: string;
+  url: string | null;
+  subdir: string | null;
   branch: string;
   commit_count: number;
+  status: RepoStatus;
+  message: string;
+  warning: string | null;
+}
+
+export interface ImportRequest {
+  url: string;
+  subdir: string;
+  max_commits: number;
+}
+
+export interface ImportResponse {
+  id: string;
+  status: RepoStatus;
+}
+
+export interface ImportStatus extends ImportResponse {
+  name: string;
+  message: string;
+  current: number | null;
+  total: number | null;
+  warning: string | null;
+  error: string | null;
+  seconds: number;
 }
 
 export interface Commit {

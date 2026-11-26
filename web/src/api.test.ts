@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchCode, fetchCommits, fetchDiff, fetchRepos } from "./api";
+import { fetchCode, fetchCommits, fetchDiff, fetchRepoStatus, fetchRepos, fetchSnapshot, importRepo } from "./api";
+import type { Repo } from "./types";
 
 vi.mock("./config", () => ({ apiUrl: "https://flow.test/gateway/" }));
 
@@ -18,12 +19,44 @@ describe("API client", () => {
     const history = { repo: "shop demo", branch: "main", commits: [] };
     mockFetch.mockResolvedValueOnce(Response.json(repos)).mockResolvedValueOnce(Response.json(history));
 
-    await expect(fetchRepos()).resolves.toEqual(repos);
+    await expect(fetchRepos()).resolves.toEqual([{
+      ...repos[0], id: "shop demo", url: null, subdir: null, status: "ready", message: "Ready", warning: null,
+    }]);
     await expect(fetchCommits("shop demo")).resolves.toEqual(history);
     expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
       "https://flow.test/gateway/api/repos",
       "https://flow.test/gateway/api/repos/shop%20demo/commits",
     ]);
+  });
+
+  it("preserves imported repo metadata and reads status and snapshots by id", async () => {
+    const repo: Repo = {
+      id: "Flagsmith__flagsmith", name: "Flagsmith/flagsmith", url: "https://github.com/Flagsmith/flagsmith",
+      subdir: "api", branch: "main", commit_count: 0, status: "analyzing", message: "Analyzing commit 1 of 50", warning: null,
+    };
+    mockFetch.mockResolvedValueOnce(Response.json([repo])).mockImplementation(async () => Response.json({}));
+    await expect(fetchRepos()).resolves.toEqual([repo]);
+    await fetchRepoStatus(repo.id);
+    await fetchSnapshot(repo.id, "f376f9c");
+    expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://flow.test/gateway/api/repos",
+      "https://flow.test/gateway/api/repos/Flagsmith__flagsmith/status",
+      "https://flow.test/gateway/api/repos/Flagsmith__flagsmith/snapshots/f376f9c",
+    ]);
+  });
+
+  it("posts the import body and returns a server validation message as written", async () => {
+    const body = { url: "https://github.com/Flagsmith/flagsmith", subdir: "api", max_commits: 50 };
+    const accepted = { id: "Flagsmith__flagsmith", status: "queued" };
+    const detail = "Repository not found or not public";
+    mockFetch.mockResolvedValueOnce(Response.json(accepted, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ detail }, { status: 400 }));
+
+    await expect(importRepo(body)).resolves.toEqual(accepted);
+    expect(mockFetch).toHaveBeenCalledWith("https://flow.test/gateway/api/repos", expect.objectContaining({
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }));
+    await expect(importRepo(body)).rejects.toEqual(new Error(detail));
   });
 
   it("omits unset diff parameters and sends explicit zero hops and an empty base", async () => {

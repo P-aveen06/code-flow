@@ -160,9 +160,10 @@ export function FlowLegend() {
       {legendStatuses.map((status) => (
         <li key={status}>
           <span className="flow-legend__swatch" style={nodeStyle(status)} />
-          {statusLabels[status]}
+          {status === "context" ? "Unchanged neighbour" : statusLabels[status]}
         </li>
       ))}
+      <li><code>flag: on/off</code> = call depends on a feature flag</li>
     </ul>
   );
 }
