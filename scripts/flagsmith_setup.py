@@ -149,6 +149,15 @@ class Flag:
     variants: tuple[Variant, ...] = ()
 
 
+FLOW_DIRECTION_FLAG = Flag(
+    "flow_direction",
+    True,
+    "horizontal",
+    "MULTIVARIATE",
+    (Variant("vertical", 50, "vertical"),),
+)
+
+
 def same_value(left: FlagValue, right: FlagValue) -> bool:
     return type(left) is type(right) and left == right
 
@@ -332,7 +341,14 @@ def initialize_flag_state(
 
 def show_value(value: FlagValue) -> str:
     # Remote strings and custom export values may contain credentials.
-    if isinstance(value, str) and value not in ("", "side_by_side", "overlay", "overlay_summary"):
+    if isinstance(value, str) and value not in (
+        "",
+        "side_by_side",
+        "overlay",
+        "overlay_summary",
+        "horizontal",
+        "vertical",
+    ):
         return "<redacted>"
     return json.dumps(value)
 
@@ -591,6 +607,7 @@ def setup(
                     Variant("overlay_summary", 33, "overlay_summary"),
                 ),
             ),
+            FLOW_DIRECTION_FLAG,
             Flag("flagsmith_mode", True),
             Flag("ai_summary", False),
         ],

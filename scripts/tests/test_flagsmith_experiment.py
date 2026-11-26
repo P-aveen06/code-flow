@@ -37,8 +37,10 @@ METRIC_BODIES = [
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, flag="flow_view", *, feature_exists=True):
         self.calls = []
+        self.flag = flag
+        self.feature_exists = feature_exists
         self.metrics = []
         self.experiments = []
         self.results = None
@@ -65,6 +67,19 @@ class FakeClient:
             "feature_state_value": "side_by_side",
             "multivariate_feature_state_values": copy.deepcopy(WEIGHTS),
         }
+        if flag == "flow_direction":
+            self.feature.update(
+                name=flag,
+                multivariate_options=[
+                    {"id": 19, "type": "unicode", "key": "vertical", "string_value": "vertical"}
+                ],
+            )
+            self.flag_state.update(
+                feature_state_value="horizontal",
+                multivariate_feature_state_values=[
+                    {"multivariate_feature_option": 19, "percentage_allocation": 50}
+                ],
+            )
 
     @property
     def writes(self):
@@ -76,8 +91,10 @@ class FakeClient:
             "organisations/": [{"id": 7}],
             "projects/?organisation=7": [{"id": 8, "name": "code-flow"}],
             "projects/8/environments/": [{"id": 9, "name": "Production", "api_key": ENV_KEY}],
-            "projects/8/features/?search=flow_view": [self.feature],
-            f"{EXPERIMENTS}?q=flow_view": self.experiments,
+            f"projects/8/features/?search={self.flag}": [self.feature]
+            if self.feature_exists
+            else [],
+            f"{EXPERIMENTS}?q={self.flag}": self.experiments,
             f"{ENV_PATH}featurestates/?feature=16": [self.flag_state],
             METRICS: self.metrics,
         }
@@ -160,7 +177,7 @@ def test_create_uses_serializer_fields_and_is_idempotent(capsys):
             {
                 "name": NAME,
                 "feature": 16,
-                "hypothesis": script.HYPOTHESIS,
+                "hypothesis": script.EXPERIMENTS["flow_view"].hypothesis,
                 "metrics": [
                     {"metric": 31, "expected_direction": "increase"},
                     {"metric": 32, "expected_direction": "decrease"},
@@ -477,3 +494,124 @@ def test_refresh_wait_reports_timeout(running_experiment, monkeypatch, capsys):
     ]
     assert sleeps == [1]
     assert "Timed out after 1s waiting for refreshed results" in capsys.readouterr().out
+
+
+def test_flow_direction_create_status_refresh_and_rollout(capsys):
+    client = FakeClient("flow_direction")
+    api = script.ExperimentAPI(client, dry_run=False)
+    options = {"experiment_flag": "flow_direction"}
+
+    script.run(api, "create", **options)
+    script.run(api, "create", **options)
+
+    assert [path for _, path, _ in client.writes] == [
+        METRICS,
+        METRICS,
+        EXPERIMENTS,
+        f"{DETAIL}start/",
+    ]
+    metric_bodies = [body for _, path, body in client.writes if path == METRICS]
+    assert metric_bodies == [
+        {
+            **body,
+            "name": body["name"].replace("Diff ", "Layout "),
+            "definition": {"version": 1, "event": "layout_understood"},
+        }
+        for body in METRIC_BODIES
+    ]
+    created = client.writes[2][2]
+    assert created["name"] == "flow_direction: vertical vs horizontal for long flows"
+    assert created["experiment_rollout"] == {
+        "enabled": False,
+        "rollout_percentage": 100,
+        "feature_state_value": {"type": "string", "value": "horizontal"},
+        "multivariate_feature_state_values": [
+            {"multivariate_feature_option": 19, "percentage_allocation": 50}
+        ],
+    }
+    assert "horizontal 50%, vertical 50%" in capsys.readouterr().out
+    client.calls.clear()
+    client.results = {
+        "payload": {
+            "metrics": [
+                {
+                    "metric_id": metric["id"],
+                    "variants": {"control": {"n": 60, "sum": 30}, "vertical": {"n": 60, "sum": 36}},
+                    "inference": {},
+                }
+                for metric in client.metrics
+            ]
+        }
+    }
+    script.run(api, "status", **options)
+    output = capsys.readouterr().out
+    assert "horizontal (control)" in output
+    assert "36 / 60.0%" in output
+    assert "Layout understood" in output
+    assert "Layout time to understand (ms)" in output
+
+    script.run(api, "refresh", **options)
+    script.run(api, "rollout", "vertical", **options)
+    assert client.writes == [
+        ("POST", f"{DETAIL}exposures/refresh/", {}),
+        ("POST", f"{DETAIL}results/refresh/", {}),
+        ("POST", f"{DETAIL}complete/", {"rollout_decision": "variant", "rollout_variant": 19}),
+    ]
+    assert ("GET", f"{EXPERIMENTS}?q=flow_direction", None) in client.calls
+
+
+@pytest.mark.parametrize("feature_exists", [True, False])
+def test_cli_previews_flow_direction_with_or_without_feature(
+    feature_exists, tmp_path, monkeypatch, capsys
+):
+    client = FakeClient("flow_direction", feature_exists=feature_exists)
+    env_file = tmp_path / ".env"
+    env_file.write_text("FLAGSMITH_ADMIN_API_KEY=fake-key\n")
+    monkeypatch.setattr(script, "AdminClient", lambda url, key: client)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "flagsmith_experiment.py",
+            "--env-file",
+            str(env_file),
+            "--experiment",
+            "flow_direction",
+            "create",
+            "--dry-run",
+        ],
+    )
+
+    assert script.main() == 0
+    assert client.writes == []
+    output = capsys.readouterr().out
+    assert ENV_KEY not in output
+    assert '"event": "layout_understood"' in output
+    assert '"percentage_allocation": 50' in output
+    assert "POST environments/<environment-key>/experiments/<new experiment ID>/start/" in output
+    if feature_exists:
+        assert '"multivariate_feature_option": 19' in output
+    else:
+        assert "Prerequisite: setup must create flow_direction" in output
+        assert "<new option ID for vertical>" in output
+        assert all("featurestates/" not in path for _, path, _ in client.calls)
+
+
+def test_cli_rejects_a_rollout_variant_from_another_experiment(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "flagsmith_experiment.py",
+            "--experiment",
+            "flow_direction",
+            "rollout",
+            "--variant",
+            "overlay",
+            "--dry-run",
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        script.main()
+    assert error.value.code == 2
+    assert "must be one of horizontal, vertical" in capsys.readouterr().err

@@ -6,11 +6,12 @@ import os
 import sys
 from pathlib import Path
 
+from codeflow.diff import LONG_FLOW_MIN_DEPTH
 from flagsmith.exceptions import FlagsmithClientError, FlagsmithFeatureDoesNotExistError
 
 from clients import DEFAULT_API_URL, DryRunClient, ExperimentClient, flagsmith_client
 from config import named_path
-from diffs import load_diff_sizes
+from diffs import load_diffs
 from experiments import Experiment, load_experiment
 from history import reserve_reviewers
 from model import MODELS
@@ -99,7 +100,12 @@ def _print_summary(
     mode = "dry run" if dry_run else "Flagsmith"
     print(f"Simulated reviewers ({model} model, {mode})")
     print(f"Experiment flag {experiment.flag} (control {experiment.control}).")
-    print(f"Diffs sampled from {commit_count} flow-changing commits in {source}.")
+    eligible = (
+        f"long-flow commits (depth >= {LONG_FLOW_MIN_DEPTH} at one hop)"
+        if experiment.long_flows_only
+        else "flow-changing commits"
+    )
+    print(f"Diffs sampled from {commit_count} {eligible} in {source}.")
     width = max(len("Variant"), *(len(variant) for variant in summary))
     print(f"{'Variant':<{width}} {'Reviewers':>9} {'Success rate':>15} {'Median ms':>12}")
     for variant, stats in summary.items():
@@ -198,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             _check_repeats(
                 experiment.flag, len(known_repeats), confirmed=True, allow_repeat=args.allow_repeat
             )
-        source, diff_sizes = load_diff_sizes(REPO_ROOT / "data")
+        source, diffs = load_diffs(REPO_ROOT / "data", long_flows_only=experiment.long_flows_only)
         client = (
             DryRunClient(experiment.allocations)
             if args.dry_run
@@ -209,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = run_simulation(
             client,
             experiment,
-            diff_sizes,
+            diffs,
             reviewers=reviewers,
             model_name=args.model,
             rate=None if args.dry_run else args.rate,
@@ -231,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Simulation interrupted.", file=sys.stderr)
         return 130
 
-    _print_summary(summary, args.model, source, len(diff_sizes), args.dry_run, experiment)
+    _print_summary(summary, args.model, source, len(diffs), args.dry_run, experiment)
     if args.persona_summary:
         _print_persona_summary(summary, personas)
     return 0

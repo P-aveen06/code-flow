@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from codeflow.diff import LONG_FLOW_MIN_DEPTH
+
 DEFAULT_FLAGSMITH_API_URL = "http://localhost:8000/api/v1/"
 
 
@@ -37,6 +39,7 @@ class Settings:
     flagsmith_api_url: str = DEFAULT_FLAGSMITH_API_URL
     flagsmith_server_key: str | None = field(default=None, repr=False)
     scopes_path: Path | None = None
+    long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -51,6 +54,12 @@ class Settings:
             return (base / value).resolve()
 
         data_dir = config_path("CODEFLOW_DATA_DIR", repo_root / "data")
+        try:
+            min_depth = int(values.get("CODEFLOW_LONG_FLOW_MIN_DEPTH") or LONG_FLOW_MIN_DEPTH)
+            if min_depth < 1:
+                raise ValueError
+        except ValueError:
+            raise ValueError("CODEFLOW_LONG_FLOW_MIN_DEPTH must be a positive integer.") from None
         return cls(
             data_dir=data_dir,
             web_origin=values.get("CODEFLOW_WEB_ORIGIN", "http://localhost:5173"),
@@ -59,6 +68,7 @@ class Settings:
             scopes_path=config_path(
                 "CODEFLOW_FLAGSMITH_SCOPES_PATH", data_dir / "flagsmith_scopes.json"
             ),
+            long_flow_min_depth=min_depth,
         )
 
     def flag_scope(self, repo: str) -> tuple[str, set[str]]:

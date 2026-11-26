@@ -29,6 +29,36 @@ def test_load_flow_view(flow_view: Experiment) -> None:
     assert set(flow_view.models["null"].variants.values()) == {VariantBehaviour(0.66, 36000, 0.5)}
 
 
+def test_flow_direction_config_and_depth_effect(personas: PersonaModel) -> None:
+    experiment = load_experiment(EXPERIMENTS_DIR / "flow_direction.yaml", personas)
+    assert experiment.flag == "flow_direction"
+    assert experiment.control == "horizontal"
+    assert experiment.allocations == {"horizontal": 50, "vertical": 50}
+    assert experiment.success_event == "layout_understood"
+    assert experiment.failure_event == "layout_confusing"
+    assert experiment.long_flows_only
+    assert not experiment.record_failure_time
+    model = experiment.models["hypothesis"]
+    horizontal, vertical = model.variants.values()
+    assert vertical.success_probability - horizontal.success_probability == pytest.approx(0.05)
+    assert vertical.median_ms == pytest.approx(0.9 * horizontal.median_ms)
+
+    persona = Persona("senior_dev", 10, "high", "visual")
+    horizontal_decision = model.sample("horizontal", 2, Random(7), persona=persona, depth=4)
+    assert horizontal_decision == model.sample("horizontal", 2, Random(7), persona=persona, depth=7)
+    vertical_decision = model.sample("vertical", 2, Random(7), persona=persona, depth=4)
+    deeper_decision = model.sample("vertical", 2, Random(7), persona=persona, depth=7)
+    assert deeper_decision.elapsed_ms == pytest.approx(
+        vertical_decision.elapsed_ms * 0.985**3, abs=1
+    )
+
+    null = experiment.models["null"]
+    for seed in range(10):
+        assert null.sample("horizontal", 2, Random(seed), persona=persona, depth=4) == null.sample(
+            "vertical", 2, Random(seed), persona=persona, depth=7
+        )
+
+
 def test_template_parses(personas: PersonaModel) -> None:
     template = load_experiment(EXPERIMENTS_DIR / "_template.yaml", personas)
     assert template.flag == "example_feature"

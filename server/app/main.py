@@ -27,7 +27,7 @@ def create_app(
     flagsmith_client: FlagsmithClient | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    store = Store(settings.data_dir)
+    store = Store(settings.data_dir, long_flow_min_depth=settings.long_flow_min_depth)
     importer = RepoImporter(store, git_url_builder, executor)
     flagsmith = flagsmith_client or FlagsmithClient(
         settings.flagsmith_server_key, settings.flagsmith_api_url

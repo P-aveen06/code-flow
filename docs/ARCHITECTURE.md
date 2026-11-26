@@ -36,7 +36,7 @@ JSON, so renderers can be swapped without touching the analyzer.
 | `analyzer/` | Python package `codeflow` + CLI `code-flow`. Parses code, builds graphs, walks git history, diffs snapshots, detects Flagsmith flag checks, exports Mermaid. Open-source core. | Python 3.11+, `tree-sitter`, `tree-sitter-python`, plain `git` via subprocess |
 | `server/` | FastAPI app. Serves snapshots, diffs, code snippets; reads live flag state of the analyzed app from Flagsmith; builds the one-line diff summary; optional local mirror of experiment events. | FastAPI, uvicorn, `flagsmith` Python SDK, SQLite (optional) |
 | `web/` | Reviewer UI: commit timeline, flow diff in three styles, Flagsmith mode panel. Sends experiment exposure and success events to Flagsmith. | Vite, React, TypeScript, `@xyflow/react`, `elkjs`, `@flagsmith/flagsmith` JS SDK |
-| `simulator/` | Generates simulated reviewers, each a Flagsmith identity, who get a `flow_view` variant and send review events to Flagsmith Experimentation. | Python, `flagsmith` SDK |
+| `simulator/` | Generates simulated reviewers, each a Flagsmith identity, who receive a variant and send review events to Flagsmith Experimentation. | Python, `flagsmith` SDK |
 | `examples/` | Scripts that build a small demo repo with a scripted git history (flag-gated checkout flow), and a script to analyze Flagsmith/flagsmith. | bash / Python |
 
 ## Graph JSON (`code-flow/graph@1`)
@@ -202,9 +202,15 @@ and responses use full SHAs.
   `dead_calls` (`source`, `target`). The order is orphan, live, off, unused,
   then by name within each status. Code-only results use `unknown`.
 - `GET /api/repos/{repo}/diff?head=SHA&base=SHA&hops=1` returns `base`, `head`,
-  `summary`, the `code-flow/diff@1` JSON in `diff`, and overlay `nodes` and
-  `edges`. Omit `base` to use the commit index's diff base.
-  `hops` defaults to 1 and accepts 0–3.
+  `summary`, the `code-flow/diff@1` JSON in `diff`, overlay `nodes` and
+  `edges`, integer `flow_depth`, and boolean `long_flow`. Omit `base` to use
+  the commit index's diff base. `hops` defaults to 1 and accepts 0–3.
+  `flow_depth` counts nodes along the longest call chain in the union of the
+  base and head graphs within the requested neighbourhood, before grouping or
+  collapsing nodes. It is 0 for an empty neighbourhood. A depth-first traversal
+  visits roots and callees in sorted node ID order and ignores edges back to
+  nodes on the current path. `long_flow` is true when the depth meets or exceeds
+  `CODEFLOW_LONG_FLOW_MIN_DEPTH`, a positive integer that defaults to 4.
   The overlay contains the union of both graphs within the changed
   neighbourhood. Nodes are sorted by `id` and include `name`, `qualname`,
   `module`, `kind`, `file`, `line`, `end_line`, and `status` (`added`,
@@ -239,7 +245,7 @@ the selected environment.
 
 | Tag | Flags |
 |---|---|
-| `code-flow` | `flow_view`, `flagsmith_mode`, `ai_summary` |
+| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary` |
 | `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
 | `repo:shop-demo` | `new_checkout`, `holiday_discount` |
 
@@ -252,6 +258,7 @@ configuration.
 | Flag | Type | Purpose |
 |---|---|---|
 | `flow_view` | multivariate string | The Track 01 experiment. Control `side_by_side`; variants `overlay` and `overlay_summary`. Allocation 34/33/33 while the test runs; roll out the winner by setting it to 100%. |
+| `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
 | `flagsmith_mode` | boolean | Turns Flagsmith mode on or off (Paveen's decision). When off, the panel and live colouring are hidden. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
 
@@ -285,6 +292,32 @@ Docs: https://docs.flagsmith.com/experimentation
 - **Simulated traffic**: `simulator/` uses the Python SDK: `get_experiment_flag("flow_view", identifier=id)` for exposure, then `track_event("diff_understood", identifier=id, value=ms)` (or `diff_confusing`), and `close()` at the end to flush. Identities are `sim-reviewer-NNNN`. The behaviour model (probability of understanding and time distribution per variant and per diff size) lives in `simulator/behaviour.yaml` and is stated openly in the README and the demo, because the users are simulated.
 - **Local mirror (optional)**: the server can also log events to SQLite and show a simple per-variant table, as a backup if the Flagsmith results page lags during the demo.
 - **Rollout**: after the run, roll out the winner from the experiment page (or set `flow_view` to it at 100%), shown live in the demo video.
+
+### Long-flow layout experiment
+
+The hypothesis for `flow_direction` is that reviewers understand long flows
+more often and faster with a top-down layout. In the planned web integration,
+only reviewers who see a long flow trigger `getExperimentFlag('flow_direction')`.
+Short flows stay horizontal. After a layout exposure, the same Yes/No review
+click sends `layout_understood` with `{value: ms}` or `layout_confusing`.
+The primary metric is the occurrence of `layout_understood` and the secondary
+metric is the mean value of that event per exposure.
+
+**Long flow = `flow_depth ≥ 4` by default.** The cutoff of 4 selects 5 of the
+14 flow-changing commits (35.7%) in the primary Flagsmith API analysis.
+The distribution below uses `hops=1` and the indexed diff base for each commit.
+
+| Analysis | Indexed commits | Flow-changing commits | Depth 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `Flagsmith__flagsmith` | 50 | 14 | 1 | 2 | 6 | 1 | 2 | 1 | 1 |
+| `openai__whisper` | 30 | 12 | 1 | 5 | 6 | 0 | 0 | 0 | 0 |
+| `openai__codex` | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+The simulator always samples eligible one-hop commits using the default
+cutoff. It prefers the Flagsmith analysis and falls back to another local
+analysis with long flows. `simulator/experiments/flow_direction.yaml` records
+the hypothesis and null behaviour assumptions. The setup and experiment CLI
+dry runs preview the new flag, both metrics, and the 50/50 experiment.
 
 ## Flagsmith mode
 

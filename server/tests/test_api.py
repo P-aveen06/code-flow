@@ -20,6 +20,7 @@ REPO_URL = "/api/repos/shop-demo"
 @pytest.fixture
 def client(demo_data: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("CODEFLOW_DATA_DIR", str(demo_data))
+    monkeypatch.setenv("CODEFLOW_LONG_FLOW_MIN_DEPTH", "")
     with TestClient(create_app()) as test_client:
         yield test_client
 
@@ -126,6 +127,8 @@ def test_diff(client: TestClient, demo_data: Path, checkout_commit: Commit) -> N
     assert overlay["head"] == checkout_commit.sha
     assert "new_checkout" in overlay["summary"]
     assert overlay["diff"]["schema"] == "code-flow/diff@1"
+    assert overlay["flow_depth"] == 4
+    assert overlay["long_flow"] is True
     nodes = {node["id"]: node for node in overlay["nodes"]}
     assert list(nodes) == sorted(nodes)
     checkout = nodes["shop.api:checkout"]
@@ -147,6 +150,8 @@ def test_diff(client: TestClient, demo_data: Path, checkout_commit: Commit) -> N
     smaller = client.get(url, params={**params, "hops": 0})
     assert smaller.status_code == 200
     assert len(smaller.json()["nodes"]) < len(nodes)
+    assert smaller.json()["flow_depth"] == 3
+    assert smaller.json()["long_flow"] is False
     assert client.get(url, params={**params, "hops": 9}).status_code in (400, 422)
 
     root = load_commits(demo_data / "shop-demo")[0]
@@ -164,7 +169,29 @@ def test_diff_from_root(client: TestClient, demo_data: Path) -> None:
     overlay = response.json()
     assert overlay["base"] == overlay["diff"]["base"] == ""
     assert overlay["diff"]["stats"]["nodes_added"] == 5
+    assert overlay["flow_depth"] == 2
+    assert overlay["long_flow"] is False
     assert all(node["status"] == "added" and not node["in_base"] for node in overlay["nodes"])
+
+
+def test_diff_long_flow_threshold_override(
+    demo_data: Path, checkout_commit: Commit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODEFLOW_DATA_DIR", str(demo_data))
+    monkeypatch.setenv("CODEFLOW_LONG_FLOW_MIN_DEPTH", "5")
+    with TestClient(create_app()) as client:
+        response = client.get(f"{REPO_URL}/diff", params={"head": checkout_commit.sha})
+
+    assert response.status_code == 200
+    assert response.json()["flow_depth"] == 4
+    assert response.json()["long_flow"] is False
+
+
+@pytest.mark.parametrize("threshold", ["0", "-1", "four"])
+def test_invalid_long_flow_threshold(threshold: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEFLOW_LONG_FLOW_MIN_DEPTH", threshold)
+    with pytest.raises(ValueError, match="CODEFLOW_LONG_FLOW_MIN_DEPTH"):
+        Settings.from_env()
 
 
 def test_code(client: TestClient, checkout_commit: Commit) -> None:

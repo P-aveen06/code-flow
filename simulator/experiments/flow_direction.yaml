@@ -1,0 +1,37 @@
+# ASSUMPTIONS for simulated reviewers on long flows.
+flag: flow_direction
+success_event: layout_understood
+failure_event: layout_confusing
+long_flows_only: true
+record_failure_time: false
+
+variants:
+  horizontal:
+    control: true
+    allocation: 50
+    success_probability: 0.60
+    median_ms: 40000
+    sigma: 0.5
+  vertical:
+    allocation: 50
+    # Assume 5 percentage points more understanding and a 10% lower median at the threshold.
+    success_probability: 0.65
+    median_ms: 36000
+    sigma: 0.5
+    # Each additional call layer adds 0.5 points and multiplies the median by 0.985.
+    per_extra_layer: {probability_delta: 0.005, time_multiplier: 0.985}
+
+size_effects:
+  success_penalty: 0.0
+  time_increase: 0.0
+
+persona_interactions:
+  vertical:
+    reading_style:
+      visual: {probability_delta: 0.01, time_multiplier: 0.99}
+
+# Equal assumptions across variants, including at greater depths.
+"null":
+  success_probability: 0.60
+  median_ms: 40000
+  sigma: 0.5

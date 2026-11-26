@@ -16,6 +16,8 @@ class Experiment:
     success_event: str
     failure_event: str
     models: dict[str, BehaviourModel]
+    long_flows_only: bool = False
+    record_failure_time: bool = True
 
 
 def _behaviour(fields: dict[str, object], name: str) -> VariantBehaviour:
@@ -26,6 +28,13 @@ def _behaviour(fields: dict[str, object], name: str) -> VariantBehaviour:
         raise ValueError(f"{name}.success_probability must be between 0 and 1.")
     if median_ms <= 0 or sigma < 0:
         raise ValueError(f"{name} requires positive median_ms and nonnegative sigma.")
+    if "per_extra_layer" in fields:
+        return VariantBehaviour(
+            probability,
+            median_ms,
+            sigma,
+            read_effect(fields["per_extra_layer"], f"{name}.per_extra_layer"),
+        )
     return VariantBehaviour(probability, median_ms, sigma)
 
 
@@ -63,13 +72,17 @@ def load_experiment(path: Path, personas: PersonaModel) -> Experiment:
         "variants",
         "size_effects",
         "null",
-        optional=("persona_interactions",),
+        optional=("persona_interactions", "long_flows_only", "record_failure_time"),
     )
     flag = name_value(config["flag"], "flag")
     success = name_value(config["success_event"], "success_event")
     failure = name_value(config["failure_event"], "failure_event")
     if success == failure:
         raise ValueError("success_event and failure_event must be different.")
+    long_flows_only = config.get("long_flows_only", False)
+    record_failure_time = config.get("record_failure_time", True)
+    if type(long_flows_only) is not bool or type(record_failure_time) is not bool:
+        raise ValueError("long_flows_only and record_failure_time must be true or false.")
 
     assumptions = ("success_probability", "median_ms", "sigma")
     raw_variants = config["variants"]
@@ -81,7 +94,9 @@ def load_experiment(path: Path, personas: PersonaModel) -> Experiment:
     for key, value in raw_variants.items():
         variant = name_value(key, "Variant value")
         name = f"variants.{variant}"
-        fields = section(value, name, "allocation", *assumptions, optional=("control",))
+        fields = section(
+            value, name, "allocation", *assumptions, optional=("control", "per_extra_layer")
+        )
         allocation = fields["allocation"]
         if type(allocation) is not int or not 0 <= allocation <= 100:
             raise ValueError(f"{name}.allocation must be a whole percentage from 0 to 100.")
@@ -114,4 +129,6 @@ def load_experiment(path: Path, personas: PersonaModel) -> Experiment:
             "hypothesis": BehaviourModel(variants, penalty, increase, personas, interactions),
             "null": BehaviourModel(dict.fromkeys(variants, null), penalty, increase, personas),
         },
+        long_flows_only=long_flows_only,
+        record_failure_time=record_failure_time,
     )

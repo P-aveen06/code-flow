@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from codeflow.diff import GraphDiff, diff_graphs, neighbourhood
+from codeflow.diff import GraphDiff, diff_graphs, flow_depth, neighbourhood
 
 
 @pytest.fixture
@@ -82,7 +82,9 @@ def test_body_hash_is_the_only_node_change_signal(compare_sources):
         {"m.py": "def shift(): pass\ndef edit(): return 1\n"},
         {"m.py": "# shift both definitions\ndef shift(): pass\ndef edit(): return 2\n"},
     )
-    assert diff_graphs(base, head).nodes.changed == ["m:edit"]
+    diff = diff_graphs(base, head)
+    assert diff.nodes.changed == ["m:edit"]
+    assert flow_depth(base, head, diff) == 1
 
 
 def test_neighbourhood_walks_callers_and_callees(checkout_graphs):
@@ -107,3 +109,81 @@ def test_hops_zero_includes_endpoints_of_edge_only_changes(compare_sources):
     diff = diff_graphs(base, head)
     assert diff.nodes.changed == []
     assert neighbourhood(base, head, diff, hops=0) == {"api:checkout", "old:check", "new:check"}
+
+
+def test_flow_depth_stays_within_the_changed_neighbourhood(compare_sources):
+    base_source = """\
+def upstream(): caller()
+def caller(): edited()
+def edited(): old()
+def old(): pass
+def new(): leaf()
+def leaf(): pass
+"""
+    head_source = base_source.replace("def edited(): old()", "def edited(): new()")
+    base, head = compare_sources({"m.py": base_source}, {"m.py": head_source})
+    diff = diff_graphs(base, head)
+
+    assert flow_depth(base, head, diff, hops=0) == 2
+    assert flow_depth(base, head, diff) == 4
+    assert flow_depth(base, head, diff, hops=2) == 5
+
+
+def test_flow_depth_combines_removed_and_added_calls(compare_sources):
+    base, head = compare_sources(
+        {"m.py": "def a(): b()\ndef b(): pass\ndef c(): pass\n"},
+        {"m.py": "def a(): pass\ndef b(): c()\ndef c(): pass\n"},
+    )
+
+    assert flow_depth(base, head, diff_graphs(base, head), hops=0) == 3
+
+
+def test_flow_depth_uses_longest_branch(compare_sources):
+    base, head = compare_sources(
+        {"m.py": "def root(): pass\n"},
+        {
+            "m.py": """\
+def root():
+    short()
+    longer()
+def short(): pass
+def longer(): leaf()
+def leaf(): pass
+"""
+        },
+    )
+
+    assert flow_depth(base, head, diff_graphs(base, head)) == 3
+
+
+def test_flow_depth_breaks_cycles_in_sorted_dfs_order(compare_sources):
+    base, head = compare_sources(
+        {"m.py": "def a(): pass\n"},
+        {
+            "m.py": """\
+def c(): b()
+def b(): c()
+def a():
+    c()
+    b()
+    a()
+def w(): z()
+def z(): c()
+"""
+        },
+    )
+    diff = diff_graphs(base, head)
+
+    assert flow_depth(base, head, diff) == 3
+    head.nodes.reverse()
+    head.edges.reverse()
+    assert flow_depth(base, head, diff) == 3
+
+
+def test_flow_depth_is_zero_for_empty_diff(compare_sources):
+    base, head = compare_sources(
+        {"m.py": "def unchanged(): pass\n"},
+        {"m.py": "# Comment only\ndef unchanged(): pass\n"},
+    )
+
+    assert flow_depth(base, head, diff_graphs(base, head)) == 0

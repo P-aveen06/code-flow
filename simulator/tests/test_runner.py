@@ -5,10 +5,12 @@ from flagsmith.models import DefaultFlag
 from flagsmith.types import TraitMapping
 
 from clients import DryRunClient
-from experiments import Experiment
+from diffs import DiffSample
+from experiments import Experiment, load_experiment
 from panels import generate_panel, load_panel
+from personas import PersonaModel
 from runner import SimulationError, VariantSummary, run_simulation
-from simulate import PANELS_DIR
+from simulate import EXPERIMENTS_DIR, PANELS_DIR
 
 
 def _simulate(
@@ -19,7 +21,7 @@ def _simulate(
     summary = run_simulation(
         client,
         experiment,
-        [1, 2, 3, 7, 14],
+        [DiffSample(size) for size in (1, 2, 3, 7, 14)],
         reviewers=generate_panel(personas, n=n, prefix="sim-reviewer", seed=seed),
         model_name=model,
         rate=None,
@@ -79,6 +81,31 @@ def test_each_reviewer_has_one_exposure_and_one_outcome(flow_view: Experiment) -
         assert isinstance(outcome[2], int) and outcome[2] > 0
 
 
+def test_layout_outcomes_follow_exposure_and_only_success_has_time(personas: PersonaModel) -> None:
+    experiment = load_experiment(EXPERIMENTS_DIR / "flow_direction.yaml", personas)
+    client = DryRunClient(experiment.allocations)
+    run_simulation(
+        client,
+        experiment,
+        [DiffSample(2, 4), DiffSample(3, 7)],
+        reviewers=generate_panel(personas, n=100, prefix="layout-test", seed=7),
+        model_name="hypothesis",
+        rate=None,
+        seed=7,
+    )
+
+    exposures, outcomes = client.events[::2], client.events[1::2]
+    assert {event for event, _, _ in outcomes} == {"layout_understood", "layout_confusing"}
+    for exposure, outcome in zip(exposures, outcomes, strict=True):
+        assert exposure[0] == "$flag_exposure"
+        assert exposure[1] == outcome[1]
+        assert exposure[2] in experiment.allocations
+        if outcome[0] == "layout_understood":
+            assert isinstance(outcome[2], int) and outcome[2] > 0
+        else:
+            assert outcome[2] is None
+
+
 def test_persona_counts_follow_variant_assignments(flow_view: Experiment) -> None:
     summary, client = _simulate(flow_view, "hypothesis", n=100)
     for variant, stats in summary.items():
@@ -104,7 +131,7 @@ def test_throttle_accounts_for_request_time_and_only_sleeps_between_reviewers(
     run_simulation(
         client,
         flow_view,
-        [1],
+        [DiffSample(1)],
         reviewers=generate_panel(personas, n=4, prefix="test", seed=7),
         model_name="null",
         rate=20,
@@ -128,7 +155,7 @@ def test_close_after_an_ineligible_assignment(flow_view: Experiment) -> None:
         run_simulation(
             client,
             flow_view,
-            [1],
+            [DiffSample(1)],
             reviewers=generate_panel(personas, n=1, prefix="test", seed=7),
             model_name="hypothesis",
             rate=None,
@@ -144,7 +171,7 @@ def test_default_panel_dry_run_keeps_flow_view_ordering(flow_view: Experiment) -
     summary = run_simulation(
         client,
         flow_view,
-        [1, 2, 3, 7, 14],
+        [DiffSample(size) for size in (1, 2, 3, 7, 14)],
         reviewers=panel,
         model_name="hypothesis",
         rate=None,

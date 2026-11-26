@@ -1,4 +1,4 @@
-"""Create, inspect, refresh, or complete the code-flow experiment on Flagsmith 2.295.2."""
+"""Create, inspect, refresh, or complete code-flow experiments on Flagsmith 2.295.2."""
 
 import argparse
 import fcntl
@@ -7,11 +7,13 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from flagsmith_setup import (
     DEFAULT_API_URL,
+    FLOW_DIRECTION_FLAG,
     PROJECT_NAME,
     AdminClient,
     AdminError,
@@ -23,22 +25,55 @@ from flagsmith_setup import (
 )
 
 ENVIRONMENT_NAME = "Production"
-FEATURE_NAME = "flow_view"
-EXPERIMENT_NAME = "flow_view: overlay vs side by side"
-HYPOTHESIS = (
-    "Reviewers understand a code change faster and more often in an overlay flow diff "
-    "with a one-line summary than in side-by-side diagrams."
-)
-CONTROL = "side_by_side"
-TREATMENTS = ("overlay", "overlay_summary")
-METRICS = (
-    ("Diff understood", "occurrence", "up", "increase"),
-    ("Diff time to understand (ms)", "mean", "down", "decrease"),
-)
-EVENT = {"version": 1, "event": "diff_understood"}
 MIN_REVIEWERS_PER_VARIANT = 50
 MIN_CONVERSIONS_PER_VARIANT = 5
 RESULTS_POLL_SECONDS = 2
+
+
+@dataclass(frozen=True)
+class ExperimentDefinition:
+    name: str
+    hypothesis: str
+    control: str
+    treatments: dict[str, int]
+    metric_subject: str
+    success_event: str
+
+    @property
+    def metrics(self) -> tuple[tuple[str, str, str, str], ...]:
+        return (
+            (f"{self.metric_subject} understood", "occurrence", "up", "increase"),
+            (f"{self.metric_subject} time to understand (ms)", "mean", "down", "decrease"),
+        )
+
+    @property
+    def allocations(self) -> dict[str, int]:
+        return {self.control: 100 - sum(self.treatments.values()), **self.treatments}
+
+
+EXPERIMENTS = {
+    "flow_view": ExperimentDefinition(
+        name="flow_view: overlay vs side by side",
+        hypothesis=(
+            "Reviewers understand a code change faster and more often in an overlay flow diff "
+            "with a one-line summary than in side-by-side diagrams."
+        ),
+        control="side_by_side",
+        treatments={"overlay": 33, "overlay_summary": 33},
+        metric_subject="Diff",
+        success_event="diff_understood",
+    ),
+    FLOW_DIRECTION_FLAG.name: ExperimentDefinition(
+        name="flow_direction: vertical vs horizontal for long flows",
+        hypothesis="Reviewers understand long flows more often and faster in a top-down layout.",
+        control=str(FLOW_DIRECTION_FLAG.value),
+        treatments={
+            str(option.value): int(option.allocation) for option in FLOW_DIRECTION_FLAG.variants
+        },
+        metric_subject="Layout",
+        success_event="layout_understood",
+    ),
+}
 
 
 class ExperimentAPI:
@@ -75,15 +110,16 @@ def experiment_state(experiment: Record) -> str:
     return state
 
 
-def variant_options(feature: Record) -> dict[str, Record]:
+def variant_options(feature: Record, definition: ExperimentDefinition) -> dict[str, Record]:
     options = {option["string_value"]: option for option in feature["multivariate_options"]}
     if (
         feature["type"] != "MULTIVARIATE"
-        or len(feature["multivariate_options"]) != len(TREATMENTS)
-        or set(options) != set(TREATMENTS)
+        or len(feature["multivariate_options"]) != len(definition.treatments)
+        or options.keys() != definition.treatments.keys()
         or any(option["type"] != "unicode" or not option.get("key") for option in options.values())
     ):
-        raise SetupError("flow_view must have the two named string variants with experiment keys.")
+        names = ", ".join(definition.treatments)
+        raise SetupError(f"{feature['name']} must have these string variants with keys: {names}.")
     return options
 
 
@@ -94,35 +130,39 @@ def variant_weights(rows: list[Record]) -> dict[int, float]:
 def create(
     api: ExperimentAPI,
     environment_path: str,
-    feature: Record,
-    experiments: list[Record],
+    feature: Record | None,
     experiment: Record | None,
+    definition: ExperimentDefinition,
 ) -> None:
     experiments_path = f"{environment_path}experiments/"
     if experiment is not None and (state := experiment_state(experiment)) != "created":
-        print(f"{EXPERIMENT_NAME} is already {state}.")
+        print(f"{definition.name} is already {state}.")
         return
-    if experiment is None and any(
-        other["feature"]["id"] == feature["id"] and experiment_state(other) != "completed"
-        for other in experiments
-    ):
-        raise SetupError("flow_view already has a different active experiment in Production.")
 
-    options = variant_options(feature)
-    weights = {options[name]["id"]: 33 for name in TREATMENTS}
-    control_value = {"type": "string", "value": CONTROL}
-    if experiment is None:
-        states = api.list(f"{environment_path}featurestates/?feature={feature['id']}")
+    if feature is None:
+        feature_id = "<new feature ID for flow_direction>"
+        weights = {
+            f"<new option ID for {name}>": weight for name, weight in definition.treatments.items()
+        }
+    else:
+        feature_id = feature["id"]
+        options = variant_options(feature, definition)
+        weights = {options[name]["id"]: weight for name, weight in definition.treatments.items()}
+
+    control_value = {"type": "string", "value": definition.control}
+    if experiment is None and feature is not None:
+        states = api.list(f"{environment_path}featurestates/?feature={feature_id}")
         if (
             len(states) != 1
             or states[0]["enabled"] is not True
-            or states[0]["feature_state_value"] != CONTROL
+            or states[0]["feature_state_value"] != definition.control
             or variant_weights(states[0]["multivariate_feature_state_values"]) != weights
         ):
+            split = "/".join(map(str, definition.allocations.values()))
             raise SetupError(
-                "Production flow_view must be enabled with a 34/33/33 split before creation."
+                f"Production {feature['name']} must be enabled with a {split} split before creation."
             )
-    else:
+    elif experiment is not None:
         detail = api.get(f"{experiments_path}{experiment['id']}/")
         existing_rollout = detail["experiment_rollout"]
         if (
@@ -139,12 +179,12 @@ def create(
     metric_path = f"{environment_path}experiment-metrics/"
     existing_metrics = api.list(metric_path)
     metric_records = []
-    for name, aggregation, direction, expected in METRICS:
+    for name, aggregation, direction, expected in definition.metrics:
         body = {
             "name": name,
             "aggregation": aggregation,
             "direction": direction,
-            "definition": EVENT,
+            "definition": {"version": 1, "event": definition.success_event},
         }
         metric = find_record(existing_metrics, "name", name, "metric")
         if metric is not None and any(metric[key] != value for key, value in body.items()):
@@ -165,13 +205,14 @@ def create(
                 metric["id"] if metric is not None else f"<new metric ID for {body['name']}>"
             )
             attachments.append({"metric": metric_id, "expected_direction": expected})
-        print("Traffic split: side_by_side 34%, overlay 33%, overlay_summary 33%.")
+        split = ", ".join(f"{name} {weight}%" for name, weight in definition.allocations.items())
+        print(f"Traffic split: {split}.")
         experiment = api.post(
             experiments_path,
             {
-                "feature": feature["id"],
-                "name": EXPERIMENT_NAME,
-                "hypothesis": HYPOTHESIS,
+                "feature": feature_id,
+                "name": definition.name,
+                "hypothesis": definition.hypothesis,
                 "metrics": attachments,
                 "experiment_rollout": {
                     "enabled": False,  # The start action enables the override, as in the dashboard.
@@ -187,22 +228,27 @@ def create(
     else:
         attached = [(row["metric"], row["expected_direction"]) for row in experiment["metrics"]]
         expected = [(metric["id"], direction) for metric, _, direction in metric_records if metric]
-        if len(expected) != len(METRICS) or attached != expected:
+        if len(expected) != len(definition.metrics) or attached != expected:
             raise SetupError("The existing draft has different metrics. Review it before starting.")
 
     experiment_id = experiment["id"] if experiment is not None else "<new experiment ID>"
     if api.post(f"{experiments_path}{experiment_id}/start/", {}) is not None:
-        print(f"Started {EXPERIMENT_NAME}.")
+        print(f"Started {definition.name}.")
 
 
 def rollout(
-    api: ExperimentAPI, path: str, feature: Record, experiment: Record, variant: str
+    api: ExperimentAPI,
+    path: str,
+    feature: Record,
+    experiment: Record,
+    variant: str,
+    definition: ExperimentDefinition,
 ) -> None:
     body: Record = {"rollout_decision": "control"}
-    if variant != CONTROL:
+    if variant != definition.control:
         body = {
             "rollout_decision": "variant",
-            "rollout_variant": variant_options(feature)[variant]["id"],
+            "rollout_variant": variant_options(feature, definition)[variant]["id"],
         }
 
     state = experiment_state(experiment)
@@ -218,7 +264,7 @@ def rollout(
 
     api.post(f"{path}complete/", body)
     verb = "Would complete" if api.dry_run else "Completed"
-    print(f"{verb} {EXPERIMENT_NAME} with {variant} at 100% in the Production environment default.")
+    print(f"{verb} {definition.name} with {variant} at 100% in the Production environment default.")
 
 
 def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
@@ -238,13 +284,13 @@ def print_inference_minimum(minimum: int, unit: str, counts: dict[str, int | flo
 
 
 def explain_missing_inference(
-    stats: dict[str, Record], missing_treatments: list[str], occurrence: bool
+    stats: dict[str, Record], missing_treatments: list[str], occurrence: bool, control: str
 ) -> None:
     if not missing_treatments:
         return
 
     # Flagsmith checks the control and treatment separately for each comparison.
-    compared = [stats[label] for label in (CONTROL, *missing_treatments)]
+    compared = [stats[label] for label in (control, *missing_treatments)]
     needs_reviewers = any(variant["n"] < MIN_REVIEWERS_PER_VARIANT for variant in compared)
     needs_conversions = occurrence and any(
         variant["sum"] < MIN_CONVERSIONS_PER_VARIANT for variant in compared
@@ -262,7 +308,7 @@ def explain_missing_inference(
             {label: row["sum"] for label, row in stats.items()},
         )
     if not (needs_reviewers or needs_conversions):
-        if stats[CONTROL]["sum"] <= 0:
+        if stats[control]["sum"] <= 0:
             print("Flagsmith needs a positive control mean to compute relative lift.")
         else:
             print(
@@ -270,7 +316,9 @@ def explain_missing_inference(
             )
 
 
-def show_metric(name: str, aggregation: str, result: Record, variants: dict[str, str]) -> None:
+def show_metric(
+    name: str, aggregation: str, result: Record, variants: dict[str, str], control: str
+) -> None:
     occurrence = aggregation == "occurrence"
     print(f"\n{name}")
     stats_by_variant = {
@@ -290,9 +338,9 @@ def show_metric(name: str, aggregation: str, result: Record, variants: dict[str,
             lift = f"{inference['lift']:+.1%}"
             interval = f"[{inference['ci_low']:+.1%}, {inference['ci_high']:+.1%}]"
             win = f"{inference['chance_to_win']:.1%}"
-        elif label != CONTROL:
+        elif label != control:
             missing_treatments.append(label)
-        display_name = f"{label} (control)" if label == CONTROL else label
+        display_name = f"{label} (control)" if label == control else label
         rows.append((display_name, f"{exposures:,}", outcome, lift, interval, win))
     outcome_title = "Conversions / rate" if occurrence else "Mean ms / exposure"
     print_table(
@@ -306,7 +354,7 @@ def show_metric(name: str, aggregation: str, result: Record, variants: dict[str,
         ),
         rows,
     )
-    explain_missing_inference(stats_by_variant, missing_treatments, occurrence)
+    explain_missing_inference(stats_by_variant, missing_treatments, occurrence, control)
 
 
 def computation_is_current(computation: Record | None) -> bool:
@@ -343,19 +391,25 @@ def read_computation(
 
 
 def status(
-    api: ExperimentAPI, path: str, feature: Record, experiment: Record, wait_seconds: int = 0
+    api: ExperimentAPI,
+    path: str,
+    feature: Record,
+    experiment: Record,
+    definition: ExperimentDefinition,
+    wait_seconds: int = 0,
 ) -> None:
-    print(f"{EXPERIMENT_NAME} is {experiment_state(experiment)}.")
-    variants = {CONTROL: "control"}
-    variants.update({name: option["key"] for name, option in variant_options(feature).items()})
+    print(f"{definition.name} is {experiment_state(experiment)}.")
+    variants = {definition.control: "control"}
+    options = variant_options(feature, definition)
+    variants.update({name: options[name]["key"] for name in definition.treatments})
     results = read_computation(api, path, "results", wait_seconds)
     if results:
         by_id = {metric["metric_id"]: metric for metric in results["metrics"]}
         by_name = {row["metric_name"]: row["metric"] for row in experiment["metrics"]}
         displayed = False
-        for name, aggregation, _, _ in METRICS:
+        for name, aggregation, _, _ in definition.metrics:
             if metric_result := by_id.get(by_name.get(name)):
-                show_metric(name, aggregation, metric_result, variants)
+                show_metric(name, aggregation, metric_result, variants, definition.control)
                 displayed = True
         if displayed:
             return
@@ -368,7 +422,7 @@ def status(
             for label, key in variants.items()
         }
         rows = [
-            (f"{label} (control)" if label == CONTROL else label, f"{count:,}")
+            (f"{label} (control)" if label == definition.control else label, f"{count:,}")
             for label, count in counts.items()
         ]
         print_table(("Variant", "Exposures"), rows)
@@ -390,8 +444,14 @@ def refresh(api: ExperimentAPI, path: str) -> None:
 
 
 def run(
-    api: ExperimentAPI, command: str, variant: str | None = None, *, wait_seconds: int = 0
+    api: ExperimentAPI,
+    command: str,
+    variant: str | None = None,
+    *,
+    experiment_flag: str = "flow_view",
+    wait_seconds: int = 0,
 ) -> None:
+    definition = EXPERIMENTS[experiment_flag]
     organisations = api.list("organisations/")
     if len(organisations) != 1:
         raise SetupError("The admin API key must identify exactly one Flagsmith organisation.")
@@ -404,30 +464,49 @@ def run(
     environment_path = f"environments/{environment['api_key']}/"
     print(f"Using Flagsmith environment {PROJECT_NAME}/{ENVIRONMENT_NAME}.")
 
-    experiments = api.list(f"{environment_path}experiments/?q={FEATURE_NAME}")
-    experiment = find_record(experiments, "name", EXPERIMENT_NAME, "experiment")
+    experiments = api.list(f"{environment_path}experiments/?q={experiment_flag}")
+    experiment = find_record(experiments, "name", definition.name, "experiment")
     if experiment is None and command != "create":
+        message = f"No experiment named {definition.name} exists."
         if command in ("refresh", "rollout"):
-            raise SetupError(f"No experiment named {EXPERIMENT_NAME} exists.")
-        print(f"No experiment named {EXPERIMENT_NAME} exists.")
+            raise SetupError(message)
+        print(message)
         return
 
-    features = api.list(f"{project_path}features/?search={FEATURE_NAME}")
-    feature = find_record(features, "name", FEATURE_NAME, "feature")
-    if feature is None or (experiment is not None and experiment["feature"]["id"] != feature["id"]):
-        raise SetupError("The experiment requires the flow_view feature in code-flow.")
+    features = api.list(f"{project_path}features/?search={experiment_flag}")
+    feature = find_record(features, "name", experiment_flag, "feature")
+    if feature is None:
+        if (
+            api.dry_run
+            and command == "create"
+            and experiment is None
+            and (experiment_flag == FLOW_DIRECTION_FLAG.name)
+        ):
+            print(f"Prerequisite: setup must create {experiment_flag} before these requests.")
+            create(api, environment_path, None, None, definition)
+            return
+        raise SetupError(f"The experiment requires the {experiment_flag} feature in code-flow.")
+    if experiment is not None and experiment["feature"]["id"] != feature["id"]:
+        raise SetupError("The existing experiment is attached to a different feature.")
     if command == "create":
-        create(api, environment_path, feature, experiments, experiment)
+        if experiment is None and any(
+            other["feature"]["id"] == feature["id"] and experiment_state(other) != "completed"
+            for other in experiments
+        ):
+            raise SetupError(
+                f"{experiment_flag} already has a different active experiment in Production."
+            )
+        create(api, environment_path, feature, experiment, definition)
     elif experiment is not None:
         path = f"{environment_path}experiments/{experiment['id']}/"
         if command == "refresh":
             refresh(api, path)
             if wait_seconds and not api.dry_run:
-                status(api, path, feature, experiment, wait_seconds)
+                status(api, path, feature, experiment, definition, wait_seconds)
         elif variant is not None:
-            rollout(api, path, feature, experiment, variant)
+            rollout(api, path, feature, experiment, variant, definition)
         else:
-            status(api, path, feature, experiment)
+            status(api, path, feature, experiment, definition)
 
 
 def main() -> int:
@@ -436,6 +515,12 @@ def main() -> int:
         "--env-file", type=Path, default=Path(__file__).resolve().parents[1] / ".env"
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview using only GET requests.")
+    parser.add_argument(
+        "--experiment",
+        choices=EXPERIMENTS,
+        default="flow_view",
+        help="Experiment flag (default flow_view).",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("create", "Create the metrics and start the experiment."),
@@ -445,8 +530,9 @@ def main() -> int:
     ):
         subcommand = commands.add_parser(name, help=help_text)
         subcommand.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
+        subcommand.add_argument("--experiment", choices=EXPERIMENTS, default=argparse.SUPPRESS)
         if name == "rollout":
-            subcommand.add_argument("--variant", choices=(CONTROL, *TREATMENTS), required=True)
+            subcommand.add_argument("--variant", required=True)
         if name == "refresh":
             subcommand.add_argument(
                 "--wait", type=int, default=0, metavar="SECONDS", help="Wait for refreshed results."
@@ -455,6 +541,11 @@ def main() -> int:
     wait_seconds = getattr(args, "wait", 0)
     if wait_seconds < 0:
         parser.error("--wait must be zero or more seconds.")
+    variant = getattr(args, "variant", None)
+    if variant is not None and variant not in EXPERIMENTS[args.experiment].allocations:
+        choices = ", ".join(EXPERIMENTS[args.experiment].allocations)
+        parser.error(f"--variant for {args.experiment} must be one of {choices}.")
+    options = {"experiment_flag": args.experiment, "wait_seconds": wait_seconds}
 
     try:
         settings = read_env(args.env_file)
@@ -462,17 +553,16 @@ def main() -> int:
             raise SetupError("Set FLAGSMITH_ADMIN_API_KEY in the environment file.")
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
         api = ExperimentAPI(client, args.dry_run)
-        variant = getattr(args, "variant", None)
         if args.dry_run or args.command == "status":
             if args.dry_run:
                 print("Dry run. Only GET requests will be sent.")
-            run(api, args.command, variant, wait_seconds=wait_seconds)
+            run(api, args.command, variant, **options)
         else:
             # Serialize writers in this checkout. Flagsmith permits duplicate metric names.
             directory = os.open(Path(__file__).resolve().parent, os.O_RDONLY)
             try:
                 fcntl.flock(directory, fcntl.LOCK_EX)
-                run(api, args.command, variant, wait_seconds=wait_seconds)
+                run(api, args.command, variant, **options)
             finally:
                 os.close(directory)
     except SetupError as error:

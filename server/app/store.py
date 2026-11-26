@@ -14,7 +14,14 @@ from codeflow.analyze import (
     load_snapshot,
     resolve_commit,
 )
-from codeflow.diff import EdgeChange, GraphDiff, diff_graphs, neighbourhood
+from codeflow.diff import (
+    LONG_FLOW_MIN_DEPTH,
+    EdgeChange,
+    GraphDiff,
+    diff_graphs,
+    flow_depth,
+    neighbourhood,
+)
 from codeflow.graph import FlagCheck, Graph
 from codeflow.summary import summarize
 
@@ -42,8 +49,9 @@ def python_warning(subdir: str) -> str:
 
 
 class Store:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, *, long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH) -> None:
         self.data_dir = data_dir.resolve()
+        self.long_flow_min_depth = long_flow_min_depth
         self.lock = Lock()
         self._snapshots: dict[tuple[Path, str], Graph] = {}
         self._commit_lists: dict[str, tuple[dict, dict]] = {}
@@ -217,11 +225,14 @@ class Store:
         )
         diff = diff_graphs(base_graph, head_graph)
         included = neighbourhood(base_graph, head_graph, diff, hops)
+        depth = flow_depth(base_graph, head_graph, diff, hops)
         return {
             "base": diff.base,
             "head": diff.head,
             "summary": summarize(base_graph, head_graph, diff),
             "diff": diff.to_json(),
+            "flow_depth": depth,
+            "long_flow": depth >= self.long_flow_min_depth,
             "nodes": _overlay_nodes(base_graph, head_graph, diff, included),
             "edges": _overlay_edges(base_graph, head_graph, diff, included),
         }

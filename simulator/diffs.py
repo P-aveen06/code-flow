@@ -1,68 +1,74 @@
-"""Read diff sizes from local analyzer output."""
+"""Sample sizes and depths from local analyzer output."""
 
-import json
-from functools import lru_cache
+from dataclasses import dataclass
+from functools import lru_cache, partial
 from pathlib import Path
-from typing import Any
+
+from codeflow.analyze import diff_base, load_index, load_snapshot
+from codeflow.diff import LONG_FLOW_MIN_DEPTH, diff_graphs, flow_depth
 
 REPOS = ("Flagsmith__flagsmith", "shop-demo")
 NODE_COUNTS = ("nodes_added", "nodes_removed", "nodes_changed")
 EDGE_COUNTS = ("edges_added", "edges_removed")
 
 
-def _read_snapshot(directory: Path, sha: str) -> tuple[dict[str, str], set[tuple[str, str]]]:
-    if not sha:
-        return {}, set()
-
-    snapshot = json.loads((directory / "snapshots" / f"{sha}.json").read_text(encoding="utf-8"))
-    nodes = {node["id"]: node["body_hash"] for node in snapshot["nodes"]}
-    edges = {(edge["source"], edge["target"]) for edge in snapshot["edges"]}
-    return nodes, edges
+@dataclass(frozen=True)
+class DiffSample:
+    size: int
+    depth: int = 0
 
 
-def _indexed_diff_size(stats: dict[str, int]) -> int | None:
+def _diff_size(stats: dict[str, int]) -> int | None:
     size = sum(stats[key] for key in NODE_COUNTS)
     return size if size or any(stats[key] for key in EDGE_COUNTS) else None
 
 
-def _repo_diff_sizes(directory: Path) -> list[int]:
-    commits: list[dict[str, Any]] = json.loads(
-        (directory / "commits.json").read_text(encoding="utf-8")
-    )["commits"]
+def _repo_diffs(directory: Path, *, long_flows_only: bool) -> list[DiffSample]:
+    commits = load_index(directory)["commits"]
     # Consecutive diffs usually share a snapshot. Keep only the two most recent graphs.
-    load_snapshot = lru_cache(maxsize=2)(_read_snapshot)
-    sizes = []
+    snapshot = lru_cache(maxsize=2)(partial(load_snapshot, directory))
+    samples = []
     for commit in commits:
-        if "stats" in commit:
-            size = _indexed_diff_size(commit["stats"])
+        if not long_flows_only and "stats" in commit:
+            size = _diff_size(commit["stats"])
             if size is not None:
-                sizes.append(size)
+                samples.append(DiffSample(size))
             continue
 
-        # The on-disk index may omit stats. Use the same node and edge comparisons
-        # as the analyzer's diff_graphs and the same base as the viewer.
-        base_sha = commit["base"] if "base" in commit else next(iter(commit["parents"]), "")
-        base_nodes, base_edges = load_snapshot(directory, base_sha)
-        head_nodes, head_edges = load_snapshot(directory, commit["sha"])
-        added_or_removed = len(base_nodes.keys() ^ head_nodes.keys())
-        changed = sum(
-            base_nodes[node] != head_nodes[node] for node in base_nodes.keys() & head_nodes.keys()
+        head = snapshot(commit["sha"])
+        base_sha = diff_base(commit)
+        base = snapshot(base_sha) if base_sha else head.empty_base()
+        diff = diff_graphs(base, head)
+        size = _diff_size(diff.stats)
+        if size is None:
+            continue
+        depth = flow_depth(base, head, diff) if long_flows_only else 0
+        if not long_flows_only or depth >= LONG_FLOW_MIN_DEPTH:
+            samples.append(DiffSample(size, depth))
+    return samples
+
+
+def load_diffs(data_dir: Path, *, long_flows_only: bool = False) -> tuple[str, list[DiffSample]]:
+    """Prefer Flagsmith, then find another analysis with eligible commits."""
+    repos = list(REPOS)
+    if long_flows_only and data_dir.is_dir():
+        repos.extend(
+            directory.name
+            for directory in sorted(data_dir.iterdir())
+            if directory.name not in REPOS and (directory / "commits.json").is_file()
         )
-        size = added_or_removed + changed
-        if size or base_edges != head_edges:
-            sizes.append(size)
-    return sizes
-
-
-def load_diff_sizes(data_dir: Path) -> tuple[str, list[int]]:
-    """Use Flagsmith commits if available, then try the analyzed shop demo."""
-    for repo in REPOS:
+    for repo in repos:
         try:
-            sizes = _repo_diff_sizes(data_dir / repo)
+            samples = _repo_diffs(data_dir / repo, long_flows_only=long_flows_only)
         except FileNotFoundError:
             continue
-        if sizes:
-            return repo, sizes
+        if samples:
+            return repo, samples
+    if long_flows_only:
+        raise ValueError(
+            f"No analyzed commits with long flows (flow_depth >= {LONG_FLOW_MIN_DEPTH} at one hop). "
+            "Import Flagsmith/flagsmith or analyze another repository with long call chains."
+        )
     raise ValueError(
         "No analyzed commits with flow changes. Import Flagsmith/flagsmith or analyze shop-demo first."
     )

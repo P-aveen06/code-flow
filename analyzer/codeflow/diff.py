@@ -7,6 +7,8 @@ from typing import ClassVar
 
 from codeflow.graph import Graph
 
+LONG_FLOW_MIN_DEPTH = 4
+
 
 @dataclass
 class NodeChanges:
@@ -139,3 +141,37 @@ def neighbourhood(base: Graph, head: Graph, diff: GraphDiff, hops: int = 1) -> s
             break
         included.update(frontier)
     return included
+
+
+def flow_depth(base: Graph, head: Graph, diff: GraphDiff, hops: int = 1) -> int:
+    """Count nodes on the longest call chain after ignoring DFS back edges."""
+    included = neighbourhood(base, head, diff, hops)
+    if not included:
+        return 0
+
+    calls: dict[str, set[str]] = defaultdict(set)
+    for edge in chain(base.edges, head.edges):
+        if edge.kind == "call" and edge.source in included and edge.target in included:
+            calls[edge.source].add(edge.target)
+
+    visited: set[str] = set()
+    depths: dict[str, int] = {}
+    for start in sorted(included):
+        if start in visited:
+            continue
+        visited.add(start)
+        # Use an explicit stack so long call chains cannot exceed the recursion limit.
+        stack = [(start, iter(sorted(calls[start])))]
+        while stack:
+            node, targets = stack[-1]
+            target = next(targets, None)
+            if target is None:
+                # Only ancestors on the stack have unfinished depths here. Skip those back edges.
+                depths[node] = 1 + max(
+                    (depths[callee] for callee in calls[node] if callee in depths), default=0
+                )
+                stack.pop()
+            elif target not in visited:
+                visited.add(target)
+                stack.append((target, iter(sorted(calls[target]))))
+    return max(depths.values(), default=0)

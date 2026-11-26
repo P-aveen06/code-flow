@@ -146,6 +146,30 @@ The simulator records live selections in `data/simulator-runs.sqlite3` before
 sending events, so an interrupted run can trigger the warning on retry. Check
 Flagsmith first if another checkout has sent traffic.
 
+### Flow direction experiment
+
+`flow_direction` compares horizontal (ELK RIGHT) and vertical (ELK DOWN)
+layouts for long call flows in a 50/50 split. The hypothesis is that reviewers
+understand a top-down layout more often and faster. The default cutoff is four
+call layers at one hop, which selects five of the 14 flow-changing Flagsmith API
+commits. The planned web integration records layout exposure only for long
+flows, with `layout_understood` carrying elapsed milliseconds and
+`layout_confusing` recording a No response.
+
+Preview the Flagsmith changes from the repo root, then run both assumption
+models on the default panel.
+
+```sh
+python3 scripts/flagsmith_setup.py --dry-run
+python3 scripts/flagsmith_experiment.py --experiment flow_direction create --dry-run
+cd simulator
+uv run python simulate.py --experiment flow_direction --panel default --dry-run
+uv run python simulate.py --experiment flow_direction --panel default --dry-run --model null
+```
+
+[Depth distribution and eligibility](docs/ARCHITECTURE.md#long-flow-layout-experiment) ·
+[Simulator assumptions](simulator/experiments/flow_direction.yaml)
+
 ### Flagsmith mode
 
 The boolean flag `flagsmith_mode` turns the panel and live path styling on or

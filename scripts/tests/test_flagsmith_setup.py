@@ -353,7 +353,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         )
         == 3
     )
-    assert len(client.features) == len(defaults) + 5
+    assert len(client.features) == len(defaults) + 6
     assert len(client.keys[environment["id"]]) == 1
 
     feature, state = client.project_flag(environment, "flow_view")
@@ -372,6 +372,17 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         "POST",
         f"environments/{environment['id']}/features/{feature['id']}/versions/",
     ) in client.calls
+
+    direction, state = client.project_flag(environment, "flow_direction")
+    assert direction["type"] == "MULTIVARIATE"
+    assert direction["tags"] == feature["tags"]
+    assert state["enabled"] is True
+    assert state["feature_state_value"] == "horizontal"
+    (vertical,) = direction["multivariate_options"]
+    assert vertical["key"] == vertical["string_value"] == "vertical"
+    (weight,) = state["multivariate_feature_state_values"]
+    assert weight["multivariate_feature_option"] == vertical["id"]
+    assert weight["percentage_allocation"] == 50
     for name, enabled in [
         ("flagsmith_mode", True),
         ("ai_summary", False),
@@ -396,7 +407,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
             "shop-demo": ["holiday_discount", "new_checkout"],
             "Flagsmith__flagsmith": sorted(flag.name for flag in defaults),
         },
-        "code_flow_flags": ["ai_summary", "flagsmith_mode", "flow_view"],
+        "code_flow_flags": ["ai_summary", "flagsmith_mode", "flow_direction", "flow_view"],
     }
 
     first = capsys.readouterr()
@@ -502,6 +513,10 @@ def test_dry_run_has_no_api_or_file_writes(env_file, scope_file, capsys, existin
     assert "Would create tag code-flow." in output.out
     assert "Would add tag code-flow to flagsmith_mode." in output.out
     assert "Would create flag flow_view" in output.out
+    assert (
+        'Would create flag flow_direction with tag code-flow (on, "horizontal" 50%, "vertical" 50%).'
+        in output.out
+    )
     assert '"side_by_side" 34%, "overlay" 33%, "overlay_summary" 33%' in output.out
     assert "Would create server-side key code-flow server." in output.out
     assert "Would enable the Flagsmith database warehouse." in output.out

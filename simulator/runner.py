@@ -10,6 +10,7 @@ from time import monotonic, sleep
 from flagsmith.models import Flag
 
 from clients import ExperimentClient
+from diffs import DiffSample
 from experiments import Experiment
 from model import Decision
 from panels import Panel
@@ -31,7 +32,7 @@ class VariantSummary:
 def run_simulation(
     client: ExperimentClient,
     experiment: Experiment,
-    diff_sizes: Sequence[int],
+    diffs: Sequence[DiffSample],
     *,
     reviewers: Panel,
     model_name: str,
@@ -50,6 +51,7 @@ def run_simulation(
         interval = 0 if rate is None else 1 / rate
         for index, (identifier, persona) in enumerate(reviewers.items(), start=1):
             started_at = clock()
+            diff = random.choice(diffs)
             traits = persona.traits()
             flag = client.get_experiment_flag(experiment.flag, identifier=identifier, traits=traits)
             if not (
@@ -67,11 +69,14 @@ def run_simulation(
                 raise SimulationError(
                     f"The {experiment.flag} flag returned an unknown variant value."
                 )
-            decision = model.sample(variant, random.choice(diff_sizes), random, persona=persona)
+            decision = model.sample(variant, diff.size, random, persona=persona, depth=diff.depth)
             event = experiment.success_event if decision.succeeded else experiment.failure_event
-            client.track_event(
-                event, identifier=identifier, value=decision.elapsed_ms, traits=traits
+            value = (
+                decision.elapsed_ms
+                if decision.succeeded or experiment.record_failure_time
+                else None
             )
+            client.track_event(event, identifier=identifier, value=value, traits=traits)
             reviews[variant].append((persona, decision))
 
             remaining = interval - (clock() - started_at)
