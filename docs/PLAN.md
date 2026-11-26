@@ -60,11 +60,11 @@ rule-based one). Never cut the experiment: it is what the track judges.
 ## Task list
 
 ### M0 Scaffold
-- [ ] `AGENTS.md`, `README.md` skeleton, `docs/`, `.gitignore`, `.env.example`
-- [ ] `analyzer/` uv project, package `codeflow`, console script `code-flow`, pytest
-- [ ] `server/` uv project depending on `analyzer` (path dependency), FastAPI hello route
-- [ ] `web/` Vite React TS app with `@xyflow/react`, `elkjs`, `flagsmith`
-- [ ] Root `Makefile` (or `justfile`): `make dev` runs server + web, `make test` runs all tests
+- [x] `AGENTS.md`, `README.md` skeleton, `docs/`, `.gitignore`, `.env.example`
+- [x] `analyzer/` uv project, package `codeflow`, console script `code-flow`, pytest
+- [x] `server/` uv project depending on `analyzer` (path dependency), FastAPI hello route
+- [x] `web/` Vite React TS app with `@xyflow/react`, `elkjs`, `flagsmith`
+- [x] Root `Makefile` (or `justfile`): `make dev` runs server + web, `make test` runs all tests
 
 ### M1 Analyzer
 - [ ] `parse_python.py`: tree-sitter-python; collect modules, classes, functions, methods (qualified names), call sites with line numbers, import table, `if` conditions

@@ -25,7 +25,19 @@ Built for the WeMakeDevs x Flagsmith **Toggle Wars** hackathon, Track 01
 
 ## Setup
 
-_Coming with milestone M0. Will cover: Python (uv), Node, a self-hosted Flagsmith in Docker with Experimentation enabled, and the `.env` file._
+Prerequisites: [uv](https://docs.astral.sh/uv/) with Python 3.11+ and Node.js
+22.12+. Docker will be needed for self-hosted Flagsmith in a later milestone.
+
+```sh
+make install  # Install dependencies
+make test     # Run tests and build the web app
+make dev      # Start the API on port 8787 and the web app on port 5173
+```
+
+Press Ctrl-C to stop both dev servers. Configuration defaults work for the
+scaffold; see `.env.example` for the environment variables used in later milestones.
+Set `CODEFLOW_WEB_ORIGIN` in the server environment to allow a web origin other
+than the default `http://localhost:5173`.
 
 ## License
 
