@@ -41,4 +41,35 @@ Run on 26 Nov 2026 in Paveen's self-hosted Flagsmith 2.295.2 (project `code-flow
 - More traffic narrowed the interval: at 300 reviewers the lift was +37.7 % with an interval from +3.1 % to +72.2 %; at 1,300 it is +30.6 % from +15.6 % to +45.6 %.
 - With the first 100 reviewers only, Flagsmith withheld lift and win probability: it needs at least 50 identities and 5 conversions per variant (`RESULTS_MIN_IDENTITIES_PER_VARIANT`).
 - These are simulated reviewers whose behaviour encodes the hypothesis (see the note at the top), so the run shows that the experiment, the events and Flagsmith's analysis work end to end; real reviewers are needed to test the hypothesis itself.
-- Roll-out of the winner is pending Paveen's decision (planned live in the demo video).
+- **Rolled out:** on 26 Nov 2026 (16:35 UTC) the experiment was completed with `overlay_summary` as the winner; Flagsmith now serves `overlay_summary` to 100 % of identified reviewers in Production (`python3 scripts/flagsmith_experiment.py rollout --variant overlay_summary`).
+
+
+# flow_direction experiment: results (simulated reviewers, long flows)
+
+Run on 26 Nov 2026 in the same Flagsmith project and environment, after `flow_view` was rolled out to `overlay_summary` (so every reviewer saw the overlay + summary view, laid out horizontally or vertically).
+
+**The reviewers are simulated** — the same fixed panel of 1,300 personas (`simulator/panels/default.csv`). Their behaviour for this experiment comes from the assumptions in [`simulator/experiments/flow_direction.yaml`](../simulator/experiments/flow_direction.yaml) (vertical assumed +5 points understood and −10 % median time at depth 4, slightly more per extra layer). The run demonstrates the pipeline and Flagsmith's analysis; it is not evidence about real users.
+
+- **Hypothesis:** for long flows, a top-down layout is understood more often and faster than left-to-right.
+- **Flag:** `flow_direction` (multivariate): `horizontal` (control) 50 %, `vertical` 50 %.
+- **Long flow:** `flow_depth` ≥ 4 call layers in the changed neighbourhood (5 of the 14 flow-changing Flagsmith `api/` commits). Only reviewers shown a long flow are exposed (`getExperimentFlag('flow_direction')`); the simulator sampled only those 5 commits.
+- **Metrics:** "Layout understood" = occurrence of `layout_understood` (primary); "Layout time to understand (ms)" = mean value per exposure (indicative only, non-converters count as 0).
+
+## Layout understood (primary)
+
+| Variant | Reviewers (exposures) | Understood | Rate | Lift vs control | 95 % credible interval | Win probability |
+|---|---:|---:|---:|---:|---|---:|
+| horizontal (control) | 648 | 394 | 60.8 % | | | |
+| vertical | 652 | 437 | 67.0 % | +10.2 % | +1.2 % to +19.3 % | 98.7 % |
+
+## Layout time to understand (secondary)
+
+| Variant | Mean ms per exposure | Lift vs control | 95 % credible interval | Win probability |
+|---|---:|---:|---|---:|
+| horizontal (control) | 26,884 | | | |
+| vertical | 25,431 | −5.4 % | −15.6 % to +4.8 % | 85.0 % |
+
+## Reading it
+
+- Vertical beats horizontal on understanding for long flows (+10.2 %, interval above zero, 98.7 % win probability). The time difference is not conclusive.
+- The effect is what the simulator's assumptions put in; a real decision needs real reviewers. The experiment is still running in Flagsmith; no roll-out yet.
