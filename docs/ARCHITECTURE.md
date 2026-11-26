@@ -90,6 +90,29 @@ diffs possible.
 
 This is deliberately heuristic. Edges come only from parsing, never from an LLM.
 
+## Commit index JSON (`code-flow/commits@1`)
+
+`<out>/commits.json` lists the selected first-parent commits oldest first.
+Each entry uses the same commit fields as the graph JSON (`message` is the
+commit subject and `date` is the author date in UTC).
+
+```json
+{
+  "schema": "code-flow/commits@1",
+  "repo": "shop-demo",
+  "branch": "main",
+  "source_root": "",
+  "commits": [
+    {"sha": "abc123", "parents": [], "author": "code-flow demo", "date": "2026-11-20T09:00:00Z", "message": "Add cart"}
+  ]
+}
+```
+
+`source_root` is a repo-relative directory used to select files and derive
+dotted module names. An empty string uses the repo root. An output directory
+reuses snapshots by SHA, so use a fresh directory when changing include or
+exclude patterns, `source_root`, or `keep_external`.
+
 ## Diff JSON (`code-flow/diff@1`)
 
 ```json
@@ -201,7 +224,9 @@ code-flow/
   .env.example
   analyzer/
     pyproject.toml
-    codeflow/{__init__,cli,graph,parse_python,resolve,git_history,diff,flags,summary,export_mermaid}.py
+    codeflow/{__init__,cli,graph,parse_python,resolve,diff,flags,summary,export_mermaid}.py
+    codeflow/git_history.py  reads first-parent commits and blobs with Git
+    codeflow/analyze.py      caches file parses and writes snapshots and the commit index
     codeflow/build.py  assembles one commit's parsed files into a graph
     tests/
   server/

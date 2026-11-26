@@ -71,12 +71,12 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] `resolve.py`: call resolution rules from ARCHITECTURE.md; unit tests per rule
 - [x] `graph.py`: dataclasses for Node/Edge/Flag/Graph, `to_json` / `from_json`, schema `code-flow/graph@1`, `body_hash` on normalized function text
 - [x] `flags.py`: detect Flagsmith checks and set `guard` on edges (if/elif/else, `not`, local variable)
-- [ ] `git_history.py`: list first-parent commits on a branch (`--max-count N`), read files at a commit with `git ls-tree` / `git cat-file`, cache per-file parse results by blob sha, path include/exclude globs (skip tests and migrations by default)
+- [x] `git_history.py`: list first-parent commits on a branch (`--max-count N`), read files at a commit with `git ls-tree` / `git cat-file`, cache per-file parse results by blob sha, path include/exclude globs (skip tests and migrations by default)
 - [ ] `diff.py`: added/removed/changed nodes, added/removed edges, flag changes, stats, `neighbourhood(diff, hops=1)`
 - [ ] `summary.py`: rule-based one-line summary of a diff
 - [ ] `export_mermaid.py`: overlay diff as Mermaid `flowchart LR` with subgraphs per module and class-based colours
 - [ ] `cli.py`: `code-flow analyze <repo> [--branch] [--max-commits] [--include] [--exclude] --out <dir>`, `code-flow diff <dir> --base --head [--format json|mermaid]`, `code-flow flags <dir> --commit`
-- [ ] `examples/make_shop_demo.sh`: builds `examples/shop-demo/` git repo with ~8 commits (cart → payment → add `new_checkout` behind flag → refactor → remove dead path, etc.), deterministic dates
+- [x] `examples/make_shop_demo.sh`: builds `examples/shop-demo/` git repo with ~8 commits (cart → payment → add `new_checkout` behind flag → refactor → remove dead path, etc.), deterministic dates
 - [ ] Tests: fixture repo built in a tmp dir; snapshot and diff assertions
 
 ### M2 Server + web
