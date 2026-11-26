@@ -16,6 +16,8 @@ function symbol(module: string, name: string): OverlayNode {
     line: 1,
     end_line: 5,
     status: "context",
+    lines_added: 0,
+    lines_removed: 0,
     in_base: true,
     in_head: true,
   };
@@ -107,7 +109,7 @@ describe("layoutFlow", () => {
     const short = symbols.find(({ id }) => id === checkout.id)!;
     const wrapped = symbols.find(({ id }) => id === longName.id)!;
 
-    expect(short.width).toBe(140);
+    expect(short.width).toBe(152);
     expect(wrapped.width!).toBeLessThan(longName.qualname.length * 10.2);
     expect(wrapped.height!).toBeGreaterThan(short.height!);
   });

@@ -22,7 +22,8 @@ from codeflow.diff import (
     flow_depth,
     neighbourhood,
 )
-from codeflow.graph import FlagCheck, Graph
+from codeflow.graph import FlagCheck, Graph, Node
+from codeflow.line_changes import LineDiff, LineRow, line_changes
 from codeflow.summary import summarize
 
 
@@ -56,6 +57,7 @@ class Store:
         self._snapshots: dict[tuple[Path, str], Graph] = {}
         self._commit_lists: dict[str, tuple[dict, dict]] = {}
         self._flag_checks: dict[tuple[Path, str], list[FlagCheck]] = {}
+        self._files: dict[tuple[str, str, str], list[str]] = {}
 
     def _is_repo_dir(self, directory: Path) -> bool:
         return directory.is_dir() and directory.resolve().parent == self.data_dir
@@ -211,11 +213,9 @@ class Store:
             self._flag_checks[key] = [FlagCheck(**check) for check in snapshot["flags"]]
         return self._flag_checks[key]
 
-    def diff(self, repo: str, head: str, base: str | None, hops: int) -> dict:
-        if not 0 <= hops <= 3:
-            raise BadRequest("hops must be between 0 and 3")
-        directory = self._repo_dir(repo)
-        index = self._index(directory)
+    def _diff_graphs(
+        self, directory: Path, index: dict, head: str, base: str | None
+    ) -> tuple[Graph, Graph]:
         entry = self._resolve_commit(index, head)
         head_graph = self._snapshot(directory, entry["sha"])
         base_graph = (
@@ -223,6 +223,14 @@ class Store:
             if base is None
             else self._snapshot(directory, self._resolve_commit(index, base)["sha"])
         )
+        return base_graph, head_graph
+
+    def diff(self, repo: str, head: str, base: str | None, hops: int) -> dict:
+        if not 0 <= hops <= 3:
+            raise BadRequest("hops must be between 0 and 3")
+        directory = self._repo_dir(repo)
+        index = self._index(directory)
+        base_graph, head_graph = self._diff_graphs(directory, index, head, base)
         diff = diff_graphs(base_graph, head_graph)
         included = neighbourhood(base_graph, head_graph, diff, hops)
         depth = flow_depth(base_graph, head_graph, diff, hops)
@@ -233,33 +241,47 @@ class Store:
             "diff": diff.to_json(),
             "flow_depth": depth,
             "long_flow": depth >= self.long_flow_min_depth,
-            "nodes": _overlay_nodes(base_graph, head_graph, diff, included),
+            "nodes": self._overlay_nodes(repo, index, base_graph, head_graph, included),
             "edges": _overlay_edges(base_graph, head_graph, diff, included),
         }
 
-    def code(self, repo: str, sha: str, file: str, start: int | None, end: int | None) -> dict:
+    @staticmethod
+    def _file_path(file: str) -> str:
         path = PurePosixPath(file)
         if not path.parts or path.is_absolute() or ".." in path.parts or "\0" in file:
             raise BadRequest("file must be a relative path without '..'")
+        return str(path)
+
+    def _file_lines(self, repo: str, index: dict, sha: str, file: str) -> list[str]:
+        path = self._file_path(file)
+        repo_path = index.get("repo_path")
+        if not repo_path:
+            raise NotFound(f"No source repository path recorded for {repo!r}. Re-run the analyzer.")
+        key = (repo_path, sha, path)
+        if key not in self._files:
+            source = subprocess.run(
+                ["git", "-C", repo_path, "cat-file", "blob", f"{sha}:{path}"],
+                check=False,
+                capture_output=True,
+            )
+            if source.returncode:
+                raise NotFound(f"No file {file!r} at commit {sha}")
+            if len(self._files) == 512:
+                del self._files[next(iter(self._files))]
+            self._files[key] = [
+                line.decode("utf-8", errors="replace") for line in source.stdout.splitlines()
+            ]
+        return self._files[key]
+
+    def code(self, repo: str, sha: str, file: str, start: int | None, end: int | None) -> dict:
+        self._file_path(file)
         if start is not None and end is not None and start > end:
             raise BadRequest("start must be less than or equal to end")
 
         directory = self._repo_dir(repo)
         index = self._index(directory)
         sha = self._resolve_commit(index, sha)["sha"]
-        repo_path = index.get("repo_path")
-        if not repo_path:
-            raise NotFound(f"No source repository path recorded for {repo!r}. Re-run the analyzer.")
-        git = ["git", "-C", repo_path]
-        ref = f"{sha}:{path}"
-        kind = subprocess.run([*git, "cat-file", "-t", ref], check=False, capture_output=True)
-        if kind.returncode or kind.stdout.strip() != b"blob":
-            raise NotFound(f"No file {file!r} at commit {sha}")
-        source = subprocess.run([*git, "show", ref], check=False, capture_output=True)
-        if source.returncode:
-            raise NotFound(f"No file {file!r} at commit {sha}")
-
-        lines = source.stdout.splitlines()
+        lines = self._file_lines(repo, index, sha, file)
         first = max(1, min(start if start is not None else 1, len(lines)))
         last = max(1, min(end, len(lines))) if lines and end is not None else len(lines)
         return {
@@ -268,40 +290,103 @@ class Store:
             "start": first,
             "end": last,
             "lines": [
-                {"number": number, "text": line.decode("utf-8", errors="replace")}
+                {"number": number, "text": line}
                 for number, line in enumerate(lines[first - 1 : last], start=first)
             ],
         }
 
+    def _node_lines(self, repo: str, index: dict, sha: str, node: Node | None) -> list[str]:
+        if node is None:
+            return []
+        if not node.file or node.line < 1:
+            raise NotFound(f"No source location for node {node.id!r} at commit {sha}")
+        lines = self._file_lines(repo, index, sha, node.file)
+        return lines[node.line - 1 : node.end_line]
 
-def _overlay_nodes(base: Graph, head: Graph, diff: GraphDiff, included: set[str]) -> list[dict]:
-    base_nodes = {node.id: node for node in base.nodes if node.id in included}
-    head_nodes = {node.id: node for node in head.nodes if node.id in included}
-    statuses = {
-        node_id: status
-        for status, ids in (
-            ("added", diff.nodes.added),
-            ("removed", diff.nodes.removed),
-            ("changed", diff.nodes.changed),
+    def _overlay_nodes(
+        self, repo: str, index: dict, base: Graph, head: Graph, included: set[str]
+    ) -> list[dict]:
+        base_nodes = {node.id: node for node in base.nodes if node.id in included}
+        head_nodes = {node.id: node for node in head.nodes if node.id in included}
+        nodes = []
+        for node_id, node in sorted((base_nodes | head_nodes).items()):
+            before, after = base_nodes.get(node_id), head_nodes.get(node_id)
+            status = _node_status(before, after)
+            added = removed = 0
+            if status != "context":
+                try:
+                    base_lines = self._node_lines(repo, index, base.commit.sha, before)
+                    head_lines = self._node_lines(repo, index, head.commit.sha, after)
+                    if before is not None and after is not None:
+                        changes = line_changes(base_lines, head_lines, before.line, after.line)
+                        added, removed = changes.lines_added, changes.lines_removed
+                    else:
+                        added, removed = len(head_lines), len(base_lines)
+                except (NotFound, BadRequest):
+                    added = removed = None
+            nodes.append(
+                {
+                    "id": node_id,
+                    "name": node.name,
+                    "qualname": node_id.split(":", 1)[-1],
+                    "module": node.module,
+                    "kind": node.kind,
+                    "file": node.file,
+                    "line": node.line,
+                    "end_line": node.end_line,
+                    "status": status,
+                    "in_base": before is not None,
+                    "in_head": after is not None,
+                    "lines_added": added,
+                    "lines_removed": removed,
+                }
+            )
+        return nodes
+
+    def function_diff(self, repo: str, head: str, node: str, base: str | None) -> dict:
+        directory = self._repo_dir(repo)
+        index = self._index(directory)
+        base_graph, head_graph = self._diff_graphs(directory, index, head, base)
+        base_sha, head_sha = base_graph.commit.sha, head_graph.commit.sha
+        before = next((item for item in base_graph.nodes if item.id == node), None)
+        after = next((item for item in head_graph.nodes if item.id == node), None)
+        location = after or before
+        if location is None:
+            raise NotFound(f"Unknown node: {node!r}")
+        status = _node_status(before, after)
+        changes = line_changes(
+            self._node_lines(repo, index, base_sha, before),
+            self._node_lines(repo, index, head_sha, after),
+            before.line if before else 1,
+            after.line if after else 1,
         )
-        for node_id in ids
-    }
-    return [
-        {
-            "id": node_id,
-            "name": node.name,
-            "qualname": node_id.split(":", 1)[-1],
-            "module": node.module,
-            "kind": node.kind,
-            "file": node.file,
-            "line": node.line,
-            "end_line": node.end_line,
-            "status": statuses.get(node_id, "context"),
-            "in_base": node_id in base_nodes,
-            "in_head": node_id in head_nodes,
+        if status == "context":
+            # The graph ignores comments and whitespace. Show head text and map matching base lines.
+            changes = LineDiff(
+                [
+                    LineRow("context", row.base_line, row.head_line, row.text)
+                    for row in changes.rows
+                    if row.head_line is not None
+                ],
+                0,
+                0,
+            )
+        return {
+            "node": node,
+            "base": base_sha,
+            "head": head_sha,
+            "file": location.file,
+            "status": status,
+            **asdict(changes),
         }
-        for node_id, node in sorted((base_nodes | head_nodes).items())
-    ]
+
+
+def _node_status(before: Node | None, after: Node | None) -> str:
+    if before is None:
+        return "added"
+    if after is None:
+        return "removed"
+    return "changed" if before.body_hash != after.body_hash else "context"
 
 
 def _overlay_edges(base: Graph, head: Graph, diff: GraphDiff, included: set[str]) -> list[dict]:

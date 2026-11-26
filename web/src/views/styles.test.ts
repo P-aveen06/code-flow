@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { edgeStyle, guardLabel, nodeStyle, symbolNameLines, symbolSize } from "./styles";
+import type { OverlayNode } from "../types";
+import { edgeStyle, formatLineCounts, guardLabel, nodeStyle, shortFilePath, symbolNameLines, symbolSize } from "./styles";
+
+const symbol: OverlayNode = {
+  id: "segments.views:load_model", kind: "function", status: "changed", module: "segments.views",
+  name: "load_model", qualname: "load_model", file: "api/segments/views.py", line: 48, end_line: 60,
+  in_base: true, in_head: true, lines_added: 12, lines_removed: 3,
+};
 
 describe("flow styles", () => {
   it("uses status colors for symbols, with a dashed border for removals", () => {
@@ -34,7 +41,25 @@ describe("flow styles", () => {
     expect(lines).toHaveLength(2);
     expect(lines[1]).toMatch(/…$/);
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(28);
-    expect(symbolSize(name)).toEqual({ width: 312, height: 56 });
-    expect(symbolSize("load_model")).toEqual({ width: 140, height: 36 });
+    const wrapped = symbolSize({ ...symbol, qualname: name });
+    const compact = symbolSize(symbol);
+    expect(wrapped.height - compact.height).toBe(17);
+    expect(wrapped.width).toBeGreaterThan(compact.width);
+    expect(compact.width).toBeGreaterThan(symbolSize({ ...symbol, lines_added: null, lines_removed: null }).width);
+  });
+
+  it("shortens paths to two segments", () => {
+    expect(shortFilePath("api/project/segments/views.py")).toBe("…/segments/views.py");
+    expect(shortFilePath("segments/views.py")).toBe("segments/views.py");
+    expect(shortFilePath("views.py")).toBe("views.py");
+    expect(shortFilePath("")).toBe("");
+  });
+
+  it("formats counts and omits zero or unavailable sides", () => {
+    expect(formatLineCounts(12, 3)).toEqual({ added: "+12", removed: "−3" });
+    expect(formatLineCounts(0, 3)).toEqual({ added: "", removed: "−3" });
+    expect(formatLineCounts(4, 0)).toEqual({ added: "+4", removed: "" });
+    expect(formatLineCounts(null, null)).toEqual({ added: "", removed: "" });
+    expect(formatLineCounts(0, 0)).toEqual({ added: "", removed: "" });
   });
 });

@@ -57,4 +57,16 @@ describe("viewer previews", () => {
     expect(markup).toContain("Show neighbours");
     expect(markup).not.toMatch(/Preview variant|Preview direction|Dev override|Back to my assigned/);
   });
+
+  it("shows the four section headings and review settings with flag checks off", () => {
+    const markup = renderViewer(true);
+    expect(markup).toContain('<h2 title="Update checkout">Update checkout</h2>');
+    for (const heading of ["Commits", "Flow", "Source code", "Flagsmith"]) {
+      expect(markup).toMatch(new RegExp(`<h2[^>]*>${heading}</h2>`));
+    }
+    expect(markup).toContain(">This review<");
+    expect(markup).toContain("<dd>Overlay<small>Preview</small></dd>");
+    expect(markup).toContain("<dd>Vertical<small>Preview</small></dd>");
+    expect(markup).toContain("Flag checks are off (flagsmith_mode)");
+  });
 });

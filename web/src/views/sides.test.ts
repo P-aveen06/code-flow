@@ -20,6 +20,8 @@ function symbol(id: string, parentId: string, status: NodeStatus, x: number): Sy
         line: 1,
         end_line: 5,
         status,
+        lines_added: 0,
+        lines_removed: 0,
         in_base: status !== "added",
         in_head: status !== "removed",
       },

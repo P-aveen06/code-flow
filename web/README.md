@@ -11,7 +11,7 @@ chooses `side_by_side`, `overlay`, or `overlay_summary`, with `side_by_side`
 as the control fallback. Add `&view=overlay_summary` to preview the summary
 variant with a developer badge and skip the experiment exposure.
 
-`flagsmith_mode` controls the panel and live path styling. The viewer refreshes
+`flagsmith_mode` controls the findings and live path styling. The viewer refreshes
 this setting and the commit's findings on a ten-second interval. Select a
 finding to highlight the calls guarded by the flag and the functions that
 check it. Select it again or press Escape to clear the highlight. Select a

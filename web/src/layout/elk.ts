@@ -100,7 +100,7 @@ export async function layoutFlow(
       group = { id, children: [], layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.module } };
       modules.set(id, group);
     }
-    const size = symbolSize(symbol.qualname);
+    const size = symbolSize(symbol);
     const node: SymbolNode = {
       id: symbol.id, ...size, type: "symbol", data: { symbol }, position: { x: 0, y: 0 }, parentId: id, focusable: false,
     };

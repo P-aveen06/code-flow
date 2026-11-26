@@ -3,13 +3,13 @@ import type { KeyboardEvent } from "react";
 import { FLOW_DIRECTIONS, FLOW_VIEWS } from "../view";
 import type { FlowDirection, FlowView } from "../view";
 
-const labels: Record<FlowView, string> = {
+export const flowViewLabels: Record<FlowView, string> = {
   side_by_side: "Side by side",
   overlay: "Overlay",
   overlay_summary: "Overlay + summary",
 };
 
-const directionLabels: Record<FlowDirection, string> = {
+export const flowDirectionLabels: Record<FlowDirection, string> = {
   horizontal: "Horizontal",
   vertical: "Vertical",
 };
@@ -25,10 +25,10 @@ interface VariantPreviewProps {
 export function VariantPreview({ view, viewOverride, assignedView, ready, onChange }: VariantPreviewProps) {
   return (
     <Preview
-      name="variant" param="view" options={FLOW_VIEWS} labels={labels}
+      name="variant" param="view" options={FLOW_VIEWS} labels={flowViewLabels}
       selected={view} override={viewOverride} ready={ready} onChange={onChange}
       status={!ready ? "Loading Flagsmith assignment…" : assignedView
-        ? `Assigned by Flagsmith: ${labels[assignedView]}`
+        ? `Assigned by Flagsmith: ${flowViewLabels[assignedView]}`
         : "Flagsmith unavailable — showing side by side"}
     />
   );
@@ -44,11 +44,11 @@ export function DirectionPreview({ direction, directionOverride, assignedDirecti
 }) {
   const status = longFlow === false ? "Short flow: horizontal (not in the experiment)"
     : !ready ? "Waiting for flow direction…"
-    : assignedDirection ? `Assigned by Flagsmith: ${directionLabels[assignedDirection]}`
+    : assignedDirection ? `Assigned by Flagsmith: ${flowDirectionLabels[assignedDirection]}`
     : "Flagsmith has no direction assignment — showing horizontal";
   return (
     <Preview
-      name="direction" param="direction" options={FLOW_DIRECTIONS} labels={directionLabels}
+      name="direction" param="direction" options={FLOW_DIRECTIONS} labels={flowDirectionLabels}
       selected={direction} override={directionOverride} ready={ready} onChange={onChange} status={status}
     />
   );

@@ -6,6 +6,7 @@ function symbol(name: string, module: string, status: NodeStatus = "context"): O
   return {
     id: `${module}:${name}`, name, qualname: name, module, status, kind: "function",
     file: `${module}.py`, line: 1, end_line: 5, in_base: status !== "added", in_head: status !== "removed",
+    lines_added: 0, lines_removed: 0,
   };
 }
 

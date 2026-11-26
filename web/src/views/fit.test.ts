@@ -9,6 +9,7 @@ function symbol(id: string, x: number, status: "changed" | "context" = "context"
     data: { symbol: {
       id, status, name: id, qualname: id, module: "example", kind: "function", file: "example.py",
       line: 1, end_line: 1, in_base: true, in_head: true,
+      lines_added: 0, lines_removed: 0,
     } },
   };
 }

@@ -151,6 +151,8 @@ interface RevisionPresence {
 export interface OverlayNode extends NodeLocation, RevisionPresence {
   qualname: string;
   status: NodeStatus;
+  lines_added: number | null;
+  lines_removed: number | null;
 }
 
 export interface OverlayEdge extends EdgeEndpoints, RevisionPresence {
@@ -175,4 +177,22 @@ export interface CodeSnippet {
   start: number;
   end: number;
   lines: { number: number; text: string }[];
+}
+
+export interface LineDiffRow {
+  kind: "context" | "added" | "removed";
+  base_line: number | null;
+  head_line: number | null;
+  text: string;
+}
+
+export interface FunctionDiff {
+  node: string;
+  base: string;
+  head: string;
+  file: string;
+  status: NodeStatus;
+  lines_added: number;
+  lines_removed: number;
+  rows: LineDiffRow[];
 }

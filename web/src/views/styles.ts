@@ -9,8 +9,35 @@ export const statusLabels: Record<NodeStatus, string> = {
   context: "Context",
 };
 
-export function symbolHint({ kind, status }: OverlayNode): string {
-  return `${kind} · ${statusLabels[status]}`;
+export function shortFilePath(file: string): string {
+  const segments = file.split("/");
+  return segments.length > 2 ? `…/${segments.slice(-2).join("/")}` : file;
+}
+
+export function formatLineCounts(added?: number | null, removed?: number | null) {
+  if (added == null || removed == null) return { added: "", removed: "" };
+  return {
+    added: added ? `+${added}` : "",
+    removed: removed ? `−${removed}` : "",
+  };
+}
+
+export function symbolName(symbol: OverlayNode): string {
+  return symbol.kind === "module" ? symbol.module || symbol.name : symbol.qualname;
+}
+
+export function symbolKindLabel(kind: OverlayNode["kind"]): string {
+  return kind === "function" ? "fn" : kind;
+}
+
+export function symbolLabel(symbol: OverlayNode): string {
+  const { kind, status, lines_added, lines_removed, file, line } = symbol;
+  const parts = [symbolName(symbol), kind, status];
+  if (status !== "context" && lines_added != null && lines_removed != null) {
+    parts.push(`${lines_added} lines added`, `${lines_removed} removed`);
+  }
+  if (file) parts.push(`${file} line ${line}`);
+  return parts.join(", ");
 }
 
 export function symbolNameLines(name: string): string[] {
@@ -27,13 +54,19 @@ export function symbolNameLines(name: string): string[] {
   return lines;
 }
 
-export function symbolSize(name: string) {
-  const lines = symbolNameLines(name);
-  const longestLine = Math.max(...lines.map((line) => line.length));
-  // Match the 16.8px monospace name, with 26px for padding and border.
+export function symbolSize(symbol: OverlayNode) {
+  const lines = symbolNameLines(symbolName(symbol));
+  // The card uses 14px mono for the name and 11.7px mono for metadata.
+  const nameWidth = Math.max(...lines.map((line) =>
+    [...line].reduce((width, char) => width + (char.charCodeAt(0) > 0x2ff ? 15 : 8.6), 0),
+  ));
+  const kindWidth = symbolKindLabel(symbol.kind).length * 7.2;
+  const counts = symbol.status === "context" ? formatLineCounts() : formatLineCounts(symbol.lines_added, symbol.lines_removed);
+  const countsWidth = [counts.added, counts.removed].filter(Boolean).join(" ").length * 7.2;
+  const locationWidth = Math.min(shortFilePath(symbol.file).length, 36) * 7.2 + `:${symbol.line}`.length * 7.2;
   return {
-    width: Math.max(140, Math.ceil(longestLine * 10.2) + 26),
-    height: 36 + (lines.length - 1) * 20,
+    width: Math.max(152, Math.ceil(kindWidth + nameWidth + countsWidth + 16) + 18, Math.ceil(locationWidth) + 18),
+    height: 56 + (lines.length - 1) * 17,
   };
 }
 

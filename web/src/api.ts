@@ -1,6 +1,6 @@
 import { apiUrl } from "./config";
 import type {
-  CodeSnippet, CommitList, DiffViewModel, GraphSnapshot, ImportRequest, ImportResponse,
+  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GraphSnapshot, ImportRequest, ImportResponse,
   ImportStatus, Repo, RepoFlags,
 } from "./types";
 
@@ -105,4 +105,9 @@ export function fetchCode(
   if (start !== undefined) query.set("start", String(start));
   if (end !== undefined) query.set("end", String(end));
   return requestJson<CodeSnippet>(`${repoPath(repo)}/code?${query}`, signal);
+}
+
+export function fetchFunctionDiff(repo: string, head: string, node: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ head, node });
+  return requestJson<FunctionDiff>(`${repoPath(repo)}/function-diff?${query}`, signal);
 }

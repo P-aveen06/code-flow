@@ -133,6 +133,11 @@ def create_app(
         with store.lock:
             return store.diff(repo, head, base, hops)
 
+    @app.get("/api/repos/{repo}/function-diff")
+    def function_diff(repo: str, head: str, node: str, base: str | None = None) -> dict:
+        with store.lock:
+            return store.function_diff(repo, head, node, base)
+
     @app.get("/api/repos/{repo}/code")
     def code(
         repo: str, sha: str, file: str, start: int | None = None, end: int | None = None

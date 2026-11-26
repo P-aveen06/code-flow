@@ -51,9 +51,9 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
   }, [selectedIndex, visible, onSelect]);
 
   return (
-    <aside className="sidebar timeline" aria-labelledby="timeline-title">
+    <aside className="timeline" aria-labelledby="timeline-title">
       <div className="panel-heading">
-        <h2 id="timeline-title">Commit timeline</h2>
+        <h2 id="timeline-title">Commits</h2>
         <span className="muted">{commits.length} {commits.length === 1 ? "commit" : "commits"}</span>
       </div>
       {commits.length ? (
@@ -81,7 +81,12 @@ export function Timeline({ commits, selectedSha, onSelect }: TimelineProps) {
                   >
                     <span className="timeline__meta">
                       <code title={commit.sha}>{commit.sha.slice(0, 7)}</code>
-                      <time dateTime={commit.date}>{formatCommitDate(commit.date)}</time>
+                      {commit.author && <>
+                        <span aria-hidden="true">·</span>
+                        <span className="timeline__author" title={commit.author}>{commit.author}</span>
+                      </>}
+                      <span aria-hidden="true">·</span>
+                      <time dateTime={commit.date} title={formatCommitDate(commit.date)}>{formatCommitDate(commit.date, true)}</time>
                     </span>
                     <span className="timeline__message">{commit.message}</span>
                     <span className="timeline__stats">

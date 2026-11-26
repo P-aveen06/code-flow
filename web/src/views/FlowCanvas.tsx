@@ -16,28 +16,41 @@ import type { LayoutPositionControls } from "./layoutPositions";
 import { RoutedEdge } from "./RoutedEdge";
 import { sideOf } from "./sides";
 import type { Revision } from "./sides";
-import { edgeStyle, guardLabel, nodeStyle, statusLabels, symbolHint, symbolNameLines } from "./styles";
+import { LineCounts } from "./LineCounts";
+import { edgeStyle, guardLabel, nodeStyle, shortFilePath, statusLabels, symbolKindLabel, symbolLabel, symbolName, symbolNameLines } from "./styles";
 
 function ModuleBox({ data }: NodeProps<ModuleNode>) {
   return <div className="flow-module" title={data.label}>{data.label}</div>;
 }
 
-function SymbolCard({ data: { symbol }, selected, sourcePosition, targetPosition }: NodeProps<SymbolNode>) {
+export function SymbolCard({ symbol, selected }: { symbol: OverlayNode; selected: boolean }) {
+  const name = symbolName(symbol);
+  return (
+    <button
+      type="button" className="flow-symbol" style={nodeStyle(symbol.status)}
+      aria-pressed={selected} aria-label={symbolLabel(symbol)} title={name}
+    >
+      <span className="flow-symbol__top">
+        <span className="flow-symbol__kind">{symbolKindLabel(symbol.kind)}</span>
+        <span className="flow-symbol__name">
+          {symbolNameLines(name).map((line, index) => <span key={index}>{line}</span>)}
+        </span>
+        {symbol.status !== "context" && <LineCounts added={symbol.lines_added} removed={symbol.lines_removed} />}
+      </span>
+      {symbol.file && (
+        <span className="flow-symbol__file" title={symbol.file}>
+          <span>{shortFilePath(symbol.file)}</span><span>:{symbol.line}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+function SymbolFlowNode({ data: { symbol }, selected, sourcePosition, targetPosition }: NodeProps<SymbolNode>) {
   return (
     <>
       <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
-      <button
-        type="button"
-        className="flow-symbol"
-        style={nodeStyle(symbol.status)}
-        aria-expanded={selected}
-        title={symbol.qualname}
-      >
-        <span className="flow-symbol__name">
-          {symbolNameLines(symbol.qualname).map((line, index) => <span key={index}>{line}</span>)}
-        </span>
-        <span className="flow-symbol__hint">{symbolHint(symbol)}</span>
-      </button>
+      <SymbolCard symbol={symbol} selected={selected} />
       <Handle type="source" position={sourcePosition ?? Position.Right} isConnectable={false} />
     </>
   );
@@ -60,7 +73,7 @@ function ContextChip({ data: { chip, label }, sourcePosition, targetPosition }: 
   );
 }
 
-const nodeTypes = { module: ModuleBox, symbol: SymbolCard, context: ContextChip } satisfies NodeTypes;
+const nodeTypes = { module: ModuleBox, symbol: SymbolFlowNode, context: ContextChip } satisfies NodeTypes;
 const edgeTypes = { routed: RoutedEdge } satisfies EdgeTypes;
 const legendStatuses: NodeStatus[] = ["added", "removed", "changed", "context"];
 const minZoom = 0.06;
@@ -154,6 +167,9 @@ function Canvas({
     if (!canvas || !autoFit || !viewportInitialized) return;
 
     let fitFrame = 0;
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    let width = canvas.clientWidth;
+    let height = canvas.clientHeight;
     let disposed = false;
     function markReady() {
       if (disposed || readyLayout.current === layout) return;
@@ -168,12 +184,22 @@ function Canvas({
     };
 
     scheduleFit();
-    const observer = new ResizeObserver(scheduleFit);
+    const observer = new ResizeObserver(() => {
+      const nextWidth = canvas.clientWidth;
+      const nextHeight = canvas.clientHeight;
+      if (width === nextWidth && height === nextHeight) return;
+      width = nextWidth;
+      height = nextHeight;
+      // Fit once the canvas stops resizing during a divider drag.
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(scheduleFit, 120);
+    });
     observer.observe(canvas);
 
     return () => {
       disposed = true;
       observer.disconnect();
+      clearTimeout(resizeTimer);
       cancelAnimationFrame(fitFrame);
     };
   }, [autoFit, fullscreen.active, layout, layoutPositions.resetCount, onReady, viewportInitialized]);

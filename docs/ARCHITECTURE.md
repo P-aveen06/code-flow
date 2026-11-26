@@ -152,6 +152,11 @@ neighbourhood**: added, removed and changed nodes plus their 1-hop callers and
 callees, grouped into compound nodes by module (ELK.js layered layout,
 hierarchical). The user can expand to 2 hops or show the full module.
 
+At viewport sizes of 1200×700 or larger, Source code starts at 30% of the
+space shared with Flow. The divider enforces minimum panel heights and saves
+its percentage under `code-flow:source-split` in local storage. The canvas
+refits after resizing settles. Full screen expands the Flow panel.
+
 ## HTTP API
 
 The server listens on port 8787 and serves JSON under `/api`. The
@@ -214,10 +219,21 @@ and responses use full SHAs.
   The overlay contains the union of both graphs within the changed
   neighbourhood. Nodes are sorted by `id` and include `name`, `qualname`,
   `module`, `kind`, `file`, `line`, `end_line`, and `status` (`added`,
-  `removed`, `changed`, or `context`). Edges are sorted by `(source, target)`
-  and include `guard` and `status` (`added`, `removed`, or `context`).
+  `removed`, `changed`, or `context`). Each node has integer `lines_added`
+  and `lines_removed` for its source spans, or `null` for both when source is
+  unavailable for an added, removed, or changed node. Context nodes have zero
+  counts and require no source reads. Edges are sorted by
+  `(source, target)` and include `guard` and `status` (`added`, `removed`, or `context`).
   Both include `in_base` and `in_head` for the side-by-side view. Node
   locations and edge guards come from head when present, otherwise from base.
+- `GET /api/repos/{repo}/function-diff?head=SHA&base=SHA&node=ID` returns
+  `node`, `base`, `head`, `file`, `status`, `lines_added`, `lines_removed`, and
+  `rows`. Omit `base` to use the same commit index base as `/diff`. The server
+  reads each revision's source span from its snapshot. Each row has `kind`
+  (`context`, `added`, or `removed`), `base_line`, `head_line`, and `text`.
+  Line numbers are 1-based, with `null` when no corresponding line exists in
+  that revision. Context symbols show head source with zero counts. The
+  endpoint returns 404 for unknown nodes and unavailable source.
 - `GET /api/repos/{repo}/code?sha=SHA&file=PATH&start=N&end=M` returns
   `{"sha": "…", "file": "shop/checkout.py", "start": 15, "end": 19, "lines": [{"number": 15, "text": "def new_checkout(…):"}, …]}`.
   Paths are repo-relative without `..`. Lines are 1-based and inclusive.
@@ -261,7 +277,7 @@ also the web client key for Development. See `.env.example` for configuration.
 |---|---|---|
 | `flow_view` | multivariate string | The Track 01 experiment. Control `side_by_side`; variants `overlay` and `overlay_summary`. Allocation 34/33/33 while the test runs; roll out the winner by setting it to 100%. |
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
-| `flagsmith_mode` | boolean | Turns Flagsmith mode on or off (Paveen's decision). When off, the panel and live colouring are hidden. |
+| `flagsmith_mode` | boolean | Toggles flag findings and live colouring. The Flagsmith section always shows the active flow settings. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
 | `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 

@@ -195,9 +195,9 @@ uv run --project simulator python simulator/simulate.py --experiment flow_direct
 
 ### Flagsmith mode
 
-The boolean flag `flagsmith_mode` turns the panel and live path styling on or
-off. The app polls every 10 seconds, so the change takes effect while the
-viewer is open.
+The Flagsmith section always shows the active flow settings. The `flagsmith_mode`
+flag toggles findings and live path styling. The app polls every 10 seconds,
+so the change takes effect while the viewer is open.
 
 The analyzer finds Flagsmith and OpenFeature calls such as
 `get_openfeature_client().get_boolean_value(...)`. It resolves supported string

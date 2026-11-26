@@ -47,7 +47,9 @@
   --shadow-sm: 0 1px 3px rgb(0 0 0 / 6%), 0 1px 2px rgb(0 0 0 / 4%);
   --motion-fast: 120ms ease;
   --nav-width: 240px;
-  --drawer-width: 320px;
+  --review-header-width: 320px;
+  --commits-width: 260px;
+  --flagsmith-width: 220px;
   --topbar-height: 56px;
 }
 
@@ -115,7 +117,7 @@ button { font: inherit; }
   align-items: start;
   gap: var(--space-6) var(--space-7);
   width: 100%;
-  max-width: calc(var(--nav-width) * 2 + var(--drawer-width) + var(--space-9) * 2);
+  max-width: calc(var(--nav-width) * 2 + var(--review-header-width) + var(--space-9) * 2);
   margin-inline: auto;
   padding: var(--space-8) var(--space-6);
 }
@@ -220,7 +222,7 @@ button { font: inherit; }
   border-bottom: var(--border);
   background: var(--color-surface);
 }
-.viewer-header__details { flex: 1 1 var(--drawer-width); min-width: 0; overflow-wrap: anywhere; }
+.viewer-header__details { flex: 1 1 var(--review-header-width); min-width: 0; overflow-wrap: anywhere; }
 .viewer-header__controls {
   display: flex;
   flex-wrap: wrap;
@@ -303,26 +305,35 @@ button { font: inherit; }
 
 .workspace {
   display: grid;
-  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  grid-template-areas: "commits flow flagsmith" "commits code flagsmith";
+  grid-template-columns: var(--commits-width) minmax(0, 1fr) var(--flagsmith-width);
+  grid-template-rows: minmax(min-content, 3fr) minmax(min-content, 2fr);
   flex: 1;
 }
 
-.workspace--with-drawer { grid-template-columns: var(--nav-width) minmax(0, 1fr) var(--drawer-width); }
-.workspace__drawer { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.workspace--code-collapsed { grid-template-rows: minmax(min-content, 1fr) auto; }
+.workspace__divider { display: none; }
 
 .timeline, .graph-panel, .code-pane, .flagsmith-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.sidebar, .drawer { background: var(--color-surface); }
-.sidebar { border-right: var(--border); }
-.drawer { border-left: var(--border); }
-.workspace__drawer > aside { flex: 1; }
-.flagsmith-panel + .code-pane { border-top: var(--border); }
-.flagsmith-panel .panel-heading { display: grid; gap: var(--space-1); }
-.flagsmith-panel__findings { overflow: auto; padding: var(--space-3); overflow-wrap: anywhere; }
+.timeline { grid-area: commits; border-right: var(--border); background: var(--color-surface); contain: size; }
+.graph-panel { grid-area: flow; }
+.code-pane { grid-area: code; border-top: var(--border); }
+.flagsmith-panel { grid-area: flagsmith; border-left: var(--border); background: var(--color-surface); }
+.flagsmith-panel__body { overflow: auto; min-height: 0; overflow-wrap: anywhere; font-size: var(--text-xs); }
+.flagsmith-panel__review, .flagsmith-panel__findings { padding: var(--space-3) var(--space-4); }
+.flagsmith-panel__review { border-bottom: var(--border); }
+.flagsmith-panel__review dl { margin: var(--space-2) 0 0; }
+.flagsmith-panel__review dt { color: var(--color-text-muted); }
+.flagsmith-panel__review dd { margin: 0; font-weight: 600; }
+.flagsmith-panel__review dd + dt { margin-top: var(--space-2); }
+.flagsmith-panel__review small { display: block; color: var(--color-text-muted); font-size: inherit; font-weight: 400; }
+.flagsmith-panel__connection { margin-bottom: var(--space-2); }
 .flag-group + .flag-group { margin-top: var(--space-4); }
 .flag-group h3 { margin-bottom: var(--space-1); }
 .flag-group__list, .flag-finding__checks, .flag-finding__dead { padding: 0; margin: 0; list-style: none; }
 .flag-finding { padding-block: var(--space-2); }
 .flag-finding + .flag-finding { border-top: var(--border); }
+.flag-finding__select { display: grid; gap: var(--space-1); width: 100%; text-align: start; white-space: normal; }
 .flag-finding__select[aria-pressed="true"] { background: var(--color-accent-soft); border-color: var(--color-accent); }
 .flag-finding__meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); }
 .flag-status { background: var(--color-sunken); color: var(--color-text-muted); }
@@ -360,6 +371,7 @@ button { font: inherit; }
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: var(--border);
+  background: var(--color-surface);
 }
 
 .panel-message { margin: var(--space-5); color: var(--color-text-muted); overflow-wrap: anywhere; }
@@ -383,6 +395,7 @@ button { font: inherit; }
 
 .timeline__commit {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   width: 100%;
   padding: var(--space-2) var(--space-3);
@@ -402,12 +415,14 @@ button { font: inherit; }
 
 .timeline__meta {
   display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
+  align-items: baseline;
+  gap: var(--space-1);
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
+.timeline__author { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .timeline__commit[aria-current] .timeline__meta code { color: var(--color-accent); }
 .timeline__message { font-weight: 500; overflow-wrap: anywhere; }
 .timeline__stats { display: flex; gap: var(--space-1); }
@@ -433,8 +448,7 @@ button { font: inherit; }
 .timeline__keys { border-top: var(--border); padding: var(--space-2) var(--space-4); }
 .timeline__keys kbd { background: var(--color-sunken); padding-inline: var(--space-1); border-radius: var(--radius-sm); }
 
-.graph-panel > .panel-heading { background: var(--color-bg); }
-.graph-panel { min-height: min-content; }
+.graph-panel { min-height: 420px; }
 .graph-panel:is(:fullscreen, .graph-panel--maximized) {
   min-height: 0;
   overflow: auto;
@@ -532,8 +546,8 @@ body:has(.graph-panel--maximized) { overflow: hidden; }
   align-items: flex-start;
   width: 100%;
   height: 100%;
-  padding-block: 0;
-  padding-inline: var(--space-3);
+  gap: var(--space-1);
+  padding: var(--space-2);
   border-width: var(--border-width);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -545,24 +559,29 @@ body:has(.graph-panel--maximized) { overflow: hidden; }
 
 .flow-symbol:hover { box-shadow: var(--shadow-sm); }
 .flow-symbol:active, .flow-module:active { cursor: grabbing; }
-.flow-symbol[aria-expanded="true"] { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.flow-symbol__name,
-.flow-symbol__hint {
-  flex-shrink: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.flow-symbol[aria-pressed="true"] { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.flow-symbol__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
   white-space: nowrap;
 }
+.flow-symbol__top .line-counts { margin-left: auto; }
 .flow-symbol__name {
-  font: var(--text-md) / var(--leading-tight) var(--font-mono);
+  font: var(--text-sm) / var(--leading-tight) var(--font-mono);
   font-weight: 600;
 }
-.flow-symbol__name span { display: block; overflow: hidden; text-overflow: ellipsis; }
-.flow-symbol__hint {
+.flow-symbol__name span { display: block; }
+.flow-symbol__kind, .flow-symbol__file {
   color: var(--color-text-muted);
-  font: var(--text-xs) / var(--leading-tight) var(--font-sans);
+  font: var(--text-xs) / var(--leading-tight) var(--font-mono);
 }
+.flow-symbol__file { display: flex; max-width: 100%; white-space: nowrap; }
+.flow-symbol__file span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.line-counts { display: inline-flex; gap: var(--space-1); flex: none; font: var(--text-xs) / var(--leading-tight) var(--font-mono); }
+.line-counts__added { color: color-mix(in srgb, var(--color-success) 65%, var(--color-text)); }
+.line-counts__removed { color: color-mix(in srgb, var(--color-danger) 75%, var(--color-text)); }
 .react-flow__node-symbol .react-flow__handle,
 .react-flow__node-context .react-flow__handle { opacity: 0; }
 
@@ -655,53 +674,172 @@ body:has(.graph-panel--maximized) { overflow: hidden; }
 .review-bar kbd { margin-left: var(--space-1); font-size: var(--text-xs); }
 
 .code-pane__location {
-  display: grid;
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: var(--border);
+  min-width: 0;
   overflow-wrap: anywhere;
+  font-size: var(--text-xs);
 }
-.code-pane__meta { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-muted); font-size: var(--text-xs); }
+.code-pane__name { font-weight: 600; }
+.code-pane__location .line-counts { margin-inline-start: auto; }
+.code-pane__actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: auto; }
+.code-pane__body:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .status-chip { padding-inline: var(--space-2); border-width: var(--border-width); border-radius: var(--radius-pill); }
 .code-pane__snippet { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) 0; background: var(--color-bg); font-size: var(--text-xs); }
-.code-line { display: flex; gap: var(--space-3); min-width: max-content; padding-inline: var(--space-2) var(--space-4); }
+.code-pane__snippet > code { display: block; min-width: max-content; }
+.code-line { display: flex; gap: var(--space-2); padding-inline: var(--space-2) var(--space-4); }
+.code-line--added { background: color-mix(in srgb, var(--color-success) 12%, var(--color-surface)); }
+.code-line--removed { background: color-mix(in srgb, var(--color-danger) 11%, var(--color-surface)); }
 .code-line.is-highlighted { background: var(--color-accent-soft); }
-.code-line__number { flex: 0 0 4ch; color: var(--color-text-muted); text-align: right; user-select: none; }
+.code-line__number { flex: 0 0 6ch; color: var(--color-text-muted); text-align: right; user-select: none; }
+.code-line__marker { flex: 0 0 1ch; user-select: none; }
+.code-pane__empty { display: flex; flex-direction: column; min-height: 0; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.changed-functions { list-style: none; padding: 0; margin: 0; overflow: auto; max-height: 12rem; }
+.changed-functions li + li { border-top: var(--border); }
+.changed-functions__select {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: start;
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.changed-functions__select:hover { background: var(--color-sunken); }
+.changed-functions__select:focus-visible { outline-offset: -2px; }
+.changed-functions__name { font-weight: 600; }
+.changed-functions__select .line-counts { justify-self: end; }
 
-@media (width > 900px) {
-  /* Scrollable sidebars stretch alongside the diagram without sizing its row. */
-  .timeline, .workspace__drawer { contain: size; }
+@media (width >= 1200px) {
+  /* Long source snippets and findings scroll inside their grid sections. */
+  .flagsmith-panel, .code-pane__body { contain: size; }
+}
+
+@media (width >= 1200px) and (height < 700px) {
+  .workspace { min-height: max(52rem, calc(100dvh - 10rem)); }
+}
+
+@media (width >= 1200px) and (height >= 700px) {
+  .app:has(> .viewer) { height: 100dvh; }
+  .viewer, .workspace { min-height: 0; }
+  .workspace:not(.workspace--code-collapsed) {
+    grid-template-areas: "commits flow flagsmith" "commits divider flagsmith" "commits code flagsmith";
+    grid-template-rows: minmax(0, 1fr) var(--space-3) var(--source-height, 30%);
+  }
+  .workspace--code-collapsed { grid-template-rows: minmax(0, 1fr) auto; }
+  .workspace__divider:not([hidden]) {
+    grid-area: divider;
+    display: grid;
+    place-items: center;
+    border-block-start: var(--border);
+    background: var(--color-sunken);
+    cursor: row-resize;
+    touch-action: none;
+    user-select: none;
+  }
+  .workspace__divider::before {
+    content: "";
+    width: var(--space-7);
+    height: var(--space-1);
+    border-radius: var(--radius-pill);
+    background: var(--color-text-muted);
+  }
+  .workspace__divider:is(:hover, :focus-visible)::before { background: var(--color-accent); }
+  .workspace__divider:focus-visible { outline-offset: calc(-1 * var(--border-width)); }
+
+  .viewer-header {
+    flex: none;
+    align-items: center;
+    min-height: calc(var(--space-8) + var(--space-2));
+    gap: var(--space-2) var(--space-4);
+    padding-block: var(--space-2);
+  }
+  .viewer-header__details { display: flex; flex-basis: 32rem; align-items: center; gap: var(--space-4); }
+  .viewer-header__repo { flex: none; max-width: min(30%, var(--flagsmith-width)); }
+  .viewer-header__repo h1 { font-size: var(--text-sm); }
+  .viewer-header__subdir { margin-top: 0; }
+  .viewer-header__commit { flex: 1; min-width: 0; margin-top: 0; }
+  .viewer-header__repo :is(h1, p), .viewer-header__commit h2, .commit-meta > :first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .commit-meta { flex-wrap: nowrap; gap: var(--space-1); white-space: nowrap; }
+  .commit-meta > :not(:first-child)::before { content: "·" / ""; margin-inline-end: var(--space-1); }
+  .viewer-header__controls { justify-content: end; gap: var(--space-1) var(--space-3); margin-inline-start: auto; }
+  .viewer-header .segmented__btn { padding-inline: var(--space-2); }
+  .variant-preview, .variant-preview__status { gap: var(--space-1); }
+
+  .panel-heading {
+    flex: none;
+    min-height: calc(var(--space-6) + var(--space-2));
+    padding-block: var(--space-1);
+  }
+  .timeline__list, .flagsmith-panel__body, .code-pane__body { overscroll-behavior: contain; }
+  .code-pane__body:not([hidden]) { display: block; overflow: auto; }
+  .code-pane__body :is(.code-pane__snippet, .changed-functions) { max-height: none; overflow: visible; }
+  .code-pane__location { flex-wrap: nowrap; }
+  .code-pane__location code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .code-pane__location .status-chip { flex: none; }
+
+  .graph-panel:not(:fullscreen, .graph-panel--maximized) {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .graph-panel:not(:fullscreen, .graph-panel--maximized) .flow-canvas {
+    /* Leave room for the flow controls and guide near the short end of this layout. */
+    min-height: min(280px, calc(60dvh - 260px));
+  }
+  .diagram-guide__heading p { font-size: var(--text-xs); }
+  .summary-bar, .flow-legend, .review-bar { padding-block: var(--space-1); }
+  .review-bar { flex-wrap: nowrap; gap: var(--space-2); }
+  .review-bar__prompt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); }
+  .review-bar__prompt h3 { font-size: var(--text-xs); }
+  .review-bar__actions { flex: none; flex-wrap: nowrap; gap: var(--space-1); }
+  .review-bar__actions .btn { padding-inline: var(--space-2); }
 }
 
 @media (max-width: 900px), (max-height: 760px) {
   .diagram-guide:not(.diagram-guide--expanded) .diagram-guide__heading p { display: none; }
-  .timeline { max-height: max(calc(var(--space-9) * 5), calc(100dvh - var(--space-8) * 3)); }
+}
+
+@media (width < 1200px) {
+  .workspace, .workspace--code-collapsed {
+    grid-template-areas: "commits flow" "code code" "flagsmith flagsmith";
+    grid-template-columns: var(--commits-width) minmax(0, 1fr);
+    grid-template-rows: minmax(min-content, 1fr) auto auto;
+  }
+  .flagsmith-panel { border-left: 0; border-top: var(--border); }
+  .flagsmith-panel__body { max-height: 32rem; }
+  .code-pane__body { max-height: 40dvh; }
 }
 
 @media (max-width: 900px) {
   .landing { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); padding: var(--space-5) var(--space-4); }
-  .workspace--with-drawer { grid-template-columns: var(--nav-width) minmax(0, 1fr); }
-  .workspace__drawer { grid-column: 1 / -1; max-height: calc(var(--space-9) * 4); border: 0; }
-  .flagsmith-panel { border-top: var(--border); }
-  .code-pane {
-    background: var(--color-surface);
-    position: fixed;
-    z-index: 10;
-    bottom: 0;
-    right: 0;
-    width: min(100%, var(--drawer-width));
-    max-height: 50dvh;
-    border-top: var(--border);
-    border-left: var(--border);
-    box-shadow: var(--shadow-sm);
+}
+
+@media (width < 760px) {
+  .workspace, .workspace--code-collapsed {
+    grid-template-areas: "commits" "flow" "code" "flagsmith";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(min-content, 1fr) auto auto;
   }
+  .timeline { contain: none; max-height: 16rem; border-right: 0; border-bottom: var(--border); }
+  .code-pane__location { order: 1; flex-basis: 100%; }
 }
 
 @media (max-width: 600px) {
   .topbar, .viewer-header { padding-inline: var(--space-3); }
   .viewer-header__controls { flex-direction: column; }
   .summary-bar { padding-inline: var(--space-3); }
-  .workspace, .workspace--with-drawer { grid-template-columns: minmax(0, 1fr); }
-  .timeline { max-height: calc(var(--space-8) * 4); border-right: 0; border-bottom: var(--border); }
-  .code-pane { width: 100%; }
 }

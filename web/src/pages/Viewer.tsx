@@ -5,23 +5,23 @@ import { recordReviewEvent } from "../events";
 import { directionExposureKey, readFlowDirection, useCodeFlowFlags, useDirectionExposure } from "../flags";
 import type { FlowLayout } from "../layout/elk";
 import { navigate, repoPath } from "../router";
-import type { DiffViewModel, FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
+import type { FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
 import { useDiff, useDiffLayout } from "../useDiff";
 import type { Hops } from "../useDiff";
 import { useRepoFlags } from "../useRepoFlags";
 import { useRequest } from "../useRequest";
-import { replaceDirectionOverride, replaceViewOverride } from "../view";
+import { parseFlowDirection, parseFlowView, replaceDirectionOverride, replaceViewOverride } from "../view";
 import type { FlowDirection, FlowView } from "../view";
 import { CodePane } from "../views/CodePane";
-import type { CodeSource } from "../views/CodePane";
 import { FlagsmithPanel } from "../views/FlagsmithPanel";
 import { FlowLegend } from "../views/FlowCanvas";
+import { FlowSourceDivider } from "../views/FlowSourceDivider";
 import { Overlay } from "../views/Overlay";
 import { OverlaySummary } from "../views/OverlaySummary";
 import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
-import { DirectionPreview, VariantPreview } from "../views/VariantPreview";
+import { DirectionPreview, VariantPreview, flowDirectionLabels, flowViewLabels } from "../views/VariantPreview";
 import type { ExpandedContext } from "../views/collapse";
 import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
 import { useDiagramFullscreen } from "../views/fullscreen";
@@ -32,13 +32,22 @@ import {
 import { displaySubdir } from "./importHelpers";
 
 const guidePreference = "code-flow:diagram-guide";
+const sourcePreference = "code-flow:source-code";
 const neighboursHint = "How many callers/callees around the changed functions to show";
 
-function readGuidePreference() {
+function readPanelPreference(key: string) {
   try {
-    return window.localStorage.getItem(guidePreference) !== "closed";
+    return window.localStorage.getItem(key) !== "closed";
   } catch {
     return true;
+  }
+}
+
+function savePanelPreference(key: string, open: boolean) {
+  try {
+    window.localStorage.setItem(key, open ? "open" : "closed");
+  } catch {
+    // Toggling a panel still works when storage is blocked.
   }
 }
 
@@ -118,14 +127,17 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     && flagSelection?.head === head ? flagSelection?.finding : undefined;
   const checkIds = useMemo(() => selectedFlag?.checks.map((check) => check.function), [selectedFlag]);
   const [hops, setHops] = useState<Hops>(1);
-  const [guideOpen, setGuideOpen] = useState(readGuidePreference);
+  const [guideOpen, setGuideOpen] = useState(() => readPanelPreference(guidePreference));
+  const [sourceOpen, setSourceOpen] = useState(() => readPanelPreference(sourcePreference));
   const guideButton = useRef<HTMLButtonElement>(null);
+  const workspace = useRef<HTMLDivElement>(null);
+  const sourceHeading = useRef<HTMLDivElement>(null);
   const [context, setContext] = useState<{ head: string | undefined; expanded: ExpandedContext }>(
     () => ({ head, expanded: new Set() }),
   );
   if (context.head !== head) setContext({ head, expanded: new Set() });
   const [selection, setSelection] = useState<
-    { diff: DiffViewModel; node: OverlayNode } | { head: string; check: FlagCheck } | null
+    { head: string; nodeId: string } | { head: string; check: FlagCheck } | null
   >(null);
   const [rendered, setRendered] = useState<{
     layout: FlowLayout; view: FlowView; direction: FlowDirection;
@@ -142,18 +154,10 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const currentLayout = layout.status === "ready" ? layout.data : null;
   const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view, direction));
   const contextExpanded = context.expanded === "all" || context.expanded.size > 0;
-  const selectedNode = selection && "node" in selection && selection.diff === diff ? selection.node : null;
-  let source: CodeSource | undefined;
-  if (selectedNode && diff) {
-    const { in_head, file, line, end_line, qualname, status } = selectedNode;
-    source = {
-      sha: in_head ? diff.head : diff.base, revision: in_head ? "Head" : "Base",
-      file, line, endLine: end_line, name: qualname, status,
-    };
-  } else if (selection && "check" in selection && selection.head === head) {
-    const { file, line } = selection.check;
-    source = { sha: head, revision: "Head", file, line, endLine: line, name: `${file}:${line}` };
-  }
+  const currentSelection = selection?.head === head ? selection : null;
+  const selectedNode = currentSelection && "nodeId" in currentSelection
+    ? diff?.nodes.find(({ id }) => id === currentSelection.nodeId) : undefined;
+  const selectedCheck = currentSelection && "check" in currentSelection ? currentSelection.check : undefined;
   const markRendered = useCallback(() => {
     if (currentLayout) setRendered({ layout: currentLayout, view, direction });
   }, [currentLayout, view, direction]);
@@ -169,6 +173,10 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const flowChanged = selected && hasFlowChange(selected.stats);
   const fullscreen = useDiagramFullscreen(Boolean(flowChanged && layout.status === "ready" && layout.data?.nodes.length));
   const nextChange = selected && !flowChanged ? nearestFlowChange(commits, selected.sha) : null;
+  const viewSource = variantPreview && parseFlowView(viewOverride) ? "Preview"
+    : !flagsReady ? "Loading assignment…" : assignedView ? "Assigned by Flagsmith" : "Default";
+  const directionSource = variantPreview && parseFlowDirection(directionOverride) ? "Preview"
+    : assignedDirection ? "Assigned by Flagsmith" : longFlow === false ? "Default for short flows" : "Default";
 
   useEffect(() => {
     if (!selectedFlag) return;
@@ -188,17 +196,19 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const selectCommit = useCallback((sha: string) => {
     if (sha !== head) {
       setFlagSelection(undefined);
+      setSelection(null);
       navigate(commitHref(sha));
     }
   }, [commitHref, head]);
 
   function setGuide(open: boolean) {
     setGuideOpen(open);
-    try {
-      window.localStorage.setItem(guidePreference, open ? "open" : "closed");
-    } catch {
-      // The guide still works when storage is blocked.
-    }
+    savePanelPreference(guidePreference, open);
+  }
+
+  function selectNode(node: OverlayNode) {
+    if (head) setSelection({ head, nodeId: node.id });
+    setSourceOpen(true);
   }
 
   function expandModule(module: string) {
@@ -207,17 +217,25 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     }));
   }
 
+  const commitTitle = selected?.message || "Untitled commit";
+
   return (
     <main className="viewer">
       <header className="viewer-header">
         <div className="viewer-header__details">
-          <h1>{name}</h1>
-          {subdir && <p className="viewer-header__subdir">Subfolder <code>{displaySubdir(subdir)}</code></p>}
+          <div className="viewer-header__repo">
+            <h1 title={name}>{name}</h1>
+            {subdir && (
+              <p className="viewer-header__subdir" title={displaySubdir(subdir)}>
+                Subfolder <code>{displaySubdir(subdir)}</code>
+              </p>
+            )}
+          </div>
           {selected && (
             <div className="viewer-header__commit">
-              <h2>{selected.message || "Untitled commit"}</h2>
+              <h2 title={commitTitle}>{commitTitle}</h2>
               <div className="commit-meta">
-                <span>{selected.author}</span>
+                {selected.author && <span title={selected.author}>{selected.author}</span>}
                 <time dateTime={selected.date}>{formatCommitDate(selected.date)}</time>
                 <code title={selected.sha}>{selected.sha.slice(0, 7)}</code>
                 <span className="commit-meta__counts">{formatFunctionCounts(selected.stats)}</span>
@@ -255,12 +273,12 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           )}
         </div>
       </header>
-      <div className={source || flagsmithMode ? "workspace workspace--with-drawer" : "workspace"}>
+      <div ref={workspace} className={sourceOpen ? "workspace" : "workspace workspace--code-collapsed"}>
         <Timeline commits={commits} selectedSha={head} onSelect={selectCommit} />
         <section className={fullscreen.maximized ? "graph-panel graph-panel--maximized" : "graph-panel"}
           aria-labelledby="flow-title" ref={fullscreen.panel}>
           <div className="panel-heading">
-            <h2 id="flow-title">Flow diff</h2>
+            <h2 id="flow-title">Flow</h2>
             {diff && (
               <code className="graph-panel__range muted" title={`${diff.base || "Empty graph"} → ${diff.head}`}>
                 {diff.base ? diff.base.slice(0, 7) : "Empty graph"} → {diff.head.slice(0, 7)}
@@ -315,7 +333,7 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
                     selectedNodeId={selectedNode?.id}
                     selectedFlag={selectedFlag}
                     liveStates={liveStates}
-                    onNodeClick={(node) => setSelection({ diff, node })}
+                    onNodeClick={selectNode}
                     onExpandModule={expandModule}
                     onReady={markRendered}
                   />
@@ -338,24 +356,30 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
             />
           )}
         </section>
-        {(source || flagsmithMode) && (
-          <div className="drawer workspace__drawer">
-            {flagsmithMode && (
-              <FlagsmithPanel
-                data={flags}
-                error={findings.status === "error" ? findings.message : undefined}
-                loading={Boolean(head) && findings.status === "loading"}
-                selected={selectedFlag?.name}
-                onSelect={(finding) => {
-                  const name = toggleFlagSelection(selectedFlag?.name, finding.name);
-                  setFlagSelection(name ? { head, finding } : undefined);
-                }}
-                onOpenCheck={(check) => { if (head) setSelection({ head, check }); }}
-              />
-            )}
-            {source && <CodePane repo={id} source={source} onClose={() => setSelection(null)} />}
-          </div>
-        )}
+        <FlowSourceDivider workspace={workspace} sourceHeading={sourceHeading} hidden={!sourceOpen || fullscreen.active} />
+        <CodePane repo={id} head={head} node={selectedNode} check={selectedCheck} headingRef={sourceHeading}
+          nodes={diff?.nodes ?? []} open={sourceOpen} onSelect={selectNode}
+          onClear={() => setSelection(null)} onOpenChange={(open) => {
+            setSourceOpen(open);
+            savePanelPreference(sourcePreference, open);
+          }} />
+        <FlagsmithPanel
+          view={{ value: flowViewLabels[view], source: viewSource }}
+          direction={{ value: flowDirectionLabels[direction], source: directionSource }}
+          enabled={flagsmithMode}
+          data={flags}
+          error={findings.status === "error" ? findings.message : undefined}
+          loading={Boolean(head) && findings.status === "loading"}
+          selected={selectedFlag?.name}
+          onSelect={(finding) => {
+            const name = toggleFlagSelection(selectedFlag?.name, finding.name);
+            setFlagSelection(name ? { head, finding } : undefined);
+          }}
+          onOpenCheck={(check) => {
+            if (head) setSelection({ head, check });
+            setSourceOpen(true);
+          }}
+        />
       </div>
     </main>
   );

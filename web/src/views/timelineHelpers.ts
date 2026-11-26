@@ -1,9 +1,10 @@
 import type { DiffStats, TimelineCommit } from "../types";
 
 const commitDate = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" });
+const shortCommitDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-export function formatCommitDate(date: string) {
-  return commitDate.format(new Date(date));
+export function formatCommitDate(date: string, compact = false) {
+  return (compact ? shortCommitDate : commitDate).format(new Date(date));
 }
 
 export function hasFlowChange(stats: DiffStats) {

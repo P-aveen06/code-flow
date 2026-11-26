@@ -81,6 +81,7 @@ function symbol(id: string, module: string): OverlayNode {
   return {
     id, module, name: id, qualname: id, kind: "function", file: `${module}.py`, line: 1, end_line: 1,
     status: "changed", in_base: true, in_head: true,
+    lines_added: 1, lines_removed: 1,
   };
 }
 
