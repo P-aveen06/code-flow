@@ -96,14 +96,14 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 - [x] D2. Analyze Flagsmith/flagsmith `api/`, last ~50 commits, tests and migrations excluded; record analysis time and flag checks found
 
 ### M3 Flagsmith
-- [ ] Flagsmith project `code-flow` with flags `flow_view` (multivariate, 3 values), `flagsmith_mode` (boolean); project `shop-demo` with `new_checkout` and one stale flag. Document the exact setup in README (or script it with the Flagsmith Admin API)
+- [x] Flagsmith flags in the existing project `code-flow` (free org = one project), grouped by tags `code-flow`, `repo:flagsmith-api`, `repo:shop-demo`; scripted as `make flagsmith-setup` (`scripts/flagsmith_setup.py`), run on Nov 26
 - [ ] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
 - [ ] Server `flagsmith_client.py`: live flags for the analyzed app via server-side env key; cache 10 s
 - [ ] `GET /api/repos/{repo}/flags?sha` returns detected flags + live state + findings (live/off/stale/orphan/unused)
 - [ ] `FlagsmithPanel.tsx` + edge styling for guarded edges
 
 ### M4 Experiment
-- [ ] Turn on Experimentation in Paveen's Docker Flagsmith (`EXPERIMENTATION_ENABLED=true`, experimentation services + ClickHouse from Flagsmith's `docker-compose.yml`); connect the warehouse for the `code-flow` environment
+- [x] Turn on Experimentation in Paveen's Docker Flagsmith (`EXPERIMENTATION_ENABLED=true`, experimentation services + ClickHouse from Flagsmith's `docker-compose.yml`); connect the warehouse for the `code-flow` environment (done Nov 26: `EXPERIMENTATION_ENABLED` only, events in Postgres; warehouse "Flagsmith database" enabled for code-flow/Production by the setup script)
 - [ ] Create metric from event `diff_understood` and the experiment on `flow_view` (34/33/33); write the exact steps into README
 - [ ] Web: `getExperimentFlag('flow_view')` for exposure, `trackEvent('diff_understood', { value: ms })` / `trackEvent('diff_confusing')` on the buttons, `enableEvents: true`
 - [ ] `simulator/simulate.py` + `behaviour.yaml`: N identities, `get_experiment_flag` per identity, sample outcome and time from the behaviour model, `track_event`, `close()`; `--n`, `--rate`, `--seed`
