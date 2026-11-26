@@ -106,8 +106,8 @@ demonstrates the experiment pipeline and Flagsmith's analysis. Testing the
 hypothesis with real reviewers requires real review data.
 [Simulator assumptions](simulator/behaviour.yaml)
 
-The demo video rolls out the simulated winner, `overlay_summary`, to 100% of
-Production. [Demo script](docs/demo-script.md)
+The experiment is still running. Use this command to roll out
+`overlay_summary` if it wins.
 
 ```sh
 python3 scripts/flagsmith_experiment.py rollout --variant overlay_summary

@@ -112,7 +112,7 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 ### M5 Demo + polish
 - [x] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
 - [x] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
-- [ ] Demo video script (≤ 3 min): problem → timeline → diff views → Flagsmith mode flip → experiment results → roll-out (script in docs/demo-script.md; recording by Paveen pending)
+- [ ] Demo video script (≤ 3 min): problem → timeline → diff views → Flagsmith mode flip → experiment results → roll-out (postponed: more features and experiments first)
 
 ## How the work is executed
 
