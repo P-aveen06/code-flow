@@ -1,23 +1,35 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ComponentType } from "react";
-import { fetchCommits, fetchDiff, fetchRepos } from "./api";
-import type { CommitList, OverlayNode } from "./types";
+import { fetchCommits, fetchRepos } from "./api";
+import { recordReviewEvent } from "./events";
+import type { CommitList, DiffViewModel, OverlayNode } from "./types";
+import { useDiff } from "./useDiff";
+import type { Hops } from "./useDiff";
 import { useRequest } from "./useRequest";
+import { readFlowView } from "./view";
+import type { FlowView } from "./view";
 import { CodePane } from "./views/CodePane";
+import { FlowLegend } from "./views/FlowCanvas";
 import { Overlay } from "./views/Overlay";
 import type { DiffViewProps } from "./views/Overlay";
+import { OverlaySummary } from "./views/OverlaySummary";
+import { ReviewBar } from "./views/ReviewBar";
+import { SideBySide } from "./views/SideBySide";
 import { Timeline } from "./views/Timeline";
 import { resolveCommit } from "./views/timelineHelpers";
 
-type Hops = 1 | 2;
+const diffViews: Record<FlowView, ComponentType<DiffViewProps>> = {
+  side_by_side: SideBySide,
+  overlay: Overlay,
+  overlay_summary: OverlaySummary,
+};
 
 interface HeaderProps {
   repo?: string;
   context?: { hops: Hops; onChange: (hops: Hops) => void };
-  summary?: string;
 }
 
-function Header({ repo, context, summary }: HeaderProps) {
+function Header({ repo, context }: HeaderProps) {
   return (
     <header>
       <div className="topbar">
@@ -45,16 +57,6 @@ function Header({ repo, context, summary }: HeaderProps) {
           </div>
         )}
       </div>
-      {summary !== undefined && (
-        <div className="summary-bar">
-          <span className="summary-bar__label">Summary</span>
-          <p aria-live="polite" title={summary}>
-            {summary.split(/(`[^`]+`)/).map((part, index) => (
-              index % 2 === 1 ? <code key={index}>{part.slice(1, -1)}</code> : part
-            ))}
-          </p>
-        </div>
-      )}
     </header>
   );
 }
@@ -62,19 +64,22 @@ function Header({ repo, context, summary }: HeaderProps) {
 interface ReviewProps {
   history: CommitList;
   initialPrefix: string | null;
-  View: ComponentType<DiffViewProps>;
+  view: FlowView;
 }
 
-function RepoReview({ history: { repo, commits }, initialPrefix, View }: ReviewProps) {
+function RepoReview({ history: { repo, commits }, initialPrefix, view }: ReviewProps) {
   const [head, setHead] = useState(() => resolveCommit(commits, initialPrefix)?.sha);
   const [hops, setHops] = useState<Hops>(1);
   const [selectedNode, setSelectedNode] = useState<OverlayNode | null>(null);
-  const loadDiff = useCallback(
-    (signal: AbortSignal) => head ? fetchDiff(repo, head, { hops }, signal) : Promise.resolve(null),
-    [repo, head, hops],
-  );
-  const request = useRequest(loadDiff);
-  const diff = request.status === "ready" ? request.data : null;
+  const [rendered, setRendered] = useState<{ diff: DiffViewModel; view: FlowView } | null>(null);
+  const { request, diff, layout } = useDiff(repo, head, hops);
+  const markRendered = useCallback(() => {
+    if (diff) setRendered({ diff, view });
+  }, [diff, view]);
+  const reviewContext = diff && rendered?.diff === diff && rendered.view === view
+    ? { repo, view, head: diff.head, base: diff.base }
+    : null;
+  const View = diffViews[view];
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -101,7 +106,6 @@ function RepoReview({ history: { repo, commits }, initialPrefix, View }: ReviewP
       <Header
         repo={repo}
         context={head ? { hops, onChange: changeHops } : undefined}
-        summary={diff?.summary ?? (head && request.status === "loading" ? "Loading comparison…" : undefined)}
       />
       <main className={`workspace${selectedNode && diff ? " workspace--with-code" : ""}`}>
         <Timeline commits={commits} selectedSha={head} onSelect={selectCommit} />
@@ -119,7 +123,31 @@ function RepoReview({ history: { repo, commits }, initialPrefix, View }: ReviewP
             <p className="panel-message" role="status">Loading flow diff…</p>
           )}
           {request.status === "error" && <p className="panel-message" role="alert">{request.message}</p>}
-          {diff && <View diff={diff} selectedNodeId={selectedNode?.id} onNodeClick={setSelectedNode} />}
+          {diff && layout.status === "loading" && (
+            <p className="panel-message" role="status">Laying out the flow…</p>
+          )}
+          {diff && layout.status === "error" && (
+            <p className="panel-message" role="alert">Could not lay out the flow. {layout.message}</p>
+          )}
+          {diff && layout.status === "ready" && layout.data && (
+            <div className="flow-comparison">
+              <View
+                diff={diff}
+                layout={layout.data}
+                selectedNodeId={selectedNode?.id}
+                onNodeClick={setSelectedNode}
+                onReady={markRendered}
+              />
+              {layout.data.nodes.length > 0 && <FlowLegend />}
+            </div>
+          )}
+          {head && (
+            <ReviewBar
+              key={JSON.stringify([repo, head, view])}
+              context={reviewContext}
+              onReview={recordReviewEvent}
+            />
+          )}
         </section>
         {selectedNode && diff && (
           <CodePane
@@ -135,8 +163,10 @@ function RepoReview({ history: { repo, commits }, initialPrefix, View }: ReviewP
   );
 }
 
-export default function App({ view: View = Overlay }: { view?: ComponentType<DiffViewProps> }) {
-  const [params] = useState(() => new URLSearchParams(window.location.search));
+export default function App() {
+  const [search] = useState(() => window.location.search);
+  const [params] = useState(() => new URLSearchParams(search));
+  const view = readFlowView(search);
   const loadHistory = useCallback(async (signal: AbortSignal) => {
     const repos = await fetchRepos(signal);
     const repo = repos.find(({ name }) => name === params.get("repo")) ?? repos[0];
@@ -145,7 +175,7 @@ export default function App({ view: View = Overlay }: { view?: ComponentType<Dif
   const history = useRequest(loadHistory);
 
   if (history.status === "ready" && history.data) {
-    return <RepoReview history={history.data} initialPrefix={params.get("commit")} View={View} />;
+    return <RepoReview history={history.data} initialPrefix={params.get("commit")} view={view} />;
   }
 
   return (

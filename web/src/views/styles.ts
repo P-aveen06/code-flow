@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { EdgeStatus, Guard, NodeStatus } from "../types";
+import type { EdgeStatus, Guard, NodeStatus, OverlayNode } from "../types";
 
 export const statusLabels: Record<NodeStatus, string> = {
   added: "Added",
@@ -7,6 +7,10 @@ export const statusLabels: Record<NodeStatus, string> = {
   changed: "Changed",
   context: "Context",
 };
+
+export function symbolHint({ kind, status }: OverlayNode): string {
+  return `${kind} · ${statusLabels[status]}`;
+}
 
 const statusColors: Record<NodeStatus, string> = {
   added: "var(--color-success)",

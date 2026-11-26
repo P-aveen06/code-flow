@@ -83,8 +83,8 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] Server routes: `GET /api/repos`, `GET /api/repos/{repo}/commits`, `GET /api/repos/{repo}/snapshots/{sha}`, `GET /api/repos/{repo}/diff?base&head&hops`, `GET /api/repos/{repo}/code?sha&file&start&end`
 - [x] Web: timeline (commit list with +/−/~ counts), diff canvas, node click opens code pane
 - [x] `layout/elk.ts`: ELK layered, compound nodes per module, left-to-right
-- [ ] Views: `Overlay.tsx`, `SideBySide.tsx` (two canvases, synced viewport), `OverlaySummary.tsx`
-- [ ] "Understood / Approve" and "Confusing" buttons, timer from render
+- [x] Views: `Overlay.tsx`, `SideBySide.tsx` (two canvases, synced viewport), `OverlaySummary.tsx`
+- [x] "Understood / Approve" and "Confusing" buttons, timer from render
 
 ### M3 Flagsmith
 - [ ] Flagsmith project `code-flow` with flags `flow_view` (multivariate, 3 values), `flagsmith_mode` (boolean); project `shop-demo` with `new_checkout` and one stale flag. Document the exact setup in README (or script it with the Flagsmith Admin API)

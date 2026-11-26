@@ -58,12 +58,44 @@ describe("layoutFlow", () => {
     expect(groups[1].position.x + last.position.x).toBeGreaterThan(groups[0].position.x + first.position.x);
   });
 
+  it("widens a short symbol when its hint needs more room", async () => {
+    const changedCheckout: OverlayNode = { ...checkout, status: "changed" };
+    const shortMethod: OverlayNode = { ...validate, kind: "method", status: "added" };
+    const { nodes: symbols } = await layoutFlow([changedCheckout, shortMethod], []);
+
+    expect(symbols.find(({ id }) => id === shortMethod.id)?.width).toBe(140);
+    expect(symbols.find(({ id }) => id === changedCheckout.id)?.width).toBeGreaterThan(140);
+  });
+
   it("keeps internal and cross-module edges, including guard information", async () => {
     const layout = await layoutFlow(nodes, edges);
     expect(layout.edges).toHaveLength(edges.length);
-    expect(layout.edges.map(({ source, target, data }) => ({ source, target, ...data }))).toEqual(
-      edges.map(({ source, target, status, guard }) => ({ source, target, status, guard })),
+    expect(layout.edges).toMatchObject(
+      edges.map(({ source, target, ...data }) => ({ source, target, data })),
     );
+  });
+
+  it("keeps guard labels and root-relative orthogonal routes", async () => {
+    const layout = await layoutFlow(nodes, edges);
+    expect(layout.edges.map(({ label }) => label)).toEqual([undefined, "new_checkout: on"]);
+
+    for (const edge of layout.edges) {
+      expect(edge.data.sections.length).toBeGreaterThan(0);
+      for (const { startPoint, bendPoints = [], endPoint } of edge.data.sections) {
+        const points = [startPoint, ...bendPoints, endPoint];
+        for (let index = 1; index < points.length; index++) {
+          const previous = points[index - 1];
+          const current = points[index];
+          expect(previous.x === current.x || previous.y === current.y).toBe(true);
+        }
+      }
+
+      const source = layout.nodes.find(({ id }) => id === edge.source)!;
+      const module = layout.nodes.find(({ id }) => id === source.parentId)!;
+      const { startPoint } = edge.data.sections[0];
+      expect(startPoint.x).toBeCloseTo(module.position.x + source.position.x + source.width!);
+      expect(startPoint.y).toBeCloseTo(module.position.y + source.position.y + source.height! / 2);
+    }
   });
 
   it("is deterministic and accepts an empty graph", async () => {

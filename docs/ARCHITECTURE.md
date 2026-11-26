@@ -209,6 +209,8 @@ experiment event.
 
 ### Variants
 
+Before Flagsmith integration, the web app accepts `?view=side_by_side`, `?view=overlay`, or `?view=overlay_summary` and defaults to `overlay`.
+
 - **A `side_by_side`**: two synchronized canvases, before (base) and after (head).
 - **B `overlay`**: one canvas with the union graph, coloured added/removed/changed.
 - **C `overlay_summary`**: B plus a one-line summary banner ("checkout now routes to `new_checkout` behind flag `new_checkout`; 3 functions added, 1 removed").
