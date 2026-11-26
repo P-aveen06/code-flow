@@ -72,4 +72,5 @@ Run on 26 Nov 2026 in the same Flagsmith project and environment, after `flow_vi
 ## Reading it
 
 - Vertical beats horizontal on understanding for long flows (+10.2 %, interval above zero, 98.7 % win probability). The time difference is not conclusive.
-- The effect is what the simulator's assumptions put in; a real decision needs real reviewers. The experiment is still running in Flagsmith; no roll-out yet.
+- The effect is what the simulator's assumptions put in; a real decision needs real reviewers.
+- **Rolled out:** on 26 Nov 2026 (16:41 UTC) the experiment was completed with `vertical` as the winner (`python3 scripts/flagsmith_experiment.py --experiment flow_direction rollout --variant vertical`); Flagsmith now serves `vertical` to 100 % of identified reviewers. The viewer applies it to long flows only; short flows stay horizontal by design.
