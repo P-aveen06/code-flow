@@ -8,7 +8,7 @@ help:
 	@echo "test     Run Python tests, web build, and web tests"
 	@echo "lint     Check Python lint and formatting"
 	@echo "dev      Run the API and web dev servers (Ctrl-C stops both)"
-	@echo "flagsmith-setup          Provision the Flagsmith demo projects and write SDK keys to .env"
+	@echo "flagsmith-setup          Set up demo flags in the existing code-flow project"
 	@echo "flagsmith-setup-dry-run  Preview Flagsmith setup using read-only API requests"
 
 flagsmith-setup:

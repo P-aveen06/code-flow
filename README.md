@@ -56,25 +56,40 @@ Replace `<sha>` with one of the commit IDs printed by `analyze`.
    and set `FLAGSMITH_API_URL` to the instance's API base URL.
 2. In the Flagsmith dashboard, open **Organisation settings > API Keys**,
    create an organisation API key with admin access, and set
-   `FLAGSMITH_ADMIN_API_KEY` in `.env`.
+   `FLAGSMITH_ADMIN_API_KEY` in `.env`. Create a project named `code-flow`
+   in that organisation if you haven't already.
+   A personal API token with admin access also works.
 3. Have a local Flagsmith checkout at `data/repos/Flagsmith__flagsmith`.
    Run `make flagsmith-setup-dry-run` to preview the setup, then run
    `make flagsmith-setup`. Pass `--environment-json PATH` to the Python
    script to use another local checkout or a local export file.
 
-The script provisions the `Development` environment in `code-flow`,
-`shop-demo`, and `flagsmith-api`. It sets the `flow_view` experiment split to
-34% side by side, 33% overlay, and 33% overlay with a summary, turns on
-`flagsmith_mode`, and turns off `ai_summary`. It turns on `new_checkout` and
-`holiday_discount` in the shop demo and loads the Flagsmith API project's
-flag defaults from the local export. It writes the SDK keys into `.env`.
-The generated shop demo still reads `DEMO_APP_FLAGSMITH_SERVER_KEY` when run
-as a standalone app. Supply `SHOP_DEMO_FLAGSMITH_SERVER_KEY` under that
-legacy name in the demo's process environment.
+The script uses one existing environment in `code-flow`. It selects
+`Production` if available, then `Development`, then the sole environment if
+there is only one. To select an environment explicitly, run
+`python3 scripts/flagsmith_setup.py --dry-run --environment NAME` and use the
+same `--environment NAME` for the setup.
 
-If the script cannot enable the built-in warehouse, open `code-flow` →
-`Development` and select **Environment Settings > Warehouse > Flagsmith
-database > Enable**.
+The project uses three tags. These defaults apply to newly created flags.
+
+- `code-flow` groups `flow_view` (34% `side_by_side`, 33% `overlay`, 33%
+  `overlay_summary`), `flagsmith_mode` (on), and `ai_summary` (off).
+- `repo:flagsmith-api` groups the 13 flags from the local checkout's
+  `api/integrations/flagsmith/data/environment.json`, using the export's
+  enabled states and values.
+- `repo:shop-demo` groups `new_checkout` and `holiday_discount`, both on.
+
+The script adds missing tags to existing flags and reports differences from
+the defaults. It writes the selected environment's client-side key to
+`CODEFLOW_FLAGSMITH_ENV_KEY` and `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` for the web
+app, experiment, and simulator, and the server-side key to
+`CODEFLOW_FLAGSMITH_SERVER_KEY` for the server's Flagsmith mode. Flagsmith
+mode uses `data/flagsmith_scopes.json` to look up each repo's flags by its
+tag membership. Use `--scope-file PATH` to change the output location.
+
+If the script cannot enable the built-in warehouse, open the selected
+environment in `code-flow` and choose **Environment Settings > Warehouse >
+Flagsmith database > Enable**.
 
 ## License
 

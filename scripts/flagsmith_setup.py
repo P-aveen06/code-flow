@@ -1,4 +1,4 @@
-"""Provision the code-flow demo projects on a self-hosted Flagsmith instance."""
+"""Set up tagged demo flags in an existing code-flow Flagsmith project."""
 
 import argparse
 import fcntl
@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.client import HTTPException
@@ -18,9 +19,16 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 DEFAULT_API_URL = "http://localhost:8000/api/v1/"
-DEFAULT_CLONE = Path(__file__).resolve().parents[1] / "data/repos/Flagsmith__flagsmith"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DEFAULT_CLONE = DATA_DIR / "repos/Flagsmith__flagsmith"
+DEFAULT_SCOPE_FILE = DATA_DIR / "flagsmith_scopes.json"
 ENVIRONMENT_EXPORT = "api/integrations/flagsmith/data/environment.json"
-ENVIRONMENT_NAME = "Development"
+PROJECT_NAME = "code-flow"
+CODE_FLOW_TAG = "code-flow"
+REPO_ID_BY_TAG = {
+    "repo:shop-demo": "shop-demo",
+    "repo:flagsmith-api": "Flagsmith__flagsmith",
+}
 SERVER_KEY_NAME = "code-flow server"
 MANUAL_WAREHOUSE_STEP = "Environment Settings > Warehouse > Flagsmith database > Enable"
 
@@ -48,7 +56,7 @@ class NoRedirects(HTTPRedirectHandler):
 
 
 class AdminClient:
-    """Send JSON requests using organisation admin authentication."""
+    """Send JSON requests to the Flagsmith Admin API."""
 
     def __init__(self, api_url: str, admin_key: str):
         self.base_url = api_url.rstrip("/") + "/"
@@ -63,8 +71,25 @@ class AdminClient:
             raise SetupError("FLAGSMITH_API_URL must be an HTTP(S) API base URL.")
         self.admin_key = admin_key
         self.opener = build_opener(NoRedirects())
+        self._auth_scheme: str | None = None
 
     def request(self, method: str, path: str, data: Record | None = None) -> Any:
+        if self._auth_scheme is not None:
+            return self._request(method, path, data, self._auth_scheme)
+
+        # Organisation API keys use Api-Key. Personal API tokens use Token.
+        scheme = "Api-Key"
+        try:
+            result = self._request(method, path, data, scheme)
+        except AdminError as error:
+            if error.status != 401:
+                raise
+            scheme = "Token"
+            result = self._request(method, path, data, scheme)
+        self._auth_scheme = scheme
+        return result
+
+    def _request(self, method: str, path: str, data: Record | None, scheme: str) -> Any:
         url = urljoin(self.base_url, path)
         target = urlsplit(url)
         if (target.scheme, target.netloc) != (
@@ -72,7 +97,7 @@ class AdminClient:
             self.base.netloc,
         ) or not target.path.startswith(self.base.path):
             raise SetupError("Flagsmith returned a pagination link outside the API base URL.")
-        headers = {"Authorization": f"Api-Key {self.admin_key}", "Accept": "application/json"}
+        headers = {"Authorization": f"{scheme} {self.admin_key}", "Accept": "application/json"}
         body = None
         if data is not None:
             headers["Content-Type"] = "application/json"
@@ -189,148 +214,106 @@ def load_flagsmith_api_defaults(path: Path) -> list[Flag]:
         ) from None
 
 
-def find_by_name(
-    records: list[Record], name: str, resource: str, *, ignore_case: bool = False
-) -> Record | None:
-    if ignore_case:
-        matches = [record for record in records if record["name"].casefold() == name.casefold()]
-    else:
-        matches = [record for record in records if record["name"] == name]
+def find_record(records: list[Record], field: str, value: str, resource: str) -> Record | None:
+    matches = [record for record in records if record[field] == value]
     if len(matches) > 1:
         raise SetupError(f"Flagsmith has multiple matching {resource} records.")
     return matches[0] if matches else None
 
 
-def ensure_project(
-    client: AdminClient, projects: list[Record], organisation: int, name: str, dry_run: bool
-) -> tuple[Record | None, str]:
-    project = find_by_name(projects, name, "project")
-    if project is not None:
-        return project, "unchanged"
-    if not dry_run:
-        project = client.request("POST", "projects/", {"name": name, "organisation": organisation})
-    return project, "created"
+def select_environment(environments: list[Record], name: str | None) -> Record:
+    if name is not None:
+        environment = find_record(environments, "name", name, "environment")
+        if environment is None:
+            raise SetupError(
+                "The environment specified by --environment was not found in code-flow."
+            )
+        return environment
+    for preferred_name in ("Production", "Development"):
+        environment = find_record(environments, "name", preferred_name, "environment")
+        if environment is not None:
+            return environment
+    if len(environments) == 1:
+        return environments[0]
+    if not environments:
+        raise SetupError("Create an environment in the code-flow project first.")
+    raise SetupError("Use --environment NAME to select an environment in code-flow.")
 
 
-def ensure_environment(
-    client: AdminClient, project: Record | None, dry_run: bool
-) -> tuple[Record | None, str]:
-    if project is None:
-        return None, "created"
-    project_id = project["id"]
-    environments = client.list(f"projects/{project_id}/environments/")
-    environment = find_by_name(environments, ENVIRONMENT_NAME, "environment")
-    if environment is not None:
-        return environment, "unchanged"
-    if not dry_run:
-        environment = client.request(
-            "POST", "environments/", {"name": ENVIRONMENT_NAME, "project": project_id}
-        )
-    return environment, "created"
+def ensure_tag(
+    client: AdminClient, path: str, tags: list[Record], label: str, dry_run: bool
+) -> int | None:
+    tag = find_record(tags, "label", label, "tag")
+    if tag is not None:
+        return tag["id"]
+    if dry_run:
+        print(f"Would create tag {label}.")
+        return None
+    tag = client.request("POST", path, {"label": label})
+    print(f"Created tag {label}.")
+    return tag["id"]
 
 
-def matching_variant(
-    options: list[Record], variant: Variant, desired_keys: set[str]
-) -> Record | None:
-    for option in options:
-        if variant.key is not None and option.get("key") == variant.key:
-            return option
-    fields = value_fields(variant.value)
-    value_field = next(field for field in fields if field != "type")
-    return next(
-        (
-            option
-            for option in options
-            if option.get("key") not in desired_keys
-            and option["type"] == fields["type"]
-            and same_value(option[value_field], variant.value)
-        ),
-        None,
-    )
-
-
-def ensure_multivariate(
-    client: AdminClient,
-    feature_path: str,
-    feature: Record,
-    variants: tuple[Variant, ...],
-    dry_run: bool,
-) -> tuple[dict[int, float], bool]:
-    """Find or add options and return the desired weights for Development."""
-    path = f"{feature_path}{feature['id']}/mv-options/"
-    options = list(feature["multivariate_options"])
-    desired_keys = {variant.key for variant in variants if variant.key is not None}
+def create_flag(
+    client: AdminClient, path: str, environment: Record, flag: Flag, tag_id: int
+) -> Record:
+    # Flagsmith creates a state in every environment. Apply the defaults only in the selected one.
+    feature = client.request("POST", path, {"name": flag.name, "type": flag.kind, "tags": [tag_id]})
+    feature_id = feature["id"]
     weights = {}
-    changed = False
-    for variant in variants:
-        option = matching_variant(options, variant, desired_keys)
-        fields = value_fields(variant.value)
-        if option is None:
-            changed = True
-            if dry_run:
-                continue
-            # Adding an option adds a weight to every environment in this project.
-            # Set Development's weight separately so other environments keep their split.
-            data = {"feature": feature["id"], "default_percentage_allocation": 0, **fields}
-            if variant.key is not None:
-                data["key"] = variant.key
-            option = client.request("POST", path, data)
-        elif any(not same_value(option[field], value) for field, value in fields.items()):
-            changed = True
-            if not dry_run:
-                option = client.request(
-                    "PUT",
-                    f"{path}{option['id']}/",
-                    {
-                        "feature": feature["id"],
-                        "key": option.get("key"),
-                        "default_percentage_allocation": option["default_percentage_allocation"],
-                        **fields,
-                    },
-                )
-        options = [entry for entry in options if entry["id"] != option["id"]]
+    for variant in flag.variants:
+        data = {
+            "feature": feature_id,
+            "default_percentage_allocation": 0,
+            **value_fields(variant.value),
+        }
+        if variant.key is not None:
+            data["key"] = variant.key
+        option = client.request("POST", f"{path}{feature_id}/mv-options/", data)
         weights[option["id"]] = variant.allocation
-    return weights, changed
+    initialize_flag_state(client, environment, feature_id, flag, weights)
+    return feature
 
 
-def reconcile_flag_state(
+def get_flag_state(client: AdminClient, environment: Record, feature_id: int) -> Record | None:
+    path = f"environments/{environment['api_key']}/featurestates/?feature={feature_id}"
+    states = client.list(path)
+    if len(states) > 1:
+        raise SetupError("Flagsmith returned multiple live states for one environment flag.")
+    return states[0] if states else None
+
+
+def initialize_flag_state(
     client: AdminClient,
     environment: Record,
     feature_id: int,
     flag: Flag,
     weights: dict[int, float],
-    dry_run: bool,
-) -> bool:
-    path = f"environments/{environment['api_key']}/featurestates/?feature={feature_id}"
-    states = client.list(path)
-    if len(states) != 1:
-        raise SetupError("Flagsmith did not return exactly one live environment flag state.")
-    state = states[0]
+) -> None:
+    state = get_flag_state(client, environment, feature_id)
+    if state is None:
+        raise SetupError("Flagsmith did not create an initial state for the new flag.")
     weight_rows = {
         row["multivariate_feature_option"]: row
         for row in state["multivariate_feature_state_values"]
     }
     actual_weights = {option: row["percentage_allocation"] for option, row in weight_rows.items()}
-    # Keep unused options in the project and leave their Development allocation at zero.
-    desired_weights = dict.fromkeys(weight_rows, 0) | weights
     if (
         state["enabled"] == flag.enabled
         and same_value(state["feature_state_value"], flag.value)
-        and actual_weights == desired_weights
+        and actual_weights == weights
     ):
-        return False
-    if dry_run:
-        return True
+        return
 
     data = {"enabled": flag.enabled, "feature_state_value": value_fields(flag.value)}
-    if actual_weights != desired_weights:
+    if actual_weights != weights:
         data["multivariate_feature_state_values"] = [
             {
                 **({"id": weight_rows[option]["id"]} if option in weight_rows else {}),
                 "multivariate_feature_option": option,
                 "percentage_allocation": allocation,
             }
-            for option, allocation in desired_weights.items()
+            for option, allocation in weights.items()
         ]
     environment_id = environment["id"]
     if environment["use_v2_feature_versioning"]:
@@ -345,70 +328,92 @@ def reconcile_flag_state(
             f"features/featurestates/{state['id']}/",
             {"environment": environment_id, **data},
         )
-    return True
 
 
-def ensure_flag(
-    client: AdminClient,
-    project: Record | None,
-    environment: Record | None,
-    features: list[Record],
-    flag: Flag,
-    dry_run: bool,
-) -> str:
-    feature = find_by_name(features, flag.name, "flag", ignore_case=True)
-    created = feature is None
-    if created and dry_run:
-        return "created"
-    path = f"projects/{project['id']}/features/"
-    changed = False
-    if created:
-        feature = client.request(
-            "POST",
-            path,
-            {
-                "name": flag.name,
-                "type": flag.kind,
-                "default_enabled": flag.enabled,
-                "initial_value": str(flag.value) if flag.value is not None else None,
-            },
+def show_value(value: FlagValue) -> str:
+    # Remote strings and custom export values may contain credentials.
+    if isinstance(value, str) and value not in ("", "side_by_side", "overlay", "overlay_summary"):
+        return "<redacted>"
+    return json.dumps(value)
+
+
+def show_state(enabled: bool, value: FlagValue, variants: tuple[Variant, ...]) -> str:
+    status = "on" if enabled else "off"
+    parts = [status, show_value(value)]
+    if variants:
+        control = 100 - sum(variant.allocation for variant in variants)
+        parts[-1] += f" {control:g}%"
+        parts.extend(f"{show_value(variant.value)} {variant.allocation:g}%" for variant in variants)
+    return ", ".join(parts)
+
+
+def report_drift(client: AdminClient, environment: Record, feature: Record, flag: Flag) -> None:
+    state = get_flag_state(client, environment, feature["id"])
+    if state is None:
+        print(f"{flag.name} differs from defaults (no live state).")
+        return
+    weights = {
+        row["multivariate_feature_option"]: row["percentage_allocation"]
+        for row in state["multivariate_feature_state_values"]
+    }
+    value_fields_by_type = {
+        "unicode": "string_value",
+        "int": "integer_value",
+        "bool": "boolean_value",
+    }
+    variants = tuple(
+        Variant(
+            option[value_fields_by_type.get(option["type"], "string_value")],
+            weights.get(option["id"], 0),
+            option.get("key"),
         )
-    else:
-        changes = {}
-        if feature["name"] != flag.name:
-            raise SetupError(
-                "An existing Flagsmith flag uses different casing for the requested name."
-            )
-        if feature["type"] != flag.kind:
-            changes["type"] = flag.kind
-        if feature["is_archived"]:
-            changes["is_archived"] = False
-        if changes:
-            changed = True
-            if not dry_run:
-                # Flagsmith replaces metadata even when PATCH omits it.
-                changes["metadata"] = feature.get("metadata", [])
-                client.request("PATCH", f"{path}{feature['id']}/", changes)
-    weights, options_changed = ensure_multivariate(client, path, feature, flag.variants, dry_run)
-    if environment is not None:
-        state_changed = reconcile_flag_state(
-            client, environment, feature["id"], flag, weights, dry_run
+        for option in feature["multivariate_options"]
+    )
+    live_value = state["feature_state_value"]
+    live_enabled = state["enabled"]
+    if (
+        live_enabled != flag.enabled
+        or not same_value(live_value, flag.value)
+        or Counter((type(variant.value), variant) for variant in variants)
+        != Counter((type(variant.value), variant) for variant in flag.variants)
+        or feature["type"] != flag.kind
+    ):
+        print(
+            f"{flag.name} differs from defaults "
+            f"(current {feature['type']} {show_state(live_enabled, live_value, variants)} | "
+            f"expected {flag.kind} {show_state(flag.enabled, flag.value, flag.variants)})."
         )
-        changed = changed or state_changed
-    if created:
-        return "created"
-    return "updated" if changed or options_changed else "unchanged"
 
 
-def ensure_server_key(client: AdminClient, environment: Record | None, dry_run: bool) -> str | None:
-    if environment is None:
-        return None
+def add_tag_to_flag(
+    client: AdminClient, path: str, feature: Record, label: str, tag_id: int | None, dry_run: bool
+) -> None:
+    if tag_id in feature["tags"]:
+        return
+    if dry_run:
+        print(f"Would add tag {label} to {feature['name']}.")
+        return
+    detail_path = f"{path}{feature['id']}/"
+    latest = client.request("GET", detail_path)
+    if tag_id not in latest["tags"]:
+        # Flagsmith replaces metadata even when PATCH omits it.
+        client.request(
+            "PATCH",
+            detail_path,
+            {"tags": [*latest["tags"], tag_id], "metadata": latest["metadata"]},
+        )
+        print(f"Added tag {label} to {feature['name']}.")
+
+
+def ensure_server_key(client: AdminClient, environment: Record, dry_run: bool) -> str | None:
     path = f"environments/{environment['api_key']}/api-keys/"
-    key = find_by_name(client.list(path), SERVER_KEY_NAME, "server key")
+    key = find_record(client.list(path), "name", SERVER_KEY_NAME, "server key")
     if key is None:
         if dry_run:
+            print(f"Would create server-side key {SERVER_KEY_NAME}.")
             return None
         key = client.request("POST", path, {"name": SERVER_KEY_NAME, "active": True})
+        print(f"Created server-side key {SERVER_KEY_NAME}.")
     expires_at = key.get("expires_at")
     if not key["active"] or (
         expires_at and datetime.fromisoformat(expires_at) <= datetime.now(UTC)
@@ -417,12 +422,7 @@ def ensure_server_key(client: AdminClient, environment: Record | None, dry_run: 
     return key["key"]
 
 
-def ensure_warehouse(client: AdminClient, environment: Record | None, dry_run: bool) -> None:
-    if environment is None:
-        print(
-            "Would check whether the Flagsmith database can be enabled for code-flow/Development."
-        )
-        return
+def ensure_warehouse(client: AdminClient, environment: Record, dry_run: bool) -> None:
     path = f"environments/{environment['api_key']}/warehouse-connections/"
     try:
         connections = client.list(f"{path}?exclude_event_stats=true")
@@ -434,18 +434,18 @@ def ensure_warehouse(client: AdminClient, environment: Record | None, dry_run: b
                 print("Flagsmith database warehouse unchanged.")
                 return
         if connections:
-            print("code-flow/Development already has a different warehouse connection.")
-        elif dry_run:
+            print("The selected environment already has a different warehouse connection.")
+            return
+        if dry_run:
             print("Would enable the Flagsmith database warehouse.")
             return
-        else:
-            client.request(
-                "POST",
-                path,
-                {"warehouse_type": "postgres", "config": {"source": "flagsmith_database"}},
-            )
-            print("Enabled the Flagsmith database warehouse.")
-            return
+        client.request(
+            "POST",
+            path,
+            {"warehouse_type": "postgres", "config": {"source": "flagsmith_database"}},
+        )
+        print("Enabled the Flagsmith database warehouse.")
+        return
     except AdminError as error:
         if error.status not in (400, 403, 404, 405, 501):
             raise
@@ -486,6 +486,19 @@ def read_env(path: Path) -> dict[str, str]:
             _, value, _ = split_env_value(match["value"])
             settings[match["name"].decode()] = unquote(value).decode("utf-8", "surrogateescape")
     return settings
+
+
+def replace_file(path: Path, content: bytes) -> None:
+    """Write a complete file before replacing its destination."""
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        temporary.write_bytes(content)
+        if path.exists():
+            temporary.chmod(path.stat().st_mode & 0o777)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def update_env_file(path: Path, values: dict[str, str | None], dry_run: bool = False) -> list[str]:
@@ -529,21 +542,45 @@ def update_env_file(path: Path, values: dict[str, str | None], dry_run: bool = F
         if missing and lines and not lines[-1].endswith((b"\n", b"\r")):
             lines.append(separator)
         lines.extend(name + b"=" + encoded[name] + separator for name in missing)
-        # Replace in place only after a complete write, preserving file permissions.
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-        try:
-            temporary.write_bytes(b"".join(lines))
-            temporary.chmod(path.stat().st_mode & 0o777)
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        replace_file(path, b"".join(lines))
     return [name for name in values if name.encode() in changed]
 
 
-def setup(client: AdminClient, defaults: list[Flag], env_file: Path, dry_run: bool) -> None:
-    projects_and_flags = {
-        "code-flow": [
+def write_scopes(
+    path: Path,
+    environment_name: str,
+    tag_names: dict[str, set[str]],
+    dry_run: bool,
+) -> None:
+    scopes = {
+        "schema": "code-flow/flagsmith-scopes@1",
+        "project": PROJECT_NAME,
+        "environment": environment_name,
+        "repos": {repo_id: sorted(tag_names[tag]) for tag, repo_id in REPO_ID_BY_TAG.items()},
+        "code_flow_flags": sorted(tag_names[CODE_FLOW_TAG]),
+    }
+    content = (json.dumps(scopes, indent=2) + "\n").encode()
+    if path.exists() and path.read_bytes() == content:
+        return
+    if dry_run:
+        print("Would write the Flagsmith scope file from project tags.")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        replace_file(path, content)
+        print("Wrote the Flagsmith scope file from project tags.")
+
+
+def setup(
+    client: AdminClient,
+    defaults: list[Flag],
+    env_file: Path,
+    dry_run: bool,
+    *,
+    environment_name: str | None = None,
+    scope_file: Path = DEFAULT_SCOPE_FILE,
+) -> None:
+    groups = {
+        CODE_FLOW_TAG: [
             Flag(
                 "flow_view",
                 True,
@@ -557,53 +594,70 @@ def setup(client: AdminClient, defaults: list[Flag], env_file: Path, dry_run: bo
             Flag("flagsmith_mode", True),
             Flag("ai_summary", False),
         ],
-        "shop-demo": [Flag("new_checkout", True), Flag("holiday_discount", True)],
-        "flagsmith-api": defaults,
+        "repo:flagsmith-api": defaults,
+        "repo:shop-demo": [Flag("new_checkout", True), Flag("holiday_discount", True)],
     }
+    scope_file = scope_file.resolve()
+    if scope_file == env_file.resolve():
+        raise SetupError("Use different paths for the environment and scope files.")
+
     organisations = client.list("organisations/")
     if len(organisations) != 1:
         raise SetupError("The admin API key must identify exactly one Flagsmith organisation.")
     organisation = organisations[0]["id"]
     projects = client.list(f"projects/?organisation={organisation}")
-    summary = {
-        group: {action: [] for action in ("created", "updated", "unchanged")}
-        for group in ("Projects", "Environments", "Flags")
-    }
-    keys = {}
-    for name, flags in projects_and_flags.items():
-        project, action = ensure_project(client, projects, organisation, name, dry_run)
-        summary["Projects"][action].append(name)
-        environment, action = ensure_environment(client, project, dry_run)
-        location = f"{name}/{ENVIRONMENT_NAME}"
-        summary["Environments"][action].append(location)
-        features = client.list(f"projects/{project['id']}/features/") if project else []
-        for flag in flags:
-            action = ensure_flag(client, project, environment, features, flag, dry_run)
-            status = "on" if flag.enabled else "off"
-            if name == "code-flow" and flag.name == "flow_view":
-                status += ", side_by_side 34%, overlay 33%, overlay_summary 33%"
-            summary["Flags"][action].append(f"{name}/{flag.name} ({status})")
-        if name == "code-flow":
-            key = environment["api_key"] if environment is not None else None
-            keys["CODEFLOW_FLAGSMITH_ENV_KEY"] = key
-            keys["VITE_CODEFLOW_FLAGSMITH_ENV_KEY"] = key
-            ensure_warehouse(client, environment, dry_run)
-        else:
-            variable = (
-                "SHOP_DEMO_FLAGSMITH_SERVER_KEY"
-                if name == "shop-demo"
-                else "FLAGSMITH_API_FLAGSMITH_SERVER_KEY"
-            )
-            keys[variable] = ensure_server_key(client, environment, dry_run)
+    project = find_record(projects, "name", PROJECT_NAME, "project")
+    if project is None:
+        raise SetupError("Create a project named code-flow in the Flagsmith dashboard first.")
+    project_path = f"projects/{project['id']}/"
+    environment = select_environment(client.list(f"{project_path}environments/"), environment_name)
+    print(f"Using Flagsmith environment {PROJECT_NAME}/{environment['name']}.")
 
-    label = ".env" if env_file == Path(".env") else "the environment file"
+    tags_path = f"{project_path}tags/"
+    project_tags = client.list(tags_path)
+    feature_path = f"{project_path}features/"
+    features = {feature["name"].casefold(): feature for feature in client.list(feature_path)}
+    tag_ids = {}
+    for label, flags in groups.items():
+        tag_id = ensure_tag(client, tags_path, project_tags, label, dry_run)
+        tag_ids[label] = tag_id
+        for flag in flags:
+            name = flag.name.casefold()
+            if feature := features.get(name):
+                report_drift(client, environment, feature, flag)
+                add_tag_to_flag(client, feature_path, feature, label, tag_id, dry_run)
+            else:
+                verb = "Would create" if dry_run else "Created"
+                if tag_id is not None and not dry_run:
+                    features[name] = create_flag(client, feature_path, environment, flag, tag_id)
+                print(
+                    f"{verb} flag {flag.name} with tag {label} "
+                    f"({show_state(flag.enabled, flag.value, flag.variants)})."
+                )
+
+    client_key = environment["api_key"]
+    keys = {
+        "CODEFLOW_FLAGSMITH_ENV_KEY": client_key,
+        "VITE_CODEFLOW_FLAGSMITH_ENV_KEY": client_key,
+        "CODEFLOW_FLAGSMITH_SERVER_KEY": ensure_server_key(client, environment, dry_run),
+    }
+    ensure_warehouse(client, environment, dry_run)
+
+    # Read the actual tag memberships after writing. For a preview, include planned attachments.
+    tagged_features = features.values() if dry_run else client.list(feature_path)
+    tag_names = {
+        label: {feature["name"] for feature in tagged_features if tag_id in feature["tags"]}
+        for label, tag_id in tag_ids.items()
+    }
+    if dry_run:
+        for label, flags in groups.items():
+            for flag in flags:
+                feature = features.get(flag.name.casefold())
+                tag_names[label].add(feature["name"] if feature else flag.name)
     for variable in update_env_file(env_file, keys, dry_run):
-        verb = "would write" if dry_run else "wrote"
-        print(f"{verb} {variable} to {label}")
-    for group, actions in summary.items():
-        for action, names in actions.items():
-            if names:
-                print(f"{group} {action} ({len(names)}) — {', '.join(names)}")
+        verb = "Would write" if dry_run else "Wrote"
+        print(f"{verb} {variable} to the environment file.")
+    write_scopes(scope_file, environment["name"], tag_names, dry_run)
 
 
 def main() -> int:
@@ -613,6 +667,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--env-file", type=Path, default=Path(".env"), help="Environment file (default .env)."
+    )
+    parser.add_argument(
+        "--environment",
+        metavar="NAME",
+        help="Choose an existing environment (default Production, Development, or the only one).",
+    )
+    parser.add_argument(
+        "--scope-file",
+        type=Path,
+        default=DEFAULT_SCOPE_FILE,
+        help="Scope file to generate (default data/flagsmith_scopes.json).",
     )
     parser.add_argument(
         "--environment-json",
@@ -628,24 +693,23 @@ def main() -> int:
             raise SetupError("Set FLAGSMITH_ADMIN_API_KEY in the environment file.")
         defaults = load_flagsmith_api_defaults(args.environment_json)
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
+        options = {"environment_name": args.environment, "scope_file": args.scope_file}
         if args.dry_run:
-            print("Dry run. The summary includes proposed changes.")
-            setup(client, defaults, args.env_file, dry_run=True)
+            print("Dry run.")
+            setup(client, defaults, args.env_file, dry_run=True, **options)
         else:
             # Serialise setup in this checkout. Flagsmith does not enforce unique key names.
             directory = os.open(Path(__file__).resolve().parent, os.O_RDONLY)
             try:
                 fcntl.flock(directory, fcntl.LOCK_EX)
-                setup(client, defaults, args.env_file, dry_run=False)
+                setup(client, defaults, args.env_file, dry_run=False, **options)
             finally:
                 os.close(directory)
     except SetupError as error:
         print(f"Flagsmith setup failed. {error}", file=sys.stderr)
         return 1
     except OSError:
-        print(
-            "Flagsmith setup failed. Could not read or write the environment file.", file=sys.stderr
-        )
+        print("Flagsmith setup failed. Could not read or write a setup file.", file=sys.stderr)
         return 1
     except (KeyError, TypeError, ValueError):
         print("Flagsmith setup failed. The Admin API URL or response was invalid.", file=sys.stderr)
