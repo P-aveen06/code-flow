@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  chooseFlowView, FLOW_DIRECTIONS, FLOW_VIEWS, readDirectionOverride, readViewOverride,
+  chooseFlowView, FLOW_DIRECTIONS, FLOW_VIEWS, readPreviewOverrides,
   replaceDirectionOverride, replaceViewOverride,
 } from "./view";
 
@@ -19,8 +19,22 @@ describe("chooseFlowView", () => {
     ["?view=", "side_by_side"],
   ])("skips experiment exposure for %s", (search, expected) => {
     const readExperimentValue = vi.fn(() => "overlay");
-    expect(chooseFlowView(readViewOverride(search), readExperimentValue)).toBe(expected);
+    expect(chooseFlowView(readPreviewOverrides(search, true).viewOverride, readExperimentValue)).toBe(expected);
     expect(readExperimentValue).not.toHaveBeenCalled();
+  });
+});
+
+describe("readPreviewOverrides", () => {
+  const search = "?view=overlay&direction=horizontal&commit=abc";
+
+  it("reads both URL overrides with previews enabled", () => {
+    expect(readPreviewOverrides(search, true)).toEqual({ viewOverride: "overlay", directionOverride: "horizontal" });
+  });
+
+  it("ignores both URL overrides with previews disabled", () => {
+    const overrides = readPreviewOverrides(search, false);
+    expect(overrides).toEqual({ viewOverride: null, directionOverride: null });
+    expect(chooseFlowView(overrides.viewOverride, () => "overlay_summary")).toBe("overlay_summary");
   });
 });
 
@@ -70,7 +84,7 @@ describe("replaceViewOverride", () => {
   it("clears the direction preview and preserves other parameters", () => {
     const page = repo + query + "&view=overlay_summary";
     const { state, replaceState } = mockLocation(page + "&direction=vertical#flow");
-    expect(readDirectionOverride(window.location.search)).toBe("vertical");
+    expect(readPreviewOverrides(window.location.search, true).directionOverride).toBe("vertical");
     replaceDirectionOverride(null);
     expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(page + "#flow"));
   });

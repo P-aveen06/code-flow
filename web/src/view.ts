@@ -6,8 +6,9 @@ export type FlowDirection = "horizontal" | "vertical";
 export const FLOW_VIEWS: readonly FlowView[] = ["side_by_side", "overlay", "overlay_summary"];
 export const FLOW_DIRECTIONS: readonly FlowDirection[] = ["horizontal", "vertical"];
 
-export function readViewOverride(search: string): string | null {
-  return new URLSearchParams(search).get("view");
+export function readPreviewOverrides(search: string, previewEnabled: boolean) {
+  const params = new URLSearchParams(previewEnabled ? search : "");
+  return { viewOverride: params.get("view"), directionOverride: params.get("direction") };
 }
 
 export function chooseFlowView(override: string | null, readExperimentValue: () => unknown): FlowView {
@@ -20,10 +21,6 @@ export function parseFlowView(value: unknown): FlowView | null {
 
 export function parseFlowDirection(value: unknown): FlowDirection | null {
   return FLOW_DIRECTIONS.find((direction) => direction === value) ?? null;
-}
-
-export function readDirectionOverride(search: string): string | null {
-  return new URLSearchParams(search).get("direction");
 }
 
 export function replaceViewOverride(view: FlowView | null) {

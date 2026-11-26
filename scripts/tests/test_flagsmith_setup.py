@@ -21,6 +21,7 @@ class FakeAdminClient:
         self.environments = []
         self.tags = []
         self.features = []
+        self.experiments = {}
         self.states = {}
         self.keys = {}
         self.warehouses = {}
@@ -143,6 +144,8 @@ class FakeAdminClient:
             case "GET", ["environments", api_key, "featurestates"]:
                 environment = self.environment_for_key(api_key)
                 return [self.states[environment["id"], int(params["feature"][0])]]
+            case "GET", ["environments", api_key, "experiments"]:
+                return self.experiments.get(self.environment_for_key(api_key)["id"], [])
             case "PATCH", ["features", "featurestates", state_id]:
                 state = next(row for row in self.states.values() if row["id"] == int(state_id))
                 assert data["environment"] == state["environment"]
@@ -308,6 +311,10 @@ def test_environment_selection_uses_one_environment(
         assert not scope_file.exists()
     assert set(client.warehouses) == {selected["id"]}
     for env in environments:
+        feature, preview = client.project_flag(env, "variant_preview")
+        assert feature["type"] == "STANDARD"
+        assert preview["enabled"] is (env["name"] != "Production")
+        assert preview["feature_state_value"] is None
         _, state = client.project_flag(env, "flow_view")
         assert state["enabled"] is (env == selected)
         assert state["feature_state_value"] == ("side_by_side" if env == selected else None)
@@ -370,6 +377,8 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     for row, allocation in zip(drifted["multivariate_feature_state_values"], (60, 10), strict=True):
         row["percentage_allocation"] = allocation
     # flow_direction still has the empty Development state created with the project flag.
+    _, preview_state = client.project_flag(development, "variant_preview")
+    preview_state.update(enabled=False, feature_state_value="legacy-value")
     before_production = copy.deepcopy(
         {key: state for key, state in client.states.items() if key[0] == production["id"]}
     )
@@ -394,6 +403,8 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert setup_script.main() == 0
     preview = capsys.readouterr().out
     assert "Would set flow_view" in preview and "Would set flow_direction" in preview
+    assert "Would set variant_preview to on, null." in preview
+    assert preview_state["enabled"] is False
     assert all(method == "GET" for method, _ in client.calls)
     assert env_file.read_bytes() == before_env
     assert scope_file.read_bytes() == before_scope
@@ -412,7 +423,9 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert scope_file.read_bytes() == before_scope
     assert {key: client.states[key] for key in before_production} == before_production
     assert all(production["api_key"] not in path for _, path in client.calls)
-    assert len(client.features) == len(defaults) + 6
+    assert len(client.features) == len(defaults) + 7
+    assert preview_state["enabled"] is True
+    assert preview_state["feature_state_value"] is None
     assert set(client.keys) == {production["id"]}
     assert set(client.warehouses) == {production["id"], development["id"]}
     for flag_name, control, expected in (
@@ -434,6 +447,67 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     client.calls.clear()
     assert setup_script.main() == 0
     assert all(method == "GET" for method, _ in client.calls)
+
+
+@pytest.mark.parametrize(
+    ("status", "dry_run", "skip"),
+    [
+        ("running", False, True),
+        ("running", True, True),
+        ("paused", False, True),
+        ("completed", False, False),
+        ("created", False, False),
+        ("draft", False, False),
+    ],
+)
+def test_development_protects_active_experiment_states(
+    env_file, scope_file, capsys, status, dry_run, skip
+):
+    client = FakeAdminClient()
+    project = client.add_project()
+    production = client.add_environment(project, "Production")
+    development = client.add_environment(project, "Development", versioned=True)
+    options = {"environment_name": "Development", "scope_file": scope_file}
+    setup_script.setup(client, [], env_file, dry_run=False, **options)
+
+    feature, state = client.project_flag(development, "flow_view")
+    for row in state["multivariate_feature_state_values"]:
+        row["percentage_allocation"] = 0
+    before = copy.deepcopy(state)
+    experiment = {"feature": {"id": feature["id"]}, "name": "Flow layout", "status": status}
+    client.experiments[development["id"]] = [experiment]
+    client.experiments[production["id"]] = [
+        {**experiment, "name": "Production layout", "status": "running"}
+    ]
+    client.calls.clear()
+    capsys.readouterr()
+
+    setup_script.setup(client, [], env_file, dry_run=dry_run, **options)
+
+    output = capsys.readouterr().out
+    assert [path for _, path in client.calls if path.endswith("/experiments/")] == [
+        f"environments/{development['api_key']}/experiments/"
+    ]
+    if skip:
+        message = (
+            f'Skipping flow_view: experiment "Flow layout" is {status} in Development; '
+            "Flagsmith manages its state."
+        )
+        assert output.splitlines().count(message) == 1
+        assert "set flow_view" not in output.lower()
+        assert all(method == "GET" for method, _ in client.calls)
+        assert state == before
+    else:
+        assert "Skipping flow_view" not in output
+        assert "Set flow_view to on" in output
+        assert (
+            "POST",
+            f"environments/{development['id']}/features/{feature['id']}/versions/",
+        ) in client.calls
+        allocations = [
+            row["percentage_allocation"] for row in state["multivariate_feature_state_values"]
+        ]
+        assert allocations == [33, 33]
 
 
 def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_file, capsys):
@@ -458,7 +532,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         )
         == 3
     )
-    assert len(client.features) == len(defaults) + 6
+    assert len(client.features) == len(defaults) + 7
     assert len(client.keys[environment["id"]]) == 1
 
     feature, state = client.project_flag(environment, "flow_view")
@@ -491,6 +565,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
     for name, enabled in [
         ("flagsmith_mode", True),
         ("ai_summary", False),
+        ("variant_preview", False),
         ("new_checkout", True),
         ("holiday_discount", True),
     ]:
@@ -512,7 +587,13 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
             "shop-demo": ["holiday_discount", "new_checkout"],
             "Flagsmith__flagsmith": sorted(flag.name for flag in defaults),
         },
-        "code_flow_flags": ["ai_summary", "flagsmith_mode", "flow_direction", "flow_view"],
+        "code_flow_flags": [
+            "ai_summary",
+            "flagsmith_mode",
+            "flow_direction",
+            "flow_view",
+            "variant_preview",
+        ],
     }
 
     first = capsys.readouterr()
@@ -533,6 +614,58 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
     scopes = scope_file.read_text()
     for secret in [*settings.values(), "test-export-secret", "test-nonpublic-config-value"]:
         assert secret not in first.out + first.err + second.out + second.err + scopes
+
+
+def test_production_preserves_existing_rollouts_and_preview_state(env_file, scope_file, capsys):
+    client = FakeAdminClient()
+    project = client.add_project()
+    production = client.add_environment(project, "Production")
+    client.add_environment(project, "Development")
+    setup_script.setup(client, [], env_file, dry_run=False, scope_file=scope_file)
+
+    for name, winner in (
+        ("flow_view", "overlay_summary"),
+        ("flow_direction", "vertical"),
+    ):
+        _, state = client.project_flag(production, name)
+        state["feature_state_value"] = winner
+        for row in state["multivariate_feature_state_values"]:
+            row["percentage_allocation"] = 0
+    _, preview_state = client.project_flag(production, "variant_preview")
+    preview_state["enabled"] = True
+    before = copy.deepcopy(client.states)
+    client.calls.clear()
+    capsys.readouterr()
+
+    setup_script.setup(client, [], env_file, dry_run=False, scope_file=scope_file)
+
+    assert client.states == before
+    assert client.calls and all(method == "GET" for method, _ in client.calls)
+    output = capsys.readouterr().out
+    for name in ("flow_view", "flow_direction", "variant_preview"):
+        assert f"{name} differs from defaults" in output
+
+
+@pytest.mark.parametrize(("environment", "state"), [("Production", "off"), ("Development", "on")])
+def test_dry_run_lists_preview_default(env_file, scope_file, capsys, environment, state):
+    client = FakeAdminClient()
+    project = client.add_project()
+    client.add_environment(project, "Production")
+    client.add_environment(project, "Development")
+
+    setup_script.setup(
+        client,
+        [],
+        env_file,
+        dry_run=True,
+        scope_file=scope_file,
+        environment_name=environment,
+    )
+
+    assert all(method == "GET" for method, _ in client.calls)
+    assert f"Would create flag variant_preview with tag code-flow ({state}, null)." in (
+        capsys.readouterr().out
+    )
 
 
 def test_existing_flag_only_gets_missing_tag_and_scope_uses_actual_tags(

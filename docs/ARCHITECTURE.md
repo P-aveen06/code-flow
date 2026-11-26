@@ -239,21 +239,23 @@ and responses use full SHAs.
 ## Flags that control code-flow itself
 
 Paveen's free, self-hosted Flagsmith organisation has room for one project.
-All flags use the existing `code-flow` project and one environment. The setup
-script selects Production if present, falls back to Development, and prints
-the selected environment.
+Flags are defined in the `code-flow` project and have a state in each
+environment. The setup script selects Production by default and accepts
+`--environment` for Development or another simulation environment.
+On creation, `variant_preview` starts off in Production and on in the
+simulation environments. Later Production runs report any state differences.
 
 | Tag | Flags |
 |---|---|
-| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary` |
+| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
 | `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
 | `repo:shop-demo` | `new_checkout`, `holiday_discount` |
 
-The web app, experiment, and simulator share one client-side environment key.
-The setup script writes the same key to `CODEFLOW_FLAGSMITH_ENV_KEY` and
-`VITE_CODEFLOW_FLAGSMITH_ENV_KEY`. Flagsmith mode uses the environment's
-server-side key, `CODEFLOW_FLAGSMITH_SERVER_KEY`. See `.env.example` for
-configuration.
+The web app uses `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` and the API server uses
+`CODEFLOW_FLAGSMITH_SERVER_KEY`. Use Development keys for `develop` and
+Production keys for `main`. Production setup writes both web and server keys
+to `.env`. Development setup writes `CODEFLOW_SIM_FLAGSMITH_ENV_KEY`, which is
+also the web client key for Development. See `.env.example` for configuration.
 
 | Flag | Type | Purpose |
 |---|---|---|
@@ -261,14 +263,19 @@ configuration.
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
 | `flagsmith_mode` | boolean | Turns Flagsmith mode on or off (Paveen's decision). When off, the panel and live colouring are hidden. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
+| `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 
 The web app identifies each reviewer to Flagsmith (`flagsmith.identify(reviewerId)`),
-so variant allocation is sticky per reviewer. The variant is attached to every
-experiment event.
+so variant allocation is sticky per reviewer. View outcome events include the
+assigned variant.
 
 ### Variants
 
-Before Flagsmith integration, the web app accepts `?view=side_by_side`, `?view=overlay`, or `?view=overlay_summary` and defaults to `overlay`.
+With `variant_preview` enabled, the viewer accepts `?view=side_by_side`,
+`?view=overlay`, or `?view=overlay_summary`, and `?direction=horizontal` or
+`?direction=vertical`. Either override skips experiment exposures and keeps
+review outcomes local. With previews disabled, the viewer uses the Flagsmith
+assignments and keeps short flows horizontal.
 
 - **A `side_by_side`**: two synchronized canvases, before (base) and after (head).
 - **B `overlay`**: one canvas with the union graph, coloured added/removed/changed.

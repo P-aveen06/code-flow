@@ -47,13 +47,30 @@ Built for the WeMakeDevs × Flagsmith **Toggle Wars** hackathon, Track 01
 
 ## How we use Flagsmith
 
-### Environments
+### Branches and environments
 
-**Production** serves real reviewers through the web app and server keys.
-**Development** is for simulations and rehearsals. The simulator uses
-`CODEFLOW_SIM_FLAGSMITH_ENV_KEY`, and both the simulator and experiment script
-default to `CODEFLOW_SIM_ENVIRONMENT` (`Development`). See [Send simulated
-traffic and read results](#5-send-simulated-traffic-and-read-results) for setup.
+The keys supplied at deployment select the Flagsmith environment. The web build uses
+`VITE_CODEFLOW_FLAGSMITH_ENV_KEY` and the API server uses
+`CODEFLOW_FLAGSMITH_SERVER_KEY`.
+
+- **`develop` / dev deploy.** Use Development keys. Set the web key to the
+  value of `CODEFLOW_SIM_FLAGSMITH_ENV_KEY` written by `make flagsmith-setup-sim`.
+  Create or copy a server-side key from the Development environment for the API.
+  `variant_preview` is on, so the viewer can preview any view or direction.
+- **`main` / prod deploy.** Use Production keys. `variant_preview` is off and
+  the viewer serves the rolled-out view and long-flow direction from Flagsmith.
+  Short flows are horizontal.
+
+For local web builds, Vite also reads `.env.development.local` and
+`.env.production.local` from the **repo root**. Put the matching
+`VITE_CODEFLOW_FLAGSMITH_ENV_KEY` in each file. `npm run dev` uses development
+mode and `npm run build` uses production mode by default. To build with
+development mode settings, run `npm run build -- --mode development` from
+`web/`. These files are gitignored. Keep keys out of Git.
+
+The simulator uses `CODEFLOW_SIM_FLAGSMITH_ENV_KEY`. The simulator and
+experiment script default to `CODEFLOW_SIM_ENVIRONMENT` (`Development`).
+[Simulation setup](#5-send-simulated-traffic-and-read-results)
 
 The recorded `flow_view` and `flow_direction` runs used simulated reviewers in
 Production before this split. Their results are recorded in the [experiment
@@ -76,7 +93,10 @@ The multivariate flag `flow_view` assigns one view per reviewer.
 - **Exposure.** The web app identifies the reviewer, then calls
   `getExperimentFlag('flow_view')` in the Flagsmith JS SDK. The simulator
   calls `get_experiment_flag` in the Python SDK with each reviewer's identity.
-- **Preview variant.** The viewer header sets a `?view=` override that keeps exposures and review answers out of the experiment. **Back to my assigned variant** restores the Flagsmith view.
+- **Preview variant.** In Development, the viewer header sets a `?view=`
+  override. While either preview override is active, the viewer skips
+  experiment exposures and keeps review answers local. **Back to my assigned
+  variant** restores the Flagsmith view.
 - **Outcome.** **Yes, I understand it** sends
   `trackEvent('diff_understood', {value: ms})`. **No, it’s confusing** sends
   `diff_confusing`. The value is the time from diagram render to answer, in
@@ -158,8 +178,8 @@ layouts more often and faster on long flows. The default cutoff of four call
 layers at one hop selects five of the 14 flow-changing Flagsmith API commits.
 Once the flag is set up, the viewer records exposure only for eligible long
 flows. Yes and No send elapsed milliseconds with `layout_understood` and
-`layout_confusing`, respectively. Preview direction works on any flow without
-sending layout experiment events.
+`layout_confusing`, respectively. In Development, Preview direction works on
+any flow and keeps the review out of both experiments.
 
 After setting up Development in step 5, preview experiment creation and
 rehearse both assumption models with the default panel.
@@ -195,7 +215,7 @@ The idempotent `make flagsmith-setup` command creates missing flags and tags.
 
 | Tag | Flags |
 | --- | --- |
-| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, and `ai_summary` |
+| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary`, and `variant_preview` |
 | `repo:flagsmith-api` | Seed flags from Flagsmith's `api/integrations/flagsmith/data/environment.json` |
 | `repo:shop-demo` | `new_checkout` and `holiday_discount` |
 
@@ -317,9 +337,10 @@ python3 scripts/flagsmith_experiment.py --experiment flow_view create
 make simulate
 ```
 
-Development setup writes the simulation settings to `.env` and restores the
-original flag splits for both experiments. If setup asks you to enable the
-warehouse manually, use **Development → Environment Settings → Warehouse →
+Development setup writes the simulation settings to `.env`, restores the
+original flag splits for both experiments, and enables `variant_preview`.
+If setup asks you to enable the warehouse manually, use
+**Development → Environment Settings → Warehouse →
 Flagsmith database → Enable** before starting the experiment.
 
 Ask Flagsmith to refresh results and read the result table.

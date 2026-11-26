@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from http.client import HTTPException
 from pathlib import Path
@@ -28,6 +28,7 @@ PRODUCTION_ENVIRONMENT = "Production"
 DEFAULT_SIM_ENVIRONMENT = "Development"
 SIM_ENVIRONMENT_SETTING = "CODEFLOW_SIM_ENVIRONMENT"
 CODE_FLOW_TAG = "code-flow"
+VARIANT_PREVIEW = "variant_preview"
 REPO_ID_BY_TAG = {
     "repo:shop-demo": "shop-demo",
     "repo:flagsmith-api": "Flagsmith__flagsmith",
@@ -268,9 +269,13 @@ def ensure_tag(
 
 
 def create_flag(
-    client: AdminClient, path: str, environment: Record, flag: Flag, tag_id: int
+    client: AdminClient,
+    path: str,
+    flag: Flag,
+    tag_id: int,
+    environment_defaults: list[tuple[Record, Flag]],
 ) -> Record:
-    # Flagsmith creates a state in every environment. Apply the defaults only in the selected one.
+    # Flagsmith creates a state in every environment.
     feature = client.request("POST", path, {"name": flag.name, "type": flag.kind, "tags": [tag_id]})
     feature_id = feature["id"]
     weights = {}
@@ -284,10 +289,11 @@ def create_flag(
             data["key"] = variant.key
         option = client.request("POST", f"{path}{feature_id}/mv-options/", data)
         weights[option["id"]] = variant.allocation
-    state = get_flag_state(client, environment, feature_id)
-    if state is None:
-        raise SetupError("Flagsmith did not create an initial state for the new flag.")
-    apply_flag_defaults(client, environment, feature_id, flag, weights, state)
+    for environment, defaults in environment_defaults:
+        state = get_flag_state(client, environment, feature_id)
+        if state is None:
+            raise SetupError("Flagsmith did not create an initial state for the new flag.")
+        apply_flag_defaults(client, environment, feature_id, defaults, weights, state)
     return feature
 
 
@@ -374,16 +380,27 @@ def configure_existing_flag(
     feature: Record,
     flag: Flag,
     *,
+    active_experiment: Record | None,
     simulation_environment: bool,
     dry_run: bool,
 ) -> None:
-    restore_experiment_defaults = simulation_environment and flag in (
-        FLOW_VIEW_FLAG,
-        FLOW_DIRECTION_FLAG,
+    if active_experiment is not None:
+        name = json.dumps(active_experiment["name"], ensure_ascii=False)
+        status = active_experiment["status"]
+        print(
+            f"Skipping {flag.name}: experiment {name} is {status} in {environment['name']}; "
+            "Flagsmith manages its state."
+        )
+        return
+
+    restore_defaults = simulation_environment and flag.name in (
+        FLOW_VIEW_FLAG.name,
+        FLOW_DIRECTION_FLAG.name,
+        VARIANT_PREVIEW,
     )
     state = get_flag_state(client, environment, feature["id"])
     if state is None:
-        if restore_experiment_defaults:
+        if restore_defaults:
             raise SetupError(f"{flag.name} has no environment state to configure.")
         print(f"{flag.name} differs from defaults (no live state).")
         return
@@ -417,7 +434,7 @@ def configure_existing_flag(
         return
 
     unconfigured = not live_enabled and live_value is None and not any(weights.values())
-    if simulation_environment and (restore_experiment_defaults or unconfigured):
+    if simulation_environment and (restore_defaults or unconfigured):
         expected_options = {
             (type(variant.value), variant.value, variant.key): variant.allocation
             for variant in flag.variants
@@ -440,7 +457,7 @@ def configure_existing_flag(
             verb = "Would set" if dry_run else "Set"
             print(f"{verb} {flag.name} to {show_state(flag.enabled, flag.value, flag.variants)}.")
             return
-        if restore_experiment_defaults:
+        if restore_defaults:
             raise SetupError(f"{flag.name} has project variants that differ from setup defaults.")
 
     print(
@@ -658,17 +675,18 @@ def setup(
     environment_name: str = PRODUCTION_ENVIRONMENT,
     scope_file: Path = DEFAULT_SCOPE_FILE,
 ) -> None:
+    app_environment = environment_name == PRODUCTION_ENVIRONMENT
     groups = {
         CODE_FLOW_TAG: [
             FLOW_VIEW_FLAG,
             FLOW_DIRECTION_FLAG,
             Flag("flagsmith_mode", True),
             Flag("ai_summary", False),
+            Flag(VARIANT_PREVIEW, not app_environment),
         ],
         "repo:flagsmith-api": defaults,
         "repo:shop-demo": [Flag("new_checkout", True), Flag("holiday_discount", True)],
     }
-    app_environment = environment_name == PRODUCTION_ENVIRONMENT
     scope_file = scope_file.resolve()
     if scope_file == env_file.resolve():
         raise SetupError("Use different paths for the environment and scope files.")
@@ -682,13 +700,22 @@ def setup(
     if project is None:
         raise SetupError("Create a project named code-flow in the Flagsmith dashboard first.")
     project_path = f"projects/{project['id']}/"
-    environment = select_environment(client.list(f"{project_path}environments/"), environment_name)
+    environments = client.list(f"{project_path}environments/")
+    environment = select_environment(environments, environment_name)
     print(f"Using Flagsmith environment {PROJECT_NAME}/{environment['name']}.")
 
     tags_path = f"{project_path}tags/"
     project_tags = client.list(tags_path)
     feature_path = f"{project_path}features/"
     features = {feature["name"].casefold(): feature for feature in client.list(feature_path)}
+    active_experiments = {}
+    if not app_environment and features:
+        experiments_path = f"environments/{environment['api_key']}/experiments/"
+        active_experiments = {
+            experiment["feature"]["id"]: experiment
+            for experiment in client.list(experiments_path)
+            if experiment["status"] not in ("completed", "created", "draft")
+        }
     tag_ids = {}
     for label, flags in groups.items():
         tag_id = ensure_tag(client, tags_path, project_tags, label, dry_run)
@@ -701,6 +728,7 @@ def setup(
                     environment,
                     feature,
                     flag,
+                    active_experiment=active_experiments.get(feature["id"]),
                     simulation_environment=not app_environment,
                     dry_run=dry_run,
                 )
@@ -708,7 +736,18 @@ def setup(
             else:
                 verb = "Would create" if dry_run else "Created"
                 if tag_id is not None and not dry_run:
-                    features[name] = create_flag(client, feature_path, environment, flag, tag_id)
+                    environment_defaults = [(environment, flag)]
+                    if name == VARIANT_PREVIEW:
+                        environment_defaults = [
+                            (
+                                env,
+                                replace(flag, enabled=env["name"] != PRODUCTION_ENVIRONMENT),
+                            )
+                            for env in environments
+                        ]
+                    features[name] = create_flag(
+                        client, feature_path, flag, tag_id, environment_defaults
+                    )
                 print(
                     f"{verb} flag {flag.name} with tag {label} "
                     f"({show_state(flag.enabled, flag.value, flag.variants)})."

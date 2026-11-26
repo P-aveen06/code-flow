@@ -103,8 +103,8 @@ interface RepoReviewProps {
 
 function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
   const {
-    flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, assignedView, reviewEventClient,
-    directionFlag,
+    flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
+    ready: flagsReady, assignedView, reviewEventClient, directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
@@ -133,8 +133,8 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const request = useDiff(id, hasNodes ? head : undefined, hops);
   const diff = request.status === "ready" ? request.data : null;
   const longFlow = diff ? diff.long_flow === true : undefined;
-  const { direction, directionOverride, assignedDirection, ready: directionReady } = readFlowDirection(
-    search, longFlow, directionFlag,
+  const { direction, assignedDirection, ready: directionReady } = readFlowDirection(
+    directionOverride, longFlow, directionFlag,
   );
   const { layout, hasCollapsedContext } = useDiffLayout(
     diff, context.expanded, view === "side_by_side", flagsReady && directionReady ? direction : null, checkIds,
@@ -159,10 +159,11 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   }, [currentLayout, view, direction]);
   const diagramRendered = Boolean(currentLayout && rendered?.layout === currentLayout
     && rendered.view === view && rendered.direction === direction);
-  const exposureKey = directionExposureKey(reviewerId, longFlow, directionOverride, directionFlag);
+  const previewOverride = viewOverride ?? directionOverride;
+  const exposureKey = directionExposureKey(reviewerId, longFlow, previewOverride, directionFlag);
   const layoutReview = useDirectionExposure(reviewerId, exposureKey, diagramRendered);
   const reviewContext = diff && diagramRendered && layoutReview.ready
-    ? { repo: id, view, reviewerId, head: diff.head, base: diff.base, devOverride: viewOverride !== null }
+    ? { repo: id, view, reviewerId, head: diff.head, base: diff.base, devOverride: previewOverride !== null }
     : null;
   const View = view === "side_by_side" ? SideBySide : Overlay;
   const flowChanged = selected && hasFlowChange(selected.stats);
@@ -225,9 +226,11 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           )}
         </div>
         <div className="viewer-header__controls">
-          <VariantPreview view={view} viewOverride={viewOverride} assignedView={assignedView}
-            ready={flagsReady} onChange={replaceViewOverride} />
-          {hasNodes && head && (
+          {variantPreview && (
+            <VariantPreview view={view} viewOverride={viewOverride} assignedView={assignedView}
+              ready={flagsReady} onChange={replaceViewOverride} />
+          )}
+          {variantPreview && hasNodes && head && (
             <DirectionPreview direction={direction} directionOverride={directionOverride}
               assignedDirection={assignedDirection} longFlow={longFlow}
               ready={directionReady} onChange={replaceDirectionOverride} />
@@ -331,9 +334,7 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
               key={JSON.stringify([id, head, view, reviewerId, viewOverride, direction, directionOverride])}
               context={reviewContext}
               sendsReviewEvents={reviewEventClient !== null || layoutReview.exposed}
-              onReview={(payload) => recordReviewEvent(payload, reviewEventClient, {
-                ...layoutReview, override: directionOverride,
-              })}
+              onReview={(payload) => recordReviewEvent(payload, reviewEventClient, layoutReview)}
             />
           )}
         </section>

@@ -22,7 +22,6 @@ const events: DiffEvent[] = [];
 export interface LayoutReview {
   client: Pick<IFlagsmith, "trackEvent">;
   exposed: boolean;
-  override: string | null;
 }
 
 export function formatElapsed(ms: number): string {
@@ -47,14 +46,15 @@ export function recordReviewEvent(
   payload: ReviewEvent, client: Pick<IFlagsmith, "trackEvent"> | null, layout?: LayoutReview,
 ) {
   record(payload);
-  if (!payload.devOverride && client) {
+  if (payload.devOverride) return;
+  if (client) {
     client.trackEvent(payload.event, {
       identifier: payload.reviewerId,
       value: payload.ms,
       metadata: { variant: payload.view },
     });
   }
-  if (layout?.exposed && layout.override === null) {
+  if (layout?.exposed) {
     const event = payload.event === "diff_understood" ? "layout_understood" : "layout_confusing";
     layout.client.trackEvent(event, { value: payload.ms });
   }

@@ -3,6 +3,7 @@ import {
   buildReviewEvent, formatElapsed, getReviewEvents, recordDiffViewed, recordReviewEvent,
 } from "./events";
 import type { ReviewContext } from "./events";
+import { readPreviewOverrides } from "./view";
 
 const context: ReviewContext = {
   repo: "shop-demo",
@@ -93,7 +94,7 @@ describe("layout review events", () => {
   ] as const)("sends %s and %s with the same review time", (outcome, layoutOutcome) => {
     const client = { trackEvent: vi.fn() };
     const review = buildReviewEvent({ ...context, devOverride: false }, outcome, 100, 450);
-    recordReviewEvent(review, client, { client, exposed: true, override: null });
+    recordReviewEvent(review, client, { client, exposed: true });
 
     expect(client.trackEvent).toHaveBeenNthCalledWith(1, outcome, {
       identifier: "demo-1", value: 350, metadata: { variant: "overlay_summary" },
@@ -101,24 +102,33 @@ describe("layout review events", () => {
     expect(client.trackEvent).toHaveBeenNthCalledWith(2, layoutOutcome, { value: 350 });
   });
 
-  it("counts layout reviews during view previews when the direction is assigned", () => {
+  it.each(["?view=overlay", "?direction=horizontal"])("keeps both experiments local during %s", (search) => {
     const client = { trackEvent: vi.fn() };
-    const review = buildReviewEvent(context, "diff_understood", 100, 450);
-    recordReviewEvent(review, client, { client, exposed: true, override: null });
+    const { viewOverride, directionOverride } = readPreviewOverrides(search, true);
+    const review = buildReviewEvent({ ...context, devOverride: (viewOverride ?? directionOverride) !== null },
+      "diff_understood", 100, 450);
+    recordReviewEvent(review, client, { client, exposed: true });
 
-    expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith("layout_understood", { value: 350 });
+    expect(client.trackEvent).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { exposed: false, override: null },
-    { exposed: true, override: "vertical" },
-  ])("keeps the view review when the layout is excluded (%j)", (assignment) => {
+  it("keeps the view review when the layout is excluded", () => {
     const client = { trackEvent: vi.fn() };
     const review = buildReviewEvent({ ...context, devOverride: false }, "diff_confusing", 100, 450);
-    recordReviewEvent(review, client, { client, ...assignment });
+    recordReviewEvent(review, client, { client, exposed: false });
 
     expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith("diff_confusing", {
       identifier: "demo-1", value: 350, metadata: { variant: "overlay_summary" },
     });
+  });
+
+  it("sends both exposed outcomes when URL overrides are ignored", () => {
+    const client = { trackEvent: vi.fn() };
+    const { viewOverride, directionOverride } = readPreviewOverrides("?view=overlay&direction=horizontal", false);
+    const review = buildReviewEvent({ ...context, devOverride: (viewOverride ?? directionOverride) !== null },
+      "diff_understood", 100, 450);
+    recordReviewEvent(review, client, { client, exposed: true });
+
+    expect(client.trackEvent.mock.calls.map(([event]) => event)).toEqual(["diff_understood", "layout_understood"]);
   });
 });

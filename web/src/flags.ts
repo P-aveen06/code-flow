@@ -1,8 +1,8 @@
 import flagsmith, { FlagSource } from "@flagsmith/flagsmith";
-import type { IFlagsmithFeature } from "@flagsmith/flagsmith";
+import type { IFlagsmith, IFlagsmithFeature } from "@flagsmith/flagsmith";
 import { useEffect, useState } from "react";
 import {
-  chooseFlowView, parseFlowDirection, parseFlowView, readDirectionOverride, readViewOverride,
+  chooseFlowView, parseFlowDirection, parseFlowView, readPreviewOverrides,
 } from "./view";
 import type { FlowView } from "./view";
 
@@ -69,40 +69,65 @@ function initFlagsmith(environmentID: string) {
   }));
 }
 
-interface FlagResult {
-  reviewerId: string;
+interface FlagSnapshot {
   assignmentKey?: string;
+  assignedView: FlowView | null;
   directionFlag: IFlagsmithFeature | null;
   flagsmithMode: boolean;
+  variantPreview: boolean;
+}
+
+const unavailableFlags: FlagSnapshot = {
+  assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false,
+};
+
+function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
+  return client.loadingState?.source === FlagSource.SERVER && !client.loadingState.error;
+}
+
+export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getAllFlags" | "hasFeature">): FlagSnapshot {
+  if (!hasServerFlags(client)) return unavailableFlags;
+  const { flow_view: viewFlag, flow_direction: directionFlag } = client.getAllFlags();
+  return {
+    assignmentKey: JSON.stringify([viewFlag?.value, viewFlag?.variant, viewFlag?.enabled, viewFlag?.experiment]),
+    assignedView: parseFlowView(viewFlag?.value),
+    directionFlag: directionFlag ?? null,
+    flagsmithMode: client.hasFeature("flagsmith_mode"),
+    variantPreview: client.hasFeature("variant_preview"),
+  };
 }
 
 interface FlowAssignment {
   reviewerId: string;
   key: string;
   view: FlowView | null;
+  exposed: boolean;
 }
 
 export function exposeFlowAssignment(
-  reviewerId: string, key: string, viewOverride: string | null,
-  previous: FlowAssignment | undefined, readExperimentValue: () => unknown,
+  reviewerId: string, key: string, previewOverride: string | null,
+  previous: FlowAssignment | undefined, readExperimentFlag: () => IFlagsmithFeature | null,
 ): FlowAssignment | undefined {
-  if (viewOverride !== null || (previous?.reviewerId === reviewerId && previous.key === key)) {
+  if (previewOverride !== null || (previous?.reviewerId === reviewerId && previous.key === key)) {
     return previous;
   }
-  return { reviewerId, key, view: parseFlowView(readExperimentValue()) };
+  const flag = readExperimentFlag();
+  return {
+    reviewerId, key, view: parseFlowView(flag?.value),
+    exposed: flag?.enabled === true && flag.experiment?.inExperiment === true,
+  };
 }
 
 export function useCodeFlowFlags(search: string) {
   const reviewerId = readReviewerId(search);
-  const viewOverride = readViewOverride(search);
-  const [result, setResult] = useState<FlagResult>();
+  const [result, setResult] = useState<FlagSnapshot & { reviewerId: string }>();
   const [assignment, setAssignment] = useState<FlowAssignment>();
 
   useEffect(() => {
     const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
     let active = true;
     let timer: number | undefined;
-    const fallback = () => setResult({ reviewerId, directionFlag: null, flagsmithMode: false });
+    const fallback = () => setResult({ reviewerId, ...unavailableFlags });
 
     if (!key) {
       fallback();
@@ -115,15 +140,7 @@ export function useCodeFlowFlags(search: string) {
         if (!active) return;
         await (initialKey ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
         if (!active) return;
-
-        const { flow_view: flag, flow_direction: directionFlag } = flagsmith.getAllFlags();
-        const assignmentKey = JSON.stringify([flag?.value, flag?.variant, flag?.enabled, flag?.experiment]);
-        setResult({
-          reviewerId, assignmentKey,
-          directionFlag: flagsmith.loadingState?.source === FlagSource.SERVER && !flagsmith.loadingState.error
-            ? directionFlag ?? null : null,
-          flagsmithMode: flagsmith.hasFeature("flagsmith_mode"),
-        });
+        setResult({ reviewerId, ...readFlagSnapshot(flagsmith) });
       } catch {
         if (active) fallback();
       } finally {
@@ -136,27 +153,30 @@ export function useCodeFlowFlags(search: string) {
   }, [reviewerId]);
 
   const flags = result?.reviewerId === reviewerId ? result : undefined;
+  const variantPreview = flags?.variantPreview ?? false;
+  const { viewOverride, directionOverride } = readPreviewOverrides(search, variantPreview);
+  const previewOverride = viewOverride ?? directionOverride;
   const assignmentKey = flags?.assignmentKey;
   useEffect(() => {
     if (assignmentKey === undefined) return;
     // Keep the last exposure across polling and preview changes.
     const next = exposeFlowAssignment(
-      reviewerId, assignmentKey, viewOverride, assignment,
-      () => flagsmith.getExperimentFlag("flow_view")?.value,
+      reviewerId, assignmentKey, previewOverride, assignment,
+      () => flagsmith.getExperimentFlag("flow_view"),
     );
     if (next !== assignment) setAssignment(next);
-  }, [assignment, assignmentKey, reviewerId, viewOverride]);
+  }, [assignment, assignmentKey, reviewerId, previewOverride]);
 
   const currentAssignment = assignment?.reviewerId === reviewerId && assignment.key === assignmentKey
     ? assignment
     : undefined;
-  const assignedView = currentAssignment?.view ?? null;
-  const ready = viewOverride !== null || Boolean(currentAssignment || (flags && assignmentKey === undefined));
+  const assignedView = currentAssignment ? currentAssignment.view : flags?.assignedView ?? null;
+  const ready = Boolean(flags && (previewOverride !== null || currentAssignment || assignmentKey === undefined));
   return {
-    reviewerId, viewOverride, ready, assignedView,
+    reviewerId, viewOverride, directionOverride, variantPreview, ready, assignedView,
     flowView: chooseFlowView(viewOverride, () => assignedView),
     flagsmithMode: flags?.flagsmithMode ?? false,
-    reviewEventClient: viewOverride === null && assignedView !== null ? flagsmith : null,
+    reviewEventClient: previewOverride === null && currentAssignment?.exposed && assignedView !== null ? flagsmith : null,
     directionFlag: flags?.directionFlag,
   };
 }
@@ -186,14 +206,13 @@ export function exposeDirectionAssignment(
 }
 
 export function readFlowDirection(
-  search: string, longFlow: boolean | undefined,
+  directionOverride: string | null, longFlow: boolean | undefined,
   flag: IFlagsmithFeature | null | undefined,
 ) {
-  const directionOverride = readDirectionOverride(search);
   const assignedDirection = longFlow === true ? flagDirection(flag) : null;
   return {
     direction: parseFlowDirection(directionOverride ?? assignedDirection) ?? "horizontal",
-    directionOverride, assignedDirection,
+    assignedDirection,
     ready: directionOverride !== null || longFlow === false || (longFlow === true && flag !== undefined),
   };
 }
@@ -208,8 +227,7 @@ export function useDirectionExposure(
     const recorded = exposeDirectionAssignment(key, directionExposures, () => {
       const currentFlag = flagsmith.getAllFlags().flow_direction;
       if (flagsmith.getContext().identity?.identifier !== reviewerId
-        || flagsmith.loadingState?.source !== FlagSource.SERVER
-        || flagsmith.loadingState.error
+        || !hasServerFlags(flagsmith)
         || directionExposureKey(reviewerId, true, null, currentFlag) !== key) return null;
       return flagsmith.getExperimentFlag("flow_direction");
     });
