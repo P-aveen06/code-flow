@@ -1,5 +1,5 @@
 import {
-  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider,
+  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, getViewportForBounds,
   useReactFlow,
 } from "@xyflow/react";
 import type { EdgeTypes, NodeProps, NodeTypes, OnMove, ReactFlowInstance } from "@xyflow/react";
@@ -7,6 +7,7 @@ import { useEffect, useId, useMemo, useRef } from "react";
 import type { ChipNode, FlowEdge, FlowLayout, FlowNode, ModuleNode, SymbolNode } from "../layout/elk";
 import type { NodeStatus, OverlayNode } from "../types";
 import { contextLabel } from "./collapse";
+import { chooseFitTarget } from "./fit";
 import { RoutedEdge } from "./RoutedEdge";
 import { edgeStyle, nodeStyle, statusLabels, symbolHint, symbolNameLines } from "./styles";
 
@@ -87,7 +88,7 @@ function Canvas({
   const canvasId = useId();
   const canvasRef = useRef<HTMLDivElement>(null);
   const readyLayout = useRef<FlowLayout | null>(null);
-  const { fitView, viewportInitialized } = useReactFlow();
+  const { fitView, getNodesBounds, viewportInitialized } = useReactFlow<FlowNode, FlowEdge>();
   const nodes = useMemo(() => layout.nodes.map(
     (node) => node.id === selectedNodeId && !node.hidden ? { ...node, selected: true } : node,
   ), [layout.nodes, selectedNodeId]);
@@ -111,30 +112,35 @@ function Canvas({
     let readyFrame = 0;
     let disposed = false;
     const changed = layout.nodes.filter((node) => node.type === "symbol" && node.data.symbol.status !== "context");
-    const initialFit = changed.length ? {
-      ...fitOptions, nodes: changed, minZoom: readableZoom, maxZoom: 1,
-    } : fitOptions;
     function markReady() {
       if (disposed || readyLayout.current === layout) return;
       cancelAnimationFrame(readyFrame);
       readyLayout.current = layout;
       onReady?.();
     }
-    function scheduleFit() {
+    const scheduleFit = () => {
       cancelAnimationFrame(fitFrame);
       fitFrame = requestAnimationFrame(() => {
         if (!viewportInitialized || !layout.nodes.length) {
           markReady();
           return;
         }
-        const fit = fitView(initialFit);
+        // Side-by-side panes share the union's bounds, including nodes shown only in the other pane.
+        const allBounds = getNodesBounds(layout.nodes);
+        const { zoom: allBoundsZoom } = getViewportForBounds(
+          allBounds, canvas.clientWidth, canvas.clientHeight, 0, fitOptions.maxZoom, fitOptions.padding,
+        );
+        const focusChanges = changed.length > 0 && chooseFitTarget(allBoundsZoom, readableZoom) === "changed";
+        const fit = fitView(focusChanges ? {
+          ...fitOptions, nodes: changed, minZoom: readableZoom, maxZoom: 1,
+        } : fitOptions);
         if (readyLayout.current !== layout && !readyFrame) {
           void fit.then(markReady, markReady);
           // React Flow can keep a fit queued while waiting for measurements.
           readyFrame = requestAnimationFrame(markReady);
         }
       });
-    }
+    };
 
     scheduleFit();
     const observer = new ResizeObserver(scheduleFit);
@@ -146,7 +152,7 @@ function Canvas({
       cancelAnimationFrame(fitFrame);
       cancelAnimationFrame(readyFrame);
     };
-  }, [autoFit, fitView, layout, onReady, viewportInitialized]);
+  }, [autoFit, fitView, getNodesBounds, layout, onReady, viewportInitialized]);
 
   return (
     <div className="flow-canvas" ref={canvasRef}>
