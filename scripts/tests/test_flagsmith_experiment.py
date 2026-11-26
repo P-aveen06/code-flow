@@ -37,10 +37,11 @@ METRIC_BODIES = [
 
 
 class FakeClient:
-    def __init__(self, flag="flow_view", *, feature_exists=True):
+    def __init__(self, flag="flow_view", *, feature_exists=True, environment="Development"):
         self.calls = []
         self.flag = flag
         self.feature_exists = feature_exists
+        self.environment = environment
         self.metrics = []
         self.experiments = []
         self.results = None
@@ -90,7 +91,7 @@ class FakeClient:
         records = {
             "organisations/": [{"id": 7}],
             "projects/?organisation=7": [{"id": 8, "name": "code-flow"}],
-            "projects/8/environments/": [{"id": 9, "name": "Production", "api_key": ENV_KEY}],
+            "projects/8/environments/": [{"id": 9, "name": self.environment, "api_key": ENV_KEY}],
             f"projects/8/features/?search={self.flag}": [self.feature]
             if self.feature_exists
             else [],
@@ -149,6 +150,11 @@ class FakeClient:
                 raise script.AdminError("POST", 429)
             return None  # HTTP 202 has an empty body.
         pytest.fail(f"Unexpected fake API request {method}")
+
+
+@pytest.fixture(autouse=True)
+def clear_simulation_environment(monkeypatch):
+    monkeypatch.delenv("CODEFLOW_SIM_ENVIRONMENT", raising=False)
 
 
 @pytest.fixture
@@ -299,6 +305,92 @@ def test_cli_dry_runs_send_only_gets_and_hide_keys(
     assert client.calls
     assert client.writes == []
     assert env_file.read_text() == env_contents
+
+
+@pytest.mark.parametrize(
+    ("configured", "override", "expected"),
+    [
+        (None, [], "Development"),
+        ("QA Preview", [], "QA Preview"),
+        ("Production", [], "Production"),
+        ("Development", ["--environment", "Production"], "Production"),
+    ],
+)
+def test_status_reads_the_selected_environment(
+    configured, override, expected, tmp_path, monkeypatch, capsys
+):
+    client = FakeClient("flow_direction", environment=expected)
+    env_file = tmp_path / ".env"
+    env_file.write_text("FLAGSMITH_ADMIN_API_KEY=test-admin-secret\n")
+    if configured is not None:
+        with env_file.open("a") as file:
+            file.write(f"CODEFLOW_SIM_ENVIRONMENT='{configured}'\n")
+    monkeypatch.setattr(script, "AdminClient", lambda *_: client)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "flagsmith_experiment.py",
+            "--env-file",
+            str(env_file),
+            "--experiment",
+            "flow_direction",
+            "status",
+            *override,
+        ],
+    )
+
+    assert script.main() == 0
+    output = capsys.readouterr()
+    assert f"Using Flagsmith environment code-flow/{expected}." in output.out
+    assert (
+        "No experiment named flow_direction: vertical vs horizontal for long flows exists."
+        in output.out
+    )
+    assert "secret" not in output.out + output.err
+    assert client.calls[-1] == ("GET", f"{EXPERIMENTS}?q=flow_direction", None)
+    assert client.writes == []
+
+
+@pytest.mark.parametrize("command", [["create"], ["refresh"], ["rollout", "--variant", "overlay"]])
+def test_implicit_production_write_is_refused(command, tmp_path, monkeypatch, capsys):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "FLAGSMITH_ADMIN_API_KEY=test-admin-secret\nCODEFLOW_SIM_ENVIRONMENT=Development\n"
+    )
+    monkeypatch.setenv("CODEFLOW_SIM_ENVIRONMENT", "Production")
+    monkeypatch.setattr(script, "AdminClient", lambda *_: pytest.fail("Unexpected Admin API call"))
+    monkeypatch.setattr(
+        sys, "argv", ["flagsmith_experiment.py", "--env-file", str(env_file), *command]
+    )
+
+    assert script.main() == 1
+    output = capsys.readouterr()
+    assert "Using Flagsmith environment code-flow/Production." in output.out
+    assert "Production writes require an explicit --environment Production." in output.err
+    assert "secret" not in output.out + output.err
+
+
+@pytest.mark.parametrize("environment", ["Development", "Production"])
+def test_create_starts_in_development_by_default_or_in_explicit_production(
+    environment, tmp_path, monkeypatch, capsys
+):
+    client = FakeClient(environment=environment)
+    env_file = tmp_path / ".env"
+    env_file.write_text("FLAGSMITH_ADMIN_API_KEY=test-admin-secret\n")
+    override = ["--environment", "Production"] if environment == "Production" else []
+    monkeypatch.setattr(script, "AdminClient", lambda *_: client)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["flagsmith_experiment.py", "--env-file", str(env_file), *override, "create"],
+    )
+
+    assert script.main() == 0
+    assert client.writes[-1][:2] == ("POST", f"{DETAIL}start/")
+    output = capsys.readouterr()
+    assert f"Using Flagsmith environment code-flow/{environment}." in output.out
+    assert "secret" not in output.out + output.err
 
 
 def test_status_formats_cached_results_for_the_two_metrics(capsys):

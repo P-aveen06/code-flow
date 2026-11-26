@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run simulate-dry-run simulate panel-profiles
+.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim simulate-dry-run simulate panel-profiles
 
 help:
 	@echo "install  Install Python and web dependencies"
@@ -9,10 +9,11 @@ help:
 	@echo "lint     Check Python lint (including scripts) and project formatting"
 	@echo "dev      Run the API and web dev servers (Ctrl-C stops both)"
 	@echo "analyze-flagsmith       Analyze recent commits in the Flagsmith API"
-	@echo "flagsmith-setup          Set up demo flags in the existing code-flow project"
-	@echo "flagsmith-setup-dry-run  Preview Flagsmith setup using read-only API requests"
-	@echo "simulate-dry-run        Run flow_view offline with the default reviewer panel"
-	@echo "simulate                Request a live flow_view run with the repeat guard enabled"
+	@echo "flagsmith-setup          Set up Flagsmith Production for the web app"
+	@echo "flagsmith-setup-dry-run  Preview Production setup using read-only API requests"
+	@echo "flagsmith-setup-sim      Set up Flagsmith Development for simulations"
+	@echo "simulate-dry-run         Rehearse flow_view offline with the default reviewer panel"
+	@echo "simulate                 Run flow_view in the simulation environment with the default panel"
 	@echo "panel-profiles          Show the default reviewer panel's traits offline"
 
 analyze-flagsmith:
@@ -23,6 +24,9 @@ flagsmith-setup:
 
 flagsmith-setup-dry-run:
 	python3 scripts/flagsmith_setup.py --dry-run
+
+flagsmith-setup-sim:
+	python3 scripts/flagsmith_setup.py --environment Development
 
 simulate-dry-run:
 	cd simulator && uv run python simulate.py --experiment flow_view --panel default --dry-run

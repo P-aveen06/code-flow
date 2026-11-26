@@ -285,6 +285,15 @@ a local ClickHouse. Results (lift, credible intervals, win probability) come
 from Flagsmith's built-in Bayesian engine on the experiment's results page.
 Docs: https://docs.flagsmith.com/experimentation
 
+The two recorded experiments used simulated reviewers in the shared
+Production environment described above. For current runs, Production serves
+the web app and real reviewers. The simulator and experiment CLI default to
+Development through `CODEFLOW_SIM_ENVIRONMENT`. Development setup seeds the
+original experiment flag states and writes `CODEFLOW_SIM_FLAGSMITH_ENV_KEY`
+for the simulator. Production experiment writes and live simulated traffic
+require the explicit `--environment Production` option. Simulator history is
+scoped to the environment and flag, with pre-split history counted as Production.
+
 - **Experiment**: in the `code-flow` project, multivariate flag `flow_view`, split 34/33/33, primary metric built from the event `diff_understood`.
 - **Unit**: reviewer identity (real or simulated). Users must be identified for experiment events.
 - **Exposure**: the web app evaluates the flag with `flagsmith.getExperimentFlag('flow_view')` (JS SDK `@flagsmith/flagsmith` >= 12.4.0, initialised with `enableEvents: true`), which records the exposure.

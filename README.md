@@ -47,6 +47,19 @@ Built for the WeMakeDevs × Flagsmith **Toggle Wars** hackathon, Track 01
 
 ## How we use Flagsmith
 
+### Environments
+
+**Production** serves real reviewers through the web app and server keys.
+**Development** is for simulations and rehearsals. The simulator uses
+`CODEFLOW_SIM_FLAGSMITH_ENV_KEY`, and both the simulator and experiment script
+default to `CODEFLOW_SIM_ENVIRONMENT` (`Development`). See [Send simulated
+traffic and read results](#5-send-simulated-traffic-and-read-results) for setup.
+
+The recorded `flow_view` and `flow_direction` runs used simulated reviewers in
+Production before this split. Their results are recorded in the [experiment
+results](docs/experiment-results.md). Production serves `overlay_summary` for
+`flow_view` and `vertical` for long flows.
+
 ### The A/B test
 
 **Hypothesis.** Reviewers understand a change more often and faster with an
@@ -98,13 +111,6 @@ Flagsmith withheld lift and win probability at 100 reviewers. Its minimums
 were 50 reviewers and five conversions per variant.
 [Experiment results and interpretation](docs/experiment-results.md)
 
-The experiment is still running. Use this command to roll out
-`overlay_summary` if it wins.
-
-```sh
-python3 scripts/flagsmith_experiment.py rollout --variant overlay_summary
-```
-
 ### Reuse the reviewer panel
 
 The `default` panel contains the same 1,300 simulated reviewers already registered
@@ -124,7 +130,7 @@ copy `_template.yaml` to a new file in `simulator/experiments/`, such as
 `example_feature.yaml`. Set the feature flag,
 its exact variant values and control, the success and failure event names, and
 the assumptions for each variant and the variant-neutral `null` model. Set up
-the matching experiment and metrics in Flagsmith before running live.
+the matching experiment and metrics in Development before running live.
 [Experiment template](simulator/experiments/_template.yaml)
 
 ```sh
@@ -138,13 +144,11 @@ Use `--model null` to rehearse with the same behaviour assumptions for every
 variant. `--seed` controls decision sampling, and `--rate` sets the live pace.
 Use `--panel generated --n N --prefix <fresh-prefix>` to create new identities.
 
-Flagsmith already counted the `default` panel on `flow_view`. Sending events
-again for the same reviewers on the same flag double-counts them, so a live
-repeat requires `--allow-repeat`. A new experiment on a different flag can
-reuse the panel because Flagsmith assigns each identity independently per flag.
-The simulator records live selections in `data/simulator-runs.sqlite3` before
-sending events, so an interrupted run can trigger the warning on retry. Check
-Flagsmith first if another checkout has sent traffic.
+The `default` panel can run in Development after its recorded Production runs.
+A live repeat for the same reviewers, flag, and environment requires
+`--allow-repeat`. The simulator records selections in `data/simulator-runs.sqlite3`
+before sending events, so an interrupted run can trigger the warning on retry.
+Check Flagsmith first if another checkout has sent traffic.
 
 ### Flow direction experiment
 
@@ -157,15 +161,13 @@ flows. Yes and No send elapsed milliseconds with `layout_understood` and
 `layout_confusing`, respectively. Preview direction works on any flow without
 sending layout experiment events.
 
-Preview the Flagsmith changes from the repo root, then run both assumption
-models on the default panel.
+After setting up Development in step 5, preview experiment creation and
+rehearse both assumption models with the default panel.
 
 ```sh
-python3 scripts/flagsmith_setup.py --dry-run
 python3 scripts/flagsmith_experiment.py --experiment flow_direction create --dry-run
-cd simulator
-uv run python simulate.py --experiment flow_direction --panel default --dry-run
-uv run python simulate.py --experiment flow_direction --panel default --dry-run --model null
+uv run --project simulator python simulator/simulate.py --experiment flow_direction --dry-run
+uv run --project simulator python simulator/simulate.py --experiment flow_direction --dry-run --model null
 ```
 
 [Depth distribution and eligibility](docs/ARCHITECTURE.md#long-flow-layout-experiment) ·
@@ -193,7 +195,7 @@ The idempotent `make flagsmith-setup` command creates missing flags and tags.
 
 | Tag | Flags |
 | --- | --- |
-| `code-flow` | `flow_view`, `flagsmith_mode`, and `ai_summary` |
+| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, and `ai_summary` |
 | `repo:flagsmith-api` | Seed flags from Flagsmith's `api/integrations/flagsmith/data/environment.json` |
 | `repo:shop-demo` | `new_checkout` and `holiday_discount` |
 
@@ -225,7 +227,8 @@ docker compose -f data/flagsmith-docker/docker-compose.yml up -d
 ```
 
 Open <http://localhost:8000>. Create an account and an organisation, then
-create a project named `code-flow` with a `Production` environment. Open
+create a project named `code-flow` with `Production` and `Development`
+environments. Open
 **Organisation settings → API Keys** and create an admin API key. A personal
 API token with admin access also works. Set `FLAGSMITH_ADMIN_API_KEY` in
 the local `.env`. Keep that file out of Git. The default Flagsmith API URL is
@@ -247,25 +250,17 @@ example**. Wait for **Import progress** to reach **Ready** and open the viewer.
 Stop the dev servers with Ctrl-C before continuing to setup so the next start
 reads the new keys.
 
-### 3. Seed flags and start the experiment
+### 3. Seed Production for the web app
 
 ```sh
 make flagsmith-setup-dry-run
 make flagsmith-setup
 ```
 
-The dry run previews changes. Setup writes the client-side and server-side
+The dry run previews changes. Setup writes the Production client-side and server-side
 environment keys to `.env` and the tag scopes to `data/flagsmith_scopes.json`.
 If setup asks you to enable the warehouse manually, use **Production →
 Environment Settings → Warehouse → Flagsmith database → Enable**.
-
-```sh
-python3 scripts/flagsmith_experiment.py create
-```
-
-This creates both metrics from `diff_understood` and starts
-**flow_view: overlay vs side by side** in Production with the 34/33/33 split.
-The recorded run used Flagsmith 2.295.2.
 
 ### 4. Open the viewer
 
@@ -312,12 +307,20 @@ and the diffs analyzed in step 2.
 make simulate-dry-run
 ```
 
-With Flagsmith running, use a fresh prefix to send new identities to the
-existing `flow_view` experiment.
+Set up Development, start `flow_view` with both `diff_understood` metrics,
+and send the default panel to that experiment.
 
 ```sh
-(cd simulator && uv run python simulate.py --experiment flow_view --panel generated --n 1000 --prefix "sim-judge-$(date +%s)")
+python3 scripts/flagsmith_setup.py --environment Development --dry-run
+make flagsmith-setup-sim
+python3 scripts/flagsmith_experiment.py --experiment flow_view create
+make simulate
 ```
+
+Development setup writes the simulation settings to `.env` and restores the
+original flag splits for both experiments. If setup asks you to enable the
+warehouse manually, use **Development → Environment Settings → Warehouse →
+Flagsmith database → Enable** before starting the experiment.
 
 Ask Flagsmith to refresh results and read the result table.
 
@@ -326,8 +329,12 @@ python3 scripts/flagsmith_experiment.py refresh --wait 120
 python3 scripts/flagsmith_experiment.py status
 ```
 
-You can also read the results in **code-flow → Production → Experiments →
+You can also read the results in **code-flow → Development → Experiments →
 flow_view: overlay vs side by side** on the Flagsmith dashboard.
+
+The simulator and experiment writes require `--environment Production` to
+target Production. To inspect a recorded result, run
+`python3 scripts/flagsmith_experiment.py --environment Production status`.
 
 ### 6. Try the shop-demo tutorial
 
@@ -376,7 +383,7 @@ flowchart LR
 - Each commit gets a JSON graph snapshot. The analyzer can also export a diff as Mermaid.
 - FastAPI serves snapshots, diffs, source snippets, and live flag findings.
 - The React viewer lays out the changed functions and nearby calls with ELK.
-- The browser and simulator send reviewer exposures and outcomes to Flagsmith.
+- The browser sends reviewer exposures and outcomes to Production. The simulator targets Development by default.
 - Flagsmith computes results from events in its Postgres-backed warehouse.
 
 [Architecture and JSON schemas](docs/ARCHITECTURE.md)

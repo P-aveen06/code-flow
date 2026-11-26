@@ -68,9 +68,6 @@ class DryRunClient:
 
 def flagsmith_client(api_url: str, environment_key: str) -> Flagsmith:
     """Enable experiment events on the same self-hosted API as flag evaluation."""
-    if not environment_key:
-        raise ValueError("Set CODEFLOW_FLAGSMITH_ENV_KEY to the client-side environment key.")
-
     api_url = api_url.rstrip("/")
     error = "FLAGSMITH_API_URL must be an HTTP(S) API base URL ending in /v1/."
     try:

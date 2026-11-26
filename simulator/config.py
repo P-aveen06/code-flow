@@ -1,10 +1,42 @@
 """Read and validate common simulator configuration fields."""
 
 import math
+import os
 import re
 from pathlib import Path
 
 import yaml
+
+PRODUCTION_ENVIRONMENT = "Production"
+DEFAULT_SIM_ENVIRONMENT = "Development"
+PRODUCTION_KEY = "CODEFLOW_FLAGSMITH_ENV_KEY"
+SIMULATION_KEY = "CODEFLOW_SIM_FLAGSMITH_ENV_KEY"
+QUOTED_ENV_VALUE = re.compile(r"""(?:'[^']*'|"(?:\\.|[^"\\])*")""")
+
+
+def read_settings(path: Path, *names: str) -> dict[str, str]:
+    """Read only the requested settings, with the shell overriding the file."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+
+    values = {}
+    for line in lines:
+        name, separator, value = line.strip().removeprefix("export ").partition("=")
+        name = name.strip()
+        if not separator or name not in names:
+            continue
+        value = value.strip()
+        if quoted := QUOTED_ENV_VALUE.match(value):
+            value = quoted[0][1:-1]
+            if quoted[0].startswith('"'):
+                value = re.sub(r'\\([\\$`"])', r"\1", value)
+        else:
+            value = "" if value.startswith("#") else value.partition(" #")[0].strip()
+        values[name] = value
+    values.update({name: os.environ[name] for name in names if name in os.environ})
+    return values
 
 
 def named_path(directory: Path, name: str, suffix: str) -> Path:

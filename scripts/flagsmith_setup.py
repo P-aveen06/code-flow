@@ -24,6 +24,9 @@ DEFAULT_CLONE = DATA_DIR / "repos/Flagsmith__flagsmith"
 DEFAULT_SCOPE_FILE = DATA_DIR / "flagsmith_scopes.json"
 ENVIRONMENT_EXPORT = "api/integrations/flagsmith/data/environment.json"
 PROJECT_NAME = "code-flow"
+PRODUCTION_ENVIRONMENT = "Production"
+DEFAULT_SIM_ENVIRONMENT = "Development"
+SIM_ENVIRONMENT_SETTING = "CODEFLOW_SIM_ENVIRONMENT"
 CODE_FLOW_TAG = "code-flow"
 REPO_ID_BY_TAG = {
     "repo:shop-demo": "shop-demo",
@@ -149,6 +152,16 @@ class Flag:
     variants: tuple[Variant, ...] = ()
 
 
+FLOW_VIEW_FLAG = Flag(
+    "flow_view",
+    True,
+    "side_by_side",
+    "MULTIVARIATE",
+    (
+        Variant("overlay", 33, "overlay"),
+        Variant("overlay_summary", 33, "overlay_summary"),
+    ),
+)
 FLOW_DIRECTION_FLAG = Flag(
     "flow_direction",
     True,
@@ -230,23 +243,14 @@ def find_record(records: list[Record], field: str, value: str, resource: str) ->
     return matches[0] if matches else None
 
 
-def select_environment(environments: list[Record], name: str | None) -> Record:
-    if name is not None:
-        environment = find_record(environments, "name", name, "environment")
-        if environment is None:
-            raise SetupError(
-                "The environment specified by --environment was not found in code-flow."
-            )
-        return environment
-    for preferred_name in ("Production", "Development"):
-        environment = find_record(environments, "name", preferred_name, "environment")
-        if environment is not None:
-            return environment
-    if len(environments) == 1:
-        return environments[0]
-    if not environments:
-        raise SetupError("Create an environment in the code-flow project first.")
-    raise SetupError("Use --environment NAME to select an environment in code-flow.")
+def select_environment(environments: list[Record], name: str) -> Record:
+    environment = find_record(environments, "name", name, "environment")
+    if environment is None:
+        raise SetupError(
+            f"Environment {name!r} was not found in the code-flow project. "
+            "Create it in Flagsmith or select an existing one with --environment."
+        )
+    return environment
 
 
 def ensure_tag(
@@ -280,7 +284,10 @@ def create_flag(
             data["key"] = variant.key
         option = client.request("POST", f"{path}{feature_id}/mv-options/", data)
         weights[option["id"]] = variant.allocation
-    initialize_flag_state(client, environment, feature_id, flag, weights)
+    state = get_flag_state(client, environment, feature_id)
+    if state is None:
+        raise SetupError("Flagsmith did not create an initial state for the new flag.")
+    apply_flag_defaults(client, environment, feature_id, flag, weights, state)
     return feature
 
 
@@ -292,16 +299,14 @@ def get_flag_state(client: AdminClient, environment: Record, feature_id: int) ->
     return states[0] if states else None
 
 
-def initialize_flag_state(
+def apply_flag_defaults(
     client: AdminClient,
     environment: Record,
     feature_id: int,
     flag: Flag,
     weights: dict[int, float],
+    state: Record,
 ) -> None:
-    state = get_flag_state(client, environment, feature_id)
-    if state is None:
-        raise SetupError("Flagsmith did not create an initial state for the new flag.")
     weight_rows = {
         row["multivariate_feature_option"]: row
         for row in state["multivariate_feature_state_values"]
@@ -363,9 +368,23 @@ def show_state(enabled: bool, value: FlagValue, variants: tuple[Variant, ...]) -
     return ", ".join(parts)
 
 
-def report_drift(client: AdminClient, environment: Record, feature: Record, flag: Flag) -> None:
+def configure_existing_flag(
+    client: AdminClient,
+    environment: Record,
+    feature: Record,
+    flag: Flag,
+    *,
+    simulation_environment: bool,
+    dry_run: bool,
+) -> None:
+    restore_experiment_defaults = simulation_environment and flag in (
+        FLOW_VIEW_FLAG,
+        FLOW_DIRECTION_FLAG,
+    )
     state = get_flag_state(client, environment, feature["id"])
     if state is None:
+        if restore_experiment_defaults:
+            raise SetupError(f"{flag.name} has no environment state to configure.")
         print(f"{flag.name} differs from defaults (no live state).")
         return
     weights = {
@@ -377,28 +396,58 @@ def report_drift(client: AdminClient, environment: Record, feature: Record, flag
         "int": "integer_value",
         "bool": "boolean_value",
     }
-    variants = tuple(
-        Variant(
+    variants_by_id = {
+        option["id"]: Variant(
             option[value_fields_by_type.get(option["type"], "string_value")],
             weights.get(option["id"], 0),
             option.get("key"),
         )
         for option in feature["multivariate_options"]
-    )
+    }
+    variants = tuple(variants_by_id.values())
     live_value = state["feature_state_value"]
     live_enabled = state["enabled"]
     if (
-        live_enabled != flag.enabled
-        or not same_value(live_value, flag.value)
-        or Counter((type(variant.value), variant) for variant in variants)
-        != Counter((type(variant.value), variant) for variant in flag.variants)
-        or feature["type"] != flag.kind
+        live_enabled == flag.enabled
+        and same_value(live_value, flag.value)
+        and Counter((type(variant.value), variant) for variant in variants)
+        == Counter((type(variant.value), variant) for variant in flag.variants)
+        and feature["type"] == flag.kind
     ):
-        print(
-            f"{flag.name} differs from defaults "
-            f"(current {feature['type']} {show_state(live_enabled, live_value, variants)} | "
-            f"expected {flag.kind} {show_state(flag.enabled, flag.value, flag.variants)})."
-        )
+        return
+
+    unconfigured = not live_enabled and live_value is None and not any(weights.values())
+    if simulation_environment and (restore_experiment_defaults or unconfigured):
+        expected_options = {
+            (type(variant.value), variant.value, variant.key): variant.allocation
+            for variant in flag.variants
+        }
+        actual_options = {
+            option_id: (type(variant.value), variant.value, variant.key)
+            for option_id, variant in variants_by_id.items()
+        }
+        if (
+            feature["type"] == flag.kind
+            and len(variants) == len(flag.variants) == len(expected_options)
+            and set(actual_options.values()) == expected_options.keys()
+        ):
+            allocations = {
+                option_id: expected_options[signature]
+                for option_id, signature in actual_options.items()
+            }
+            if not dry_run:
+                apply_flag_defaults(client, environment, feature["id"], flag, allocations, state)
+            verb = "Would set" if dry_run else "Set"
+            print(f"{verb} {flag.name} to {show_state(flag.enabled, flag.value, flag.variants)}.")
+            return
+        if restore_experiment_defaults:
+            raise SetupError(f"{flag.name} has project variants that differ from setup defaults.")
+
+    print(
+        f"{flag.name} differs from defaults "
+        f"(current {feature['type']} {show_state(live_enabled, live_value, variants)} | "
+        f"expected {flag.kind} {show_state(flag.enabled, flag.value, flag.variants)})."
+    )
 
 
 def add_tag_to_flag(
@@ -474,6 +523,7 @@ ENV_ASSIGNMENT = re.compile(
     rb"(?P<value>[^\r\n]*)(?P<newline>\r\n|\n|\r)?"
 )
 INLINE_COMMENT = re.compile(rb"[ \t]+#")
+QUOTED_ENV_VALUE = re.compile(rb"""(?:'[^']*'|"(?:\\.|[^"\\])*")""")
 
 
 def split_env_value(raw: bytes) -> tuple[bytes, bytes, bytes]:
@@ -482,15 +532,19 @@ def split_env_value(raw: bytes) -> tuple[bytes, bytes, bytes]:
     prefix = raw[: len(raw) - len(rest)]
     if rest.startswith(b"#") and prefix:
         return b"", b"", raw
-    if rest.startswith((b'"', b"'")) and (end := rest.find(rest[:1], 1)) >= 0:
-        return prefix, rest[: end + 1], rest[end + 1 :]
+    if quoted := QUOTED_ENV_VALUE.match(rest):
+        return prefix, quoted[0], rest[quoted.end() :]
     comment = INLINE_COMMENT.search(rest)
     value = (rest[: comment.start()] if comment else rest).rstrip(b" \t")
     return prefix, value, rest[len(value) :]
 
 
 def unquote(value: bytes) -> bytes:
-    if len(value) >= 2 and value[:1] in (b'"', b"'") and value[-1:] == value[:1]:
+    if len(value) < 2:
+        return value
+    if value.startswith(b'"') and value.endswith(b'"'):
+        return re.sub(rb'\\([\\$`"])', rb"\1", value[1:-1])
+    if value.startswith(b"'") and value.endswith(b"'"):
         return value[1:-1]
     return value
 
@@ -527,6 +581,13 @@ def update_env_file(path: Path, values: dict[str, str | None], dry_run: bool = F
             encoded[name.encode()] = None
         elif value is not None and re.fullmatch(r"[a-zA-Z0-9_.-]+", value):
             encoded[name.encode()] = value.encode()
+        elif name == SIM_ENVIRONMENT_SETTING:
+            if not value or value != value.strip() or not value.isprintable():
+                raise SetupError(
+                    "The simulation environment name cannot be stored in the .env file."
+                )
+            escaped = re.sub(rb'([\\$`"])', rb"\\\1", value.encode())
+            encoded[name.encode()] = b'"' + escaped + b'"'
         else:
             raise SetupError("Flagsmith returned an invalid SDK key.")
     changed = set()
@@ -541,10 +602,12 @@ def update_env_file(path: Path, values: dict[str, str | None], dry_run: bool = F
             continue
         prefix, old_value, suffix = split_env_value(match["value"])
         value = encoded[name]
-        if unquote(old_value) == value:
+        old_unquoted = unquote(old_value)
+        unquoted = unquote(value) if value is not None else None
+        if old_unquoted == unquoted:
             lines.append(line)
         elif not dry_run:
-            if old_value != unquote(old_value):
+            if old_value != old_unquoted and value == unquoted:
                 value = old_value[:1] + value + old_value[-1:]
             lines.append(match["prefix"] + prefix + value + suffix + (match["newline"] or b""))
             changed.add(name)
@@ -592,21 +655,12 @@ def setup(
     env_file: Path,
     dry_run: bool,
     *,
-    environment_name: str | None = None,
+    environment_name: str = PRODUCTION_ENVIRONMENT,
     scope_file: Path = DEFAULT_SCOPE_FILE,
 ) -> None:
     groups = {
         CODE_FLOW_TAG: [
-            Flag(
-                "flow_view",
-                True,
-                "side_by_side",
-                "MULTIVARIATE",
-                (
-                    Variant("overlay", 33, "overlay"),
-                    Variant("overlay_summary", 33, "overlay_summary"),
-                ),
-            ),
+            FLOW_VIEW_FLAG,
             FLOW_DIRECTION_FLAG,
             Flag("flagsmith_mode", True),
             Flag("ai_summary", False),
@@ -614,6 +668,7 @@ def setup(
         "repo:flagsmith-api": defaults,
         "repo:shop-demo": [Flag("new_checkout", True), Flag("holiday_discount", True)],
     }
+    app_environment = environment_name == PRODUCTION_ENVIRONMENT
     scope_file = scope_file.resolve()
     if scope_file == env_file.resolve():
         raise SetupError("Use different paths for the environment and scope files.")
@@ -641,7 +696,14 @@ def setup(
         for flag in flags:
             name = flag.name.casefold()
             if feature := features.get(name):
-                report_drift(client, environment, feature, flag)
+                configure_existing_flag(
+                    client,
+                    environment,
+                    feature,
+                    flag,
+                    simulation_environment=not app_environment,
+                    dry_run=dry_run,
+                )
                 add_tag_to_flag(client, feature_path, feature, label, tag_id, dry_run)
             else:
                 verb = "Would create" if dry_run else "Created"
@@ -652,29 +714,37 @@ def setup(
                     f"({show_state(flag.enabled, flag.value, flag.variants)})."
                 )
 
-    client_key = environment["api_key"]
-    keys = {
-        "CODEFLOW_FLAGSMITH_ENV_KEY": client_key,
-        "VITE_CODEFLOW_FLAGSMITH_ENV_KEY": client_key,
-        "CODEFLOW_FLAGSMITH_SERVER_KEY": ensure_server_key(client, environment, dry_run),
-    }
+    if app_environment:
+        keys = {
+            "CODEFLOW_FLAGSMITH_ENV_KEY": environment["api_key"],
+            "VITE_CODEFLOW_FLAGSMITH_ENV_KEY": environment["api_key"],
+            "CODEFLOW_FLAGSMITH_SERVER_KEY": ensure_server_key(client, environment, dry_run),
+        }
+    else:
+        keys = {
+            "CODEFLOW_SIM_FLAGSMITH_ENV_KEY": environment["api_key"],
+            SIM_ENVIRONMENT_SETTING: environment_name,
+        }
     ensure_warehouse(client, environment, dry_run)
 
-    # Read the actual tag memberships after writing. For a preview, include planned attachments.
-    tagged_features = features.values() if dry_run else client.list(feature_path)
-    tag_names = {
-        label: {feature["name"] for feature in tagged_features if tag_id in feature["tags"]}
-        for label, tag_id in tag_ids.items()
-    }
-    if dry_run:
-        for label, flags in groups.items():
-            for flag in flags:
-                feature = features.get(flag.name.casefold())
-                tag_names[label].add(feature["name"] if feature else flag.name)
+    if app_environment:
+        # Use the actual tag memberships, including planned attachments in a preview.
+        tagged_features = features.values() if dry_run else client.list(feature_path)
+        tag_names = {
+            label: {feature["name"] for feature in tagged_features if tag_id in feature["tags"]}
+            for label, tag_id in tag_ids.items()
+        }
+        if dry_run:
+            for label, flags in groups.items():
+                for flag in flags:
+                    feature = features.get(flag.name.casefold())
+                    tag_names[label].add(feature["name"] if feature else flag.name)
+
     for variable in update_env_file(env_file, keys, dry_run):
         verb = "Would write" if dry_run else "Wrote"
         print(f"{verb} {variable} to the environment file.")
-    write_scopes(scope_file, environment["name"], tag_names, dry_run)
+    if app_environment:
+        write_scopes(scope_file, environment_name, tag_names, dry_run)
 
 
 def main() -> int:
@@ -688,7 +758,8 @@ def main() -> int:
     parser.add_argument(
         "--environment",
         metavar="NAME",
-        help="Choose an existing environment (default Production, Development, or the only one).",
+        default=PRODUCTION_ENVIRONMENT,
+        help="Choose an existing environment (default Production).",
     )
     parser.add_argument(
         "--scope-file",

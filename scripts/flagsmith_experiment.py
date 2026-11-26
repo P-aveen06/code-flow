@@ -13,8 +13,11 @@ from pathlib import Path
 
 from flagsmith_setup import (
     DEFAULT_API_URL,
+    DEFAULT_SIM_ENVIRONMENT,
     FLOW_DIRECTION_FLAG,
+    PRODUCTION_ENVIRONMENT,
     PROJECT_NAME,
+    SIM_ENVIRONMENT_SETTING,
     AdminClient,
     AdminError,
     Record,
@@ -24,7 +27,6 @@ from flagsmith_setup import (
     select_environment,
 )
 
-ENVIRONMENT_NAME = "Production"
 MIN_REVIEWERS_PER_VARIANT = 50
 MIN_CONVERSIONS_PER_VARIANT = 5
 RESULTS_POLL_SECONDS = 2
@@ -160,7 +162,7 @@ def create(
         ):
             split = "/".join(map(str, definition.allocations.values()))
             raise SetupError(
-                f"Production {feature['name']} must be enabled with a {split} split before creation."
+                f"{feature['name']} must be enabled with a {split} split before creation."
             )
     elif experiment is not None:
         detail = api.get(f"{experiments_path}{experiment['id']}/")
@@ -254,9 +256,7 @@ def rollout(
     state = experiment_state(experiment)
     if state == "completed":
         if all(experiment[key] == value for key, value in body.items()):
-            print(
-                f"Already completed with {variant} at 100% in the Production environment default."
-            )
+            print(f"Already completed with {variant} at 100% as the environment default.")
             return
         raise SetupError("The experiment was already completed with a different rollout decision.")
     if state == "created":
@@ -264,7 +264,7 @@ def rollout(
 
     api.post(f"{path}complete/", body)
     verb = "Would complete" if api.dry_run else "Completed"
-    print(f"{verb} {definition.name} with {variant} at 100% in the Production environment default.")
+    print(f"{verb} {definition.name} with {variant} at 100% as the environment default.")
 
 
 def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
@@ -448,6 +448,7 @@ def run(
     command: str,
     variant: str | None = None,
     *,
+    environment_name: str = DEFAULT_SIM_ENVIRONMENT,
     experiment_flag: str = "flow_view",
     wait_seconds: int = 0,
 ) -> None:
@@ -460,9 +461,8 @@ def run(
     if project is None:
         raise SetupError("The code-flow project was not found.")
     project_path = f"projects/{project['id']}/"
-    environment = select_environment(api.list(f"{project_path}environments/"), ENVIRONMENT_NAME)
+    environment = select_environment(api.list(f"{project_path}environments/"), environment_name)
     environment_path = f"environments/{environment['api_key']}/"
-    print(f"Using Flagsmith environment {PROJECT_NAME}/{ENVIRONMENT_NAME}.")
 
     experiments = api.list(f"{environment_path}experiments/?q={experiment_flag}")
     experiment = find_record(experiments, "name", definition.name, "experiment")
@@ -494,7 +494,7 @@ def run(
             for other in experiments
         ):
             raise SetupError(
-                f"{experiment_flag} already has a different active experiment in Production."
+                f"{experiment_flag} already has a different active experiment in this environment."
             )
         create(api, environment_path, feature, experiment, definition)
     elif experiment is not None:
@@ -516,6 +516,10 @@ def main() -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview using only GET requests.")
     parser.add_argument(
+        "--environment",
+        help="Flagsmith environment (default CODEFLOW_SIM_ENVIRONMENT or Development).",
+    )
+    parser.add_argument(
         "--experiment",
         choices=EXPERIMENTS,
         default="flow_view",
@@ -530,6 +534,7 @@ def main() -> int:
     ):
         subcommand = commands.add_parser(name, help=help_text)
         subcommand.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
+        subcommand.add_argument("--environment", default=argparse.SUPPRESS)
         subcommand.add_argument("--experiment", choices=EXPERIMENTS, default=argparse.SUPPRESS)
         if name == "rollout":
             subcommand.add_argument("--variant", required=True)
@@ -545,12 +550,32 @@ def main() -> int:
     if variant is not None and variant not in EXPERIMENTS[args.experiment].allocations:
         choices = ", ".join(EXPERIMENTS[args.experiment].allocations)
         parser.error(f"--variant for {args.experiment} must be one of {choices}.")
-    options = {"experiment_flag": args.experiment, "wait_seconds": wait_seconds}
-
     try:
-        settings = read_env(args.env_file)
+        try:
+            settings = read_env(args.env_file)
+        except FileNotFoundError:
+            settings = {}
+        configured = os.environ.get(SIM_ENVIRONMENT_SETTING, settings.get(SIM_ENVIRONMENT_SETTING))
+        environment = (
+            args.environment
+            if args.environment is not None
+            else configured or DEFAULT_SIM_ENVIRONMENT
+        )
+        print(f"Using Flagsmith environment {PROJECT_NAME}/{environment}.", flush=True)
+        if (
+            environment.casefold() == PRODUCTION_ENVIRONMENT.casefold()
+            and args.environment != PRODUCTION_ENVIRONMENT
+            and args.command != "status"
+            and not args.dry_run
+        ):
+            raise SetupError("Production writes require an explicit --environment Production.")
         if not (admin_key := settings.get("FLAGSMITH_ADMIN_API_KEY")):
             raise SetupError("Set FLAGSMITH_ADMIN_API_KEY in the environment file.")
+        options = {
+            "environment_name": environment,
+            "experiment_flag": args.experiment,
+            "wait_seconds": wait_seconds,
+        }
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
         api = ExperimentAPI(client, args.dry_run)
         if args.dry_run or args.command == "status":

@@ -272,8 +272,7 @@ def test_missing_project_explains_how_to_create_it(env_file, scope_file, dry_run
     [
         (["Development", "Production"], None, "Production"),
         (["Development", "Production"], "Development", "Development"),
-        (["Preview", "Development"], None, "Development"),
-        (["Staging"], None, "Staging"),
+        (['QA "Preview"', "Development"], 'QA "Preview"', 'QA "Preview"'),
     ],
 )
 def test_environment_selection_uses_one_environment(
@@ -288,16 +287,26 @@ def test_environment_selection_uses_one_environment(
         [],
         env_file,
         dry_run=False,
-        environment_name=override,
         scope_file=scope_file,
+        **({"environment_name": override} if override else {}),
     )
 
     settings = setup_script.read_env(env_file)
-    assert settings["CODEFLOW_FLAGSMITH_ENV_KEY"] == selected["api_key"]
-    assert settings["VITE_CODEFLOW_FLAGSMITH_ENV_KEY"] == selected["api_key"]
-    assert settings["CODEFLOW_FLAGSMITH_SERVER_KEY"] == client.keys[selected["id"]][0]["key"]
-    assert set(client.keys) == set(client.warehouses) == {selected["id"]}
-    assert json.loads(scope_file.read_bytes())["environment"] == expected
+    if expected == "Production":
+        assert settings["CODEFLOW_FLAGSMITH_ENV_KEY"] == selected["api_key"]
+        assert settings["VITE_CODEFLOW_FLAGSMITH_ENV_KEY"] == selected["api_key"]
+        assert settings["CODEFLOW_FLAGSMITH_SERVER_KEY"] == client.keys[selected["id"]][0]["key"]
+        assert set(client.keys) == {selected["id"]}
+        assert json.loads(scope_file.read_bytes())["environment"] == expected
+    else:
+        assert settings == {
+            "FLAGSMITH_ADMIN_API_KEY": "test-admin-secret",
+            "CODEFLOW_SIM_FLAGSMITH_ENV_KEY": selected["api_key"],
+            "CODEFLOW_SIM_ENVIRONMENT": expected,
+        }
+        assert not client.keys
+        assert not scope_file.exists()
+    assert set(client.warehouses) == {selected["id"]}
     for env in environments:
         _, state = client.project_flag(env, "flow_view")
         assert state["enabled"] is (env == selected)
@@ -311,9 +320,9 @@ def test_environment_selection_uses_one_environment(
 @pytest.mark.parametrize(
     ("environments", "override", "message"),
     [
-        (["Production"], "Missing", "specified by --environment was not found"),
-        (["Staging", "Preview"], None, "Use --environment NAME"),
-        ([], None, "Create an environment"),
+        (["Production"], "Missing", "Environment 'Missing' was not found"),
+        (["Staging", "Development"], None, "Environment 'Production' was not found"),
+        ([], None, "Create it in Flagsmith"),
     ],
 )
 def test_environment_selection_errors_before_writes(
@@ -325,10 +334,106 @@ def test_environment_selection_errors_before_writes(
         client.add_environment(project, name)
     with pytest.raises(setup_script.SetupError, match=message):
         setup_script.setup(
-            client, [], env_file, dry_run=False, environment_name=override, scope_file=scope_file
+            client,
+            [],
+            env_file,
+            dry_run=False,
+            scope_file=scope_file,
+            **({"environment_name": override} if override else {}),
         )
     assert all(method == "GET" for method, _ in client.calls)
     assert not scope_file.exists()
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+def test_development_cli_restores_experiment_states_and_preserves_production(
+    versioned, export_file, env_file, scope_file, monkeypatch, capsys
+):
+    client = FakeAdminClient()
+    project = client.add_project()
+    production = client.add_environment(project, "Production")
+    development = client.add_environment(project, "Development", versioned=versioned)
+    defaults = setup_script.load_flagsmith_api_defaults(export_file)
+    setup_script.setup(client, defaults, env_file, dry_run=False, scope_file=scope_file)
+
+    for flag_name, winner in (
+        ("flow_view", "overlay_summary"),
+        ("flow_direction", "vertical"),
+    ):
+        _, state = client.project_flag(production, flag_name)
+        state["feature_state_value"] = winner
+        for weight in state["multivariate_feature_state_values"]:
+            weight["percentage_allocation"] = 0
+
+    _, drifted = client.project_flag(development, "flow_view")
+    drifted.update(enabled=True, feature_state_value="overlay")
+    for row, allocation in zip(drifted["multivariate_feature_state_values"], (60, 10), strict=True):
+        row["percentage_allocation"] = allocation
+    # flow_direction still has the empty Development state created with the project flag.
+    before_production = copy.deepcopy(
+        {key: state for key, state in client.states.items() if key[0] == production["id"]}
+    )
+    before_env = env_file.read_bytes()
+    before_scope = scope_file.read_bytes()
+    client.calls.clear()
+    capsys.readouterr()
+
+    monkeypatch.setattr(setup_script, "AdminClient", lambda *_: client)
+    args = [
+        "flagsmith_setup.py",
+        "--environment",
+        "Development",
+        "--env-file",
+        str(env_file),
+        "--scope-file",
+        str(scope_file),
+        "--environment-json",
+        str(export_file),
+    ]
+    monkeypatch.setattr(sys, "argv", [*args, "--dry-run"])
+    assert setup_script.main() == 0
+    preview = capsys.readouterr().out
+    assert "Would set flow_view" in preview and "Would set flow_direction" in preview
+    assert all(method == "GET" for method, _ in client.calls)
+    assert env_file.read_bytes() == before_env
+    assert scope_file.read_bytes() == before_scope
+
+    monkeypatch.setattr(sys, "argv", args)
+    client.calls.clear()
+    assert setup_script.main() == 0
+    assert (
+        env_file.read_bytes()
+        == before_env
+        + (
+            f"CODEFLOW_SIM_FLAGSMITH_ENV_KEY={development['api_key']}\r\n"
+            "CODEFLOW_SIM_ENVIRONMENT=Development\r\n"
+        ).encode()
+    )
+    assert scope_file.read_bytes() == before_scope
+    assert {key: client.states[key] for key in before_production} == before_production
+    assert all(production["api_key"] not in path for _, path in client.calls)
+    assert len(client.features) == len(defaults) + 6
+    assert set(client.keys) == {production["id"]}
+    assert set(client.warehouses) == {production["id"], development["id"]}
+    for flag_name, control, expected in (
+        ("flow_view", "side_by_side", {"overlay": 33, "overlay_summary": 33}),
+        ("flow_direction", "horizontal", {"vertical": 50}),
+    ):
+        flag, state = client.project_flag(development, flag_name)
+        assert state["enabled"] is True
+        assert state["feature_state_value"] == control
+        option_keys = {option["id"]: option["key"] for option in flag["multivariate_options"]}
+        assert {
+            option_keys[row["multivariate_feature_option"]]: row["percentage_allocation"]
+            for row in state["multivariate_feature_state_values"]
+        } == expected
+
+    output = capsys.readouterr()
+    assert "Using Flagsmith environment code-flow/Development." in output.out
+    assert "secret" not in preview + output.out + output.err
+    client.calls.clear()
+    assert setup_script.main() == 0
+    assert all(method == "GET" for method, _ in client.calls)
 
 
 def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_file, capsys):

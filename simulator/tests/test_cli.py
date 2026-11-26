@@ -1,6 +1,7 @@
 """Check the CLI configuration and SDK wiring with stubbed HTTP."""
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from requests import PreparedRequest, Response, Session
 
 import simulate
 from clients import DryRunClient
+from diffs import DiffSample
 
 
 @pytest.fixture
@@ -23,8 +25,13 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     }
     (directory / "commits.json").write_text(json.dumps({"commits": [{"stats": stats}]}))
     monkeypatch.setattr(simulate, "REPO_ROOT", tmp_path)
-    monkeypatch.delenv("FLAGSMITH_API_URL", raising=False)
-    monkeypatch.delenv("CODEFLOW_FLAGSMITH_ENV_KEY", raising=False)
+    for name in (
+        "FLAGSMITH_API_URL",
+        "CODEFLOW_FLAGSMITH_ENV_KEY",
+        "CODEFLOW_SIM_FLAGSMITH_ENV_KEY",
+        "CODEFLOW_SIM_ENVIRONMENT",
+    ):
+        monkeypatch.delenv(name, raising=False)
     return tmp_path
 
 
@@ -32,6 +39,7 @@ def test_dry_run_prints_a_simulated_summary(repo: Path, capsys: pytest.CaptureFi
     (repo / ".env").write_text("CODEFLOW_FLAGSMITH_ENV_KEY=local-test-secret\n")
     assert simulate.main(["--dry-run", "--limit", "3", "--model", "null"]) == 0
     captured = capsys.readouterr()
+    assert "Using Flagsmith environment code-flow/Development." in captured.out
     assert "Simulated reviewers (null model, dry run)" in captured.out
     assert "shop-demo" in captured.out
     assert "Success rate" in captured.out
@@ -60,9 +68,10 @@ def test_sdk_posts_to_self_hosted_api_and_never_prints_keys(
     api_url = "https://flagsmith.example.test/prefix/api/v1"
     (repo / ".env").write_text(
         f"export FLAGSMITH_API_URL='{api_url}/' # self-hosted\n"
-        "CODEFLOW_FLAGSMITH_ENV_KEY=file-test-secret\n"
+        "CODEFLOW_FLAGSMITH_ENV_KEY=production-test-secret\n"
+        "CODEFLOW_SIM_FLAGSMITH_ENV_KEY=file-test-secret\n"
     )
-    monkeypatch.setenv("CODEFLOW_FLAGSMITH_ENV_KEY", "shell-test-secret")
+    monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "shell-test-secret")
     calls: list[PreparedRequest] = []
 
     def stub_send(session: Session, request: PreparedRequest, **kwargs: object) -> Response:
@@ -98,8 +107,9 @@ def test_sdk_posts_to_self_hosted_api_and_never_prints_keys(
         rejected
     )
     captured = capsys.readouterr()
-    assert "file-test-secret" not in captured.out + captured.err
-    assert "shell-test-secret" not in captured.out + captured.err
+    assert "Using Flagsmith environment code-flow/Development." in captured.out
+    assert "Warning" not in captured.err
+    assert "test-secret" not in captured.out + captured.err
     assert all(call.headers["X-Environment-Key"] == "shell-test-secret" for call in calls)
     assert calls[0].url == f"{api_url}/identities/"
     identity = json.loads(calls[0].body)
@@ -125,6 +135,68 @@ def test_sdk_posts_to_self_hosted_api_and_never_prints_keys(
     assert int(outcome["value"]) > 0
 
 
+def test_missing_simulation_key_does_not_fall_back_to_production(repo, monkeypatch, capsys):
+    (repo / ".env").write_text("CODEFLOW_FLAGSMITH_ENV_KEY=production-test-secret\n")
+    monkeypatch.setattr(simulate, "flagsmith_client", lambda *_: pytest.fail("Unexpected SDK call"))
+
+    assert simulate.main(["--limit", "1"]) == 1
+
+    output = capsys.readouterr()
+    assert "code-flow/Development" in output.out
+    assert "Set CODEFLOW_SIM_FLAGSMITH_ENV_KEY" in output.err
+    assert "python3 scripts/flagsmith_setup.py --environment Development" in output.err
+    assert "test-secret" not in output.out + output.err
+
+
+def test_production_requires_an_explicit_option_and_warns(repo, monkeypatch, capsys):
+    (repo / ".env").write_text(
+        "CODEFLOW_SIM_ENVIRONMENT=Production\n"
+        "CODEFLOW_SIM_FLAGSMITH_ENV_KEY=simulation-test-secret\n"
+        "CODEFLOW_FLAGSMITH_ENV_KEY=production-test-secret\n"
+    )
+    client = DryRunClient({"side_by_side": 100})
+    keys = []
+
+    def fake_client(api_url, key):
+        keys.append(key)
+        return client
+
+    monkeypatch.setattr(simulate, "flagsmith_client", fake_client)
+    args = ["--panel", "generated", "--n", "1", "--prefix", "new-reviewer"]
+    assert simulate.main(args) == 1
+    output = capsys.readouterr()
+    assert "Targeting Production requires an explicit --environment Production." in output.err
+    assert keys == []
+
+    assert simulate.main([*args, "--environment", "Production"]) == 0
+    output = capsys.readouterr()
+    assert "code-flow/Production" in output.out
+    assert "simulated users will go into the Production real-reviewer environment" in output.err
+    assert "test-secret" not in output.out + output.err
+    assert keys == ["production-test-secret"]
+    assert client.closed
+
+
+def test_live_simulation_uses_the_configured_non_production_environment(repo, monkeypatch, capsys):
+    (repo / ".env").write_text(
+        'CODEFLOW_SIM_ENVIRONMENT="QA \\"Preview\\""\nCODEFLOW_SIM_FLAGSMITH_ENV_KEY=test-sim-key\n'
+    )
+    keys = []
+
+    def fake_client(api_url, key):
+        keys.append(key)
+        return DryRunClient({"side_by_side": 100})
+
+    monkeypatch.setattr(simulate, "flagsmith_client", fake_client)
+    assert simulate.main(["--limit", "1", "--environment", "Development"]) == 1
+    assert "must match CODEFLOW_SIM_ENVIRONMENT" in capsys.readouterr().err
+    assert simulate.main(["--limit", "1"]) == 0
+    output = capsys.readouterr()
+    assert 'code-flow/QA "Preview"' in output.out
+    assert "test-sim-key" not in output.out + output.err
+    assert keys == ["test-sim-key"]
+
+
 @pytest.fixture
 def second_experiment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     template = (simulate.EXPERIMENTS_DIR / "_template.yaml").read_text()
@@ -144,7 +216,7 @@ def second_experiment(repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 def test_a_second_experiment_uses_its_flag_events_and_stored_traits(
     second_experiment: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("CODEFLOW_FLAGSMITH_ENV_KEY", "test-key")
+    monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "test-key")
     identities = []
     events = []
 
@@ -230,30 +302,75 @@ def test_profiles_need_no_experiment_or_diff_data(
     assert not (tmp_path / "data").exists()
 
 
-def test_guard_blocks_the_recorded_flow_view_panel_before_contacting_flagsmith(
-    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("flag", "control"), [("flow_view", "side_by_side"), ("flow_direction", "horizontal")]
+)
+def test_guard_blocks_the_recorded_production_panel_before_contacting_flagsmith(
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+    control: str,
 ) -> None:
     def unexpected_client(*args: str) -> DryRunClient:
         pytest.fail("The repeat guard must block before starting the client.")
 
+    monkeypatch.setenv("CODEFLOW_FLAGSMITH_ENV_KEY", "test-key")
+    monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "test-sim-key")
+    monkeypatch.setattr(simulate, "load_diffs", lambda *_, **__: ("shop-demo", [DiffSample(3, 4)]))
     monkeypatch.setattr(simulate, "flagsmith_client", unexpected_client)
-    assert simulate.main(["--experiment", "flow_view", "--panel", "default", "--limit", "1"]) == 1
+    args = ["--limit", "1", "--experiment", flag]
+    production_args = [*args, "--environment", "Production"]
+    assert simulate.main(production_args) == 1
     error = capsys.readouterr().err
-    assert "Flagsmith already counted 1 of the selected reviewers for flow_view" in error
+    assert f"Flagsmith already counted 1 of the selected reviewers for {flag}" in error
     assert "--allow-repeat" in error
 
-    client = DryRunClient({"side_by_side": 100})
+    client = DryRunClient({control: 100})
     monkeypatch.setattr(simulate, "flagsmith_client", lambda *_: client)
-    assert simulate.main(["--limit", "1", "--allow-repeat"]) == 0
+    assert simulate.main([*production_args, "--allow-repeat"]) == 0
     assert "Flagsmith already counted" in capsys.readouterr().err
     assert client.closed
     assert len(client.events) == 2
+
+    client = DryRunClient({control: 100})
+    assert simulate.main(args) == 0
+    assert "already counted" not in capsys.readouterr().err
+    assert client.closed
+    assert len(client.events) == 2
+
+
+def test_legacy_production_history_does_not_block_development(
+    repo, second_experiment, monkeypatch, capsys
+):
+    monkeypatch.setenv("CODEFLOW_FLAGSMITH_ENV_KEY", "test-key")
+    monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "test-sim-key")
+    monkeypatch.setattr(simulate, "flagsmith_client", lambda *_: DryRunClient({"baseline": 100}))
+    history = repo / "data" / "simulator-runs.sqlite3"
+    with sqlite3.connect(history) as database:
+        database.execute(
+            "CREATE TABLE reviewer_runs (flag TEXT NOT NULL, identity TEXT NOT NULL, "
+            "PRIMARY KEY (flag, identity))"
+        )
+        database.execute("INSERT INTO reviewer_runs VALUES ('guided_review', 'sim-reviewer-0001')")
+
+    args = ["--experiment", second_experiment, "--panel", "generated", "--n", "1"]
+    assert simulate.main(args) == 0
+    assert "may already have counted" not in capsys.readouterr().err
+    assert simulate.main([*args, "--environment", "Production"]) == 1
+    assert "may already have counted 1" in capsys.readouterr().err
+    with sqlite3.connect(history) as database:
+        assert database.execute("SELECT * FROM reviewer_runs ORDER BY environment").fetchall() == [
+            ("Development", "guided_review", "sim-reviewer-0001"),
+            ("Production", "guided_review", "sim-reviewer-0001"),
+        ]
 
 
 def test_future_repeats_are_guarded_by_flag_and_overlapping_identities(
     second_experiment: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     clients: list[DryRunClient] = []
+    monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "test-key")
 
     def fake_client(*args: str) -> DryRunClient:
         client = DryRunClient({"baseline": 100})

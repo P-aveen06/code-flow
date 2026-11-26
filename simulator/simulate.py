@@ -2,7 +2,6 @@
 
 import argparse
 import math
-import os
 import sys
 from pathlib import Path
 
@@ -10,7 +9,15 @@ from codeflow.diff import LONG_FLOW_MIN_DEPTH
 from flagsmith.exceptions import FlagsmithClientError, FlagsmithFeatureDoesNotExistError
 
 from clients import DEFAULT_API_URL, DryRunClient, ExperimentClient, flagsmith_client
-from config import named_path
+from config import (
+    DEFAULT_SIM_ENVIRONMENT,
+    PRODUCTION_ENVIRONMENT,
+    PRODUCTION_KEY,
+    SIMULATION_KEY,
+    name_value,
+    named_path,
+    read_settings,
+)
 from diffs import load_diffs
 from experiments import Experiment, load_experiment
 from history import reserve_reviewers
@@ -25,31 +32,14 @@ EXPERIMENTS_DIR = SIMULATOR_DIR / "experiments"
 PANELS_DIR = SIMULATOR_DIR / "panels"
 
 
-def _read_dotenv(path: Path) -> dict[str, str]:
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return {}
-
-    values = {}
-    for line in lines:
-        name, separator, value = line.strip().removeprefix("export ").partition("=")
-        name = name.strip()
-        if not separator or not name or name.startswith("#"):
-            continue
-        value = value.strip()
-        if value.startswith(('"', "'")) and value[0] in value[1:]:
-            value = value[1:].split(value[0], 1)[0]
-        else:
-            value = "" if value.startswith("#") else value.partition(" #")[0].strip()
-        values[name] = value
-    return values
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--experiment", default="flow_view", help="experiment name (default flow_view)"
+    )
+    parser.add_argument(
+        "--environment",
+        help="Flagsmith environment (default CODEFLOW_SIM_ENVIRONMENT or Development)",
     )
     parser.add_argument(
         "--panel", default="default", help="panel name or generated (default default)"
@@ -68,7 +58,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--model", choices=MODELS, default="hypothesis")
     parser.add_argument("--dry-run", action="store_true", help="assign and record events offline")
     parser.add_argument(
-        "--allow-repeat", action="store_true", help="allow repeat events on the same flag"
+        "--allow-repeat",
+        action="store_true",
+        help="allow repeat events on the same flag in the same environment",
     )
     parser.add_argument(
         "--persona-summary", action="store_true", help="show simulated persona counts by variant"
@@ -156,15 +148,57 @@ def _check_repeats(flag: str, count: int, *, confirmed: bool, allow_repeat: bool
     print(message, file=sys.stderr)
 
 
-def _live_client(flag: str, identities: set[str], *, allow_repeat: bool) -> ExperimentClient:
-    settings = {**_read_dotenv(REPO_ROOT / ".env"), **os.environ}
-    client = flagsmith_client(
-        settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL,
-        settings.get("CODEFLOW_FLAGSMITH_ENV_KEY", ""),
+def _simulation_target(requested: str | None, *, dry_run: bool) -> tuple[str, str, str]:
+    production = requested == PRODUCTION_ENVIRONMENT
+    key_name = PRODUCTION_KEY if production else SIMULATION_KEY
+    names = ("CODEFLOW_SIM_ENVIRONMENT",)
+    if not dry_run:
+        names += ("FLAGSMITH_API_URL", key_name)
+    settings = read_settings(REPO_ROOT / ".env", *names)
+    configured = settings.get("CODEFLOW_SIM_ENVIRONMENT") or DEFAULT_SIM_ENVIRONMENT
+    environment = name_value(
+        configured if requested is None else requested, "Flagsmith environment"
     )
+    print(f"Using Flagsmith environment code-flow/{environment}.", flush=True)
+    if environment.casefold() == PRODUCTION_ENVIRONMENT.casefold() and not production:
+        raise SimulationError("Targeting Production requires an explicit --environment Production.")
+    if dry_run:
+        return environment, "", ""
+    if production:
+        print(
+            "Warning: simulated users will go into the Production real-reviewer environment.",
+            file=sys.stderr,
+        )
+    elif environment != configured:
+        raise SimulationError(
+            "The requested environment must match CODEFLOW_SIM_ENVIRONMENT to use its key."
+        )
+    key = settings.get(key_name, "")
+    if not key:
+        message = f"Set {key_name} to the client-side environment key."
+        if not production:
+            message += (
+                " Run python3 scripts/flagsmith_setup.py --environment Development "
+                "from the repo root to set up the default simulation environment."
+            )
+        raise SimulationError(message)
+    return environment, settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, key
+
+
+def _live_client(
+    api_url: str,
+    key: str,
+    environment: str,
+    flag: str,
+    identities: set[str],
+    *,
+    allow_repeat: bool,
+) -> ExperimentClient:
+    client = flagsmith_client(api_url, key)
     try:
         repeats = reserve_reviewers(
             REPO_ROOT / "data" / "simulator-runs.sqlite3",
+            environment,
             flag,
             identities,
             allow_repeat=allow_repeat,
@@ -191,12 +225,17 @@ def main(argv: list[str] | None = None) -> int:
             _print_profiles(args.panel, reviewers, personas)
             return 0
 
+        environment, api_url, key = _simulation_target(args.environment, dry_run=args.dry_run)
         experiment = load_experiment(
             named_path(EXPERIMENTS_DIR, args.experiment, ".yaml"), personas
         )
         known_repeats = set()
-        if not args.dry_run and experiment.flag == "flow_view":
-            # This flag already received the entire default panel in the published run.
+        if (
+            not args.dry_run
+            and environment == PRODUCTION_ENVIRONMENT
+            and experiment.flag in ("flow_view", "flow_direction")
+        ):
+            # Both published Production runs counted the entire default panel.
             published_panel = (
                 panel if args.panel == "default" else load_panel("default", personas, PANELS_DIR)
             )
@@ -209,7 +248,12 @@ def main(argv: list[str] | None = None) -> int:
             DryRunClient(experiment.allocations)
             if args.dry_run
             else _live_client(
-                experiment.flag, reviewers.keys() - known_repeats, allow_repeat=args.allow_repeat
+                api_url,
+                key,
+                environment,
+                experiment.flag,
+                reviewers.keys() - known_repeats,
+                allow_repeat=args.allow_repeat,
             )
         )
         summary = run_simulation(
