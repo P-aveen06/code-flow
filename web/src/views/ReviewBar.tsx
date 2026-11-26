@@ -4,10 +4,11 @@ import type { ReviewContext, ReviewEvent, ReviewOutcome } from "../events";
 
 interface ReviewBarProps {
   context: ReviewContext | null;
+  sendsReviewEvents: boolean;
   onReview: (payload: ReviewEvent) => void;
 }
 
-export function ReviewBar({ context, onReview }: ReviewBarProps) {
+export function ReviewBar({ context, sendsReviewEvents, onReview }: ReviewBarProps) {
   const startedAt = useRef<number | null>(null);
   const recorded = useRef(false);
   const [started, setStarted] = useState(false);
@@ -54,7 +55,11 @@ export function ReviewBar({ context, onReview }: ReviewBarProps) {
     <section className="review-bar" aria-labelledby="review-question">
       <div className="review-bar__prompt">
         <h3 id="review-question">Did this diagram help you understand the change?</h3>
-        <p className="muted">Your answer feeds a Flagsmith A/B test of how code-flow shows diffs.</p>
+        <p className="muted">
+          {sendsReviewEvents
+            ? "Your answer feeds a Flagsmith A/B test of how code-flow shows diffs."
+            : "Your answer stays local."}
+        </p>
       </div>
       <div className="review-bar__actions">
         {answered ? (

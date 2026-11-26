@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { readReviewerId } from "./flags";
+import { exposeFlowAssignment, readReviewerId } from "./flags";
+import { FLOW_VIEWS } from "./view";
 
 describe("reviewer identity", () => {
   it("generates an ID once and reuses it from storage", () => {
@@ -27,5 +28,36 @@ describe("reviewer identity", () => {
     expect(id).toBeTruthy();
     expect(readReviewerId("", blocked)).toBe(id);
     expect(readReviewerId("", full)).toBe(id);
+  });
+});
+
+describe("experiment exposure", () => {
+  it.each([...FLOW_VIEWS, "", "unknown"])("skips the SDK exposure read when view=%s", (view) => {
+    const readExperimentValue = vi.fn(() => "overlay");
+    expect(exposeFlowAssignment("demo-1", "assignment", view, undefined, readExperimentValue)).toBeUndefined();
+    expect(readExperimentValue).not.toHaveBeenCalled();
+  });
+
+  it("reuses the exposed assignment after previewing other variants", () => {
+    const readExperimentValue = vi.fn(() => "overlay");
+    const assigned = exposeFlowAssignment("demo-1", "assignment", null, undefined, readExperimentValue);
+    const preview = exposeFlowAssignment("demo-1", "assignment", "side_by_side", assigned, readExperimentValue);
+    const returned = exposeFlowAssignment("demo-1", "assignment", null, preview, readExperimentValue);
+
+    expect(returned).toBe(assigned);
+    expect(returned?.view).toBe("overlay");
+    expect(readExperimentValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes a changed assignment on return from preview", () => {
+    const readExperimentValue = vi.fn().mockReturnValueOnce("overlay").mockReturnValueOnce("overlay_summary");
+    const assigned = exposeFlowAssignment("demo-1", "original", null, undefined, readExperimentValue);
+    const preview = exposeFlowAssignment("demo-1", "updated", "side_by_side", assigned, readExperimentValue);
+    expect(preview).toBe(assigned);
+    expect(readExperimentValue).toHaveBeenCalledTimes(1);
+
+    const returned = exposeFlowAssignment("demo-1", "updated", null, preview, readExperimentValue);
+    expect(returned?.view).toBe("overlay_summary");
+    expect(readExperimentValue).toHaveBeenCalledTimes(2);
   });
 });

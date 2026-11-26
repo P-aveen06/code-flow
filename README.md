@@ -63,6 +63,7 @@ The multivariate flag `flow_view` assigns one view per reviewer.
 - **Exposure.** The web app identifies the reviewer, then calls
   `getExperimentFlag('flow_view')` in the Flagsmith JS SDK. The simulator
   calls `get_experiment_flag` in the Python SDK with each reviewer's identity.
+- **Preview variant.** The viewer header sets a `?view=` override that keeps exposures and review answers out of the experiment. **Back to my assigned variant** restores the Flagsmith view.
 - **Outcome.** **Yes, I understand it** sends
   `trackEvent('diff_understood', {value: ms})`. **No, it’s confusing** sends
   `diff_confusing`. The value is the time from diagram render to answer, in

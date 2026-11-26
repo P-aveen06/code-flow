@@ -1,6 +1,6 @@
 import flagsmith from "@flagsmith/flagsmith";
 import { useEffect, useState } from "react";
-import { chooseFlowView, readViewOverride } from "./view";
+import { chooseFlowView, parseFlowView, readViewOverride } from "./view";
 import type { FlowView } from "./view";
 
 const reviewerKey = "code-flow:reviewer";
@@ -65,32 +65,42 @@ function initFlagsmith(environmentID: string) {
   }));
 }
 
-interface FlagValues {
-  flowView: FlowView;
+interface FlagResult {
+  reviewerId: string;
+  assignmentKey?: string;
   flagsmithMode: boolean;
-  reviewEventClient: typeof flagsmith | null;
-  notice?: string;
+}
+
+interface FlowAssignment {
+  reviewerId: string;
+  key: string;
+  view: FlowView | null;
+}
+
+export function exposeFlowAssignment(
+  reviewerId: string, key: string, viewOverride: string | null,
+  previous: FlowAssignment | undefined, readExperimentValue: () => unknown,
+): FlowAssignment | undefined {
+  if (viewOverride !== null || (previous?.reviewerId === reviewerId && previous.key === key)) {
+    return previous;
+  }
+  return { reviewerId, key, view: parseFlowView(readExperimentValue()) };
 }
 
 export function useCodeFlowFlags(search: string) {
   const reviewerId = readReviewerId(search);
   const viewOverride = readViewOverride(search);
-  const [result, setResult] = useState<{
-    reviewerId: string; viewOverride: string | null; values: FlagValues;
-  }>();
+  const [result, setResult] = useState<FlagResult>();
+  const [assignment, setAssignment] = useState<FlowAssignment>();
 
   useEffect(() => {
     const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
     let active = true;
     let timer: number | undefined;
-    let lastAssignment: { key: string; view: FlowView } | undefined;
-    const publish = (values: FlagValues) => setResult({ reviewerId, viewOverride, values });
-    const fallback = (notice: string) => publish({
-      flowView: chooseFlowView(viewOverride, () => null), flagsmithMode: false, reviewEventClient: null, notice,
-    });
+    const fallback = () => setResult({ reviewerId, flagsmithMode: false });
 
     if (!key) {
-      fallback("Flagsmith is unconfigured. Using default flags.");
+      fallback();
       return;
     }
 
@@ -101,21 +111,14 @@ export function useCodeFlowFlags(search: string) {
         await (initialKey ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
         if (!active) return;
 
-        // Read a new assignment once. Polling the same assignment should not
-        // generate more experiment exposures.
         const flag = flagsmith.getAllFlags().flow_view;
         const assignmentKey = JSON.stringify([flag?.value, flag?.variant, flag?.enabled, flag?.experiment]);
-        if (lastAssignment?.key !== assignmentKey) {
-          const view = chooseFlowView(viewOverride, () => flagsmith.getExperimentFlag("flow_view")?.value);
-          lastAssignment = { key: assignmentKey, view };
-        }
-        publish({
-          flowView: lastAssignment.view,
+        setResult({
+          reviewerId, assignmentKey,
           flagsmithMode: flagsmith.hasFeature("flagsmith_mode"),
-          reviewEventClient: flagsmith,
         });
       } catch {
-        if (active) fallback("Flagsmith is unavailable. Using default flags.");
+        if (active) fallback();
       } finally {
         if (active) timer = window.setTimeout(() => void refresh(), pollInterval);
       }
@@ -123,14 +126,29 @@ export function useCodeFlowFlags(search: string) {
 
     void refresh(key);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [reviewerId, viewOverride]);
+  }, [reviewerId]);
 
-  const values = result?.reviewerId === reviewerId && result.viewOverride === viewOverride ? result.values : null;
+  const flags = result?.reviewerId === reviewerId ? result : undefined;
+  const assignmentKey = flags?.assignmentKey;
+  useEffect(() => {
+    if (assignmentKey === undefined) return;
+    // Keep the last exposure across polling and preview changes.
+    const next = exposeFlowAssignment(
+      reviewerId, assignmentKey, viewOverride, assignment,
+      () => flagsmith.getExperimentFlag("flow_view")?.value,
+    );
+    if (next !== assignment) setAssignment(next);
+  }, [assignment, assignmentKey, reviewerId, viewOverride]);
+
+  const currentAssignment = assignment?.reviewerId === reviewerId && assignment.key === assignmentKey
+    ? assignment
+    : undefined;
+  const assignedView = currentAssignment?.view ?? null;
+  const ready = viewOverride !== null || Boolean(currentAssignment || (flags && assignmentKey === undefined));
   return {
-    reviewerId, viewOverride, ready: values !== null,
-    flowView: values?.flowView ?? chooseFlowView(viewOverride, () => null),
-    flagsmithMode: values?.flagsmithMode ?? false,
-    reviewEventClient: values?.reviewEventClient ?? null,
-    notice: values?.notice,
+    reviewerId, viewOverride, ready, assignedView,
+    flowView: chooseFlowView(viewOverride, () => assignedView),
+    flagsmithMode: flags?.flagsmithMode ?? false,
+    reviewEventClient: viewOverride === null && assignedView !== null ? flagsmith : null,
   };
 }

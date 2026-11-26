@@ -9,6 +9,7 @@ import { useDiff } from "../useDiff";
 import type { Hops } from "../useDiff";
 import { useRepoFlags } from "../useRepoFlags";
 import { useRequest } from "../useRequest";
+import { replaceViewOverride } from "../view";
 import type { FlowView } from "../view";
 import { CodePane } from "../views/CodePane";
 import type { CodeSource } from "../views/CodePane";
@@ -19,6 +20,7 @@ import { OverlaySummary } from "../views/OverlaySummary";
 import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
+import { VariantPreview } from "../views/VariantPreview";
 import type { ExpandedContext } from "../views/collapse";
 import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
 import {
@@ -97,7 +99,7 @@ interface RepoReviewProps {
 
 function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
   const {
-    flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, notice, reviewEventClient,
+    flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, assignedView, reviewEventClient,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
@@ -203,6 +205,8 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           )}
         </div>
         <div className="viewer-header__controls">
+          <VariantPreview view={view} viewOverride={viewOverride} assignedView={assignedView}
+            ready={flagsReady} onChange={replaceViewOverride} />
           {hasNodes && (
             <div className="neighbours" title={neighboursHint}>
               <span id="neighbours-label">Show neighbours:</span>
@@ -221,12 +225,6 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
               </div>
             </div>
           )}
-          {viewOverride !== null && (
-            <span className="status-chip viewer-header__notice">
-              Dev override: <code>view={viewOverride}</code> (not counted in the experiment)
-            </span>
-          )}
-          {notice && <p className="muted" role="status">{notice}</p>}
         </div>
       </header>
       <div className={source || flagsmithMode ? "workspace workspace--with-drawer" : "workspace"}>
@@ -300,6 +298,7 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
             <ReviewBar
               key={JSON.stringify([id, head, view, reviewerId, viewOverride])}
               context={reviewContext}
+              sendsReviewEvents={reviewEventClient !== null}
               onReview={(payload) => recordReviewEvent(payload, reviewEventClient)}
             />
           )}

@@ -67,9 +67,9 @@ describe("Flagsmith review events", () => {
     });
   });
 
-  it("keeps a dev override local even with a working client", () => {
+  it.each(["diff_understood", "diff_confusing"] as const)("keeps preview %s local even with a working client", (outcome) => {
     const client = { trackEvent: vi.fn() };
-    const review = buildReviewEvent(context, "diff_understood", 100, 450);
+    const review = buildReviewEvent(context, outcome, 100, 450);
 
     recordReviewEvent(review, client);
 
