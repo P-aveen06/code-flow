@@ -47,14 +47,15 @@ push. Times are IST.
 |---|---|---|---|
 | M0 | Nov 26, 2 PM | Repo scaffold, `AGENTS.md`, docs, `.env.example`, Python + web toolchains install cleanly | `uv run pytest` and `npm run build` succeed on empty skeleton |
 | M1 | Nov 26, 11 PM | Analyzer: Python parser, call resolution, graph JSON, git history walker (incremental by blob sha), diff, flag detection, Mermaid export, CLI. Demo repo script. | `code-flow analyze examples/shop-demo --out data/shop-demo` writes one snapshot per commit; `code-flow diff --base A --head B --format mermaid` prints a diagram that renders on GitHub |
-| M2 | Nov 27, 6 PM | Server (snapshots, diffs, code snippets) + web app: commit timeline, overlay view, side-by-side view, click a node to see code, ELK layout of the changed neighbourhood | Open the web app, click through the shop-demo commits, watch the flow change |
-| M3 | Nov 28, 12 PM | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings | Flip `new_checkout` in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
-| M4 | Nov 28, 8 PM | Experiment: Flagsmith Experimentation enabled on the Docker instance, exposure + success events from web app and simulator, results, roll-out of the winner | Run 1,000+ simulated reviewers; Flagsmith's results page shows lift and win probability per variant; winner rolled out |
-| M5 | Nov 29, 2 PM | Run on Flagsmith/flagsmith (last ~30 commits of `api/`), README polish, architecture diagram, demo video script and recording | Video recorded; README has setup steps and "How we use Flagsmith" |
+| M2 | Nov 26, 2 PM (done) | Server (snapshots, diffs, code snippets) + web app: commit timeline, overlay view, side-by-side view, click a node to see code, ELK layout of the changed neighbourhood | Open the web app, click through the shop-demo commits, watch the flow change |
+| M2.5 | Nov 26, 11 PM | Landing page, "Analyze a GitHub repo" import with background analysis and progress, a self-explanatory viewer, OpenFeature flag detection, Flagsmith/flagsmith (`api/`, last ~50 commits) as the main demo | Paste `https://github.com/Flagsmith/flagsmith` + `api/` on the landing page, watch progress, open the repo and understand a real commit without being told what the screen means |
+| M3 | Nov 27, 6 PM | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings; seed a `flagsmith-api` project from `api/integrations/flagsmith/data/environment.json` | Flip a flag in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
+| M4 | Nov 28, 2 PM | Experiment: Flagsmith Experimentation enabled on the Docker instance, exposure + success events from web app and simulator, results, roll-out of the winner | Run 1,000+ simulated reviewers; Flagsmith's results page shows lift and win probability per variant; winner rolled out |
+| M5 | Nov 29, 2 PM | README polish, architecture diagram, demo video script and recording (on the Flagsmith repo) | Video recorded; README has setup steps and "How we use Flagsmith" |
 | — | Nov 29, 5 PM | Submit | |
 
-If time runs short, cut in this order: stale-flag history check → run on
-Flagsmith/flagsmith → side-by-side viewport sync → LLM summary (keep the
+If time runs short, cut in this order: stale-flag history check → side-by-side
+viewport sync → LLM summary (keep the
 rule-based one). Never cut the experiment: it is what the track judges.
 
 ## Task list
@@ -86,6 +87,14 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] Views: `Overlay.tsx`, `SideBySide.tsx` (two canvases, synced viewport), `OverlaySummary.tsx`
 - [x] "Understood / Approve" and "Confusing" buttons, timer from render
 
+### M2.5 Landing page, repo import, explained viewer, Flagsmith demo
+Why: a first-time user opening the M2 app had "zero idea what this web app does", no way to add a GitHub repo, and the demo must run on the real Flagsmith repo.
+- [ ] A. Landing page at `/`: one-sentence pitch, 3-step "How it works", "Analyze a GitHub repo" form (URL, optional subfolder, recent commits, default 30), example buttons (Flagsmith/flagsmith with `api/`, shop-demo), list of analyzed repos with status; viewer moves to `/repo/:id`
+- [ ] B. Repo import: `POST /api/repos {url, subdir, max_commits}` (public github.com only), clone into `data/repos/<owner>__<name>`, analyze in a background job, `GET /api/repos/{id}/status` (cloning / analyzing i of N / ready / error); web shows progress and opens the repo when ready; clear "Python only for now" message; re-analysis reuses the per-blob cache
+- [ ] C. Self-explanatory viewer: header with the commit's message, author, date and counts in words; dismissible "What am I looking at?" panel; legend in words; empty state for commits with no Python flow change and a "hide commits with no flow change" toggle (on by default); review bar reworded ("Did this diagram help you understand the change?" Yes / No, answers feed a Flagsmith A/B test), raw timer hidden but still measured; summary only in `overlay_summary`
+- [ ] D1. Analyzer: OpenFeature evaluation methods (`get_boolean_value`, `get_string_value`, `get_integer_value`, `get_float_value`, `get_object_value` and `_details` forms) in flag detection; progress callback; every listed commit gets a base snapshot when history is capped; performance on Flagsmith/flagsmith `api/`
+- [ ] D2. Analyze Flagsmith/flagsmith `api/`, last ~50 commits, tests and migrations excluded; record analysis time and flag checks found
+
 ### M3 Flagsmith
 - [ ] Flagsmith project `code-flow` with flags `flow_view` (multivariate, 3 values), `flagsmith_mode` (boolean); project `shop-demo` with `new_checkout` and one stale flag. Document the exact setup in README (or script it with the Flagsmith Admin API)
 - [ ] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
@@ -101,7 +110,7 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [ ] Optional: server SQLite mirror + small results table in the web app as a backup
 - [ ] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README
 ### M5 Demo + polish
-- [ ] `examples/analyze_flagsmith.sh`: clone Flagsmith/flagsmith, analyze last ~30 commits of `api/`, load in the web app
+- [ ] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
 - [ ] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
 - [ ] Demo video script (≤ 3 min): problem → timeline → diff views → Flagsmith mode flip → experiment results → roll-out
 
