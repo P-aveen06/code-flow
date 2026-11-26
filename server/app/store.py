@@ -1,11 +1,19 @@
 """Read analyzer output and assemble the API's commit and diff views."""
 
+import json
 import subprocess
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from threading import Lock
 
-from codeflow.analyze import AmbiguousSHA, UnknownSHA, load_index, load_snapshot, resolve_sha
+from codeflow.analyze import (
+    AmbiguousSHA,
+    UnknownSHA,
+    diff_base,
+    load_index,
+    load_snapshot,
+    resolve_commit,
+)
 from codeflow.diff import EdgeChange, GraphDiff, diff_graphs, neighbourhood
 from codeflow.graph import Graph
 from codeflow.summary import summarize
@@ -20,14 +28,24 @@ class BadRequest(ValueError):
 
 
 def _valid_repo_name(name: str) -> bool:
-    return bool(name) and name != "." and not any(part in name for part in ("/", "\\", "..", "\0"))
+    return (
+        bool(name)
+        and name not in (".", "repos")
+        and not any(part in name for part in ("/", "\\", "..", "\0"))
+    )
+
+
+def python_warning(subdir: str) -> str:
+    """Explain why an imported repository has an empty graph."""
+    location = f"{subdir}/" if subdir else "the repository"
+    return f"No Python files found in {location}. code-flow analyzes Python only for now."
 
 
 class Store:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir.resolve()
+        self.lock = Lock()
         self._snapshots: dict[tuple[Path, str], Graph] = {}
-        self._snapshot_lock = Lock()
         self._commit_lists: dict[str, tuple[dict, dict]] = {}
 
     def _is_repo_dir(self, directory: Path) -> bool:
@@ -47,11 +65,9 @@ class Store:
         except (FileNotFoundError, IsADirectoryError) as exc:
             raise NotFound(f"Unknown repository: {directory.name!r}") from exc
 
-    def _resolve_sha(self, directory: Path, sha: str) -> str:
+    def _resolve_commit(self, index: dict, sha: str) -> dict:
         try:
-            return resolve_sha(directory, sha)
-        except (FileNotFoundError, IsADirectoryError) as exc:
-            raise NotFound(f"Unknown repository: {directory.name!r}") from exc
+            return resolve_commit(index, sha)
         except UnknownSHA as exc:
             raise NotFound(str(exc)) from exc
         except AmbiguousSHA as exc:
@@ -59,39 +75,77 @@ class Store:
 
     def _snapshot(self, directory: Path, sha: str) -> Graph:
         key = (directory, sha)
-        with self._snapshot_lock:
-            if key not in self._snapshots:
-                try:
-                    graph = load_snapshot(directory, sha)
-                except FileNotFoundError as exc:
-                    raise NotFound(f"No snapshot for commit {sha}") from exc
-                if len(self._snapshots) == 64:
-                    del self._snapshots[next(iter(self._snapshots))]
-                self._snapshots[key] = graph
-            return self._snapshots[key]
+        if key not in self._snapshots:
+            try:
+                graph = load_snapshot(directory, sha)
+            except FileNotFoundError as exc:
+                raise NotFound(f"No snapshot for commit {sha}") from exc
+            if len(self._snapshots) == 64:
+                del self._snapshots[next(iter(self._snapshots))]
+            self._snapshots[key] = graph
+        return self._snapshots[key]
 
-    def _first_parent(self, directory: Path, head: Graph) -> Graph:
-        if head.commit.parents:
-            return self._snapshot(directory, head.commit.parents[0])
-        return head.empty_base()
+    def _default_base(self, directory: Path, head: Graph, entry: dict) -> Graph:
+        sha = diff_base(entry)
+        return self._snapshot(directory, sha) if sha else head.empty_base()
+
+    def publish_import(self, repo_id: str, staged: Path) -> None:
+        """Swap a complete import into place while excluding API readers."""
+        directory = self.data_dir / repo_id
+        previous = staged.with_name("previous")
+        with self.lock:
+            if directory.exists():
+                directory.rename(previous)
+            try:
+                staged.rename(directory)
+            except OSError:
+                if previous.exists():
+                    previous.rename(directory)
+                raise
+            self._commit_lists.pop(repo_id, None)
+            self._snapshots = {
+                key: graph for key, graph in self._snapshots.items() if key[0] != directory
+            }
+
+    def repo_info(self, repo: str) -> dict:
+        directory = self._repo_dir(repo)
+        index = self._index(directory)
+        try:
+            source = json.loads((directory / "source.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            source = {}
+        commits = index["commits"]
+        subdir = source.get("subdir", "")
+        warning = None
+        if source and (not commits or not self._snapshot(directory, commits[-1]["sha"]).nodes):
+            warning = python_warning(subdir)
+        return {
+            "id": repo,
+            "name": source.get("name", repo),
+            "url": source.get("url"),
+            "subdir": subdir,
+            "branch": self._branch(index),
+            "commit_count": len(commits),
+            "status": "ready",
+            "message": "Ready",
+            "warning": warning,
+        }
+
+    @staticmethod
+    def _branch(index: dict) -> str:
+        return index["branch"].removeprefix("refs/remotes/origin/")
 
     def list_repos(self) -> list[dict]:
         if not self.data_dir.is_dir():
             return []
         repos = []
-        for directory in sorted(self.data_dir.iterdir()):
-            if _valid_repo_name(directory.name) and self._is_repo_dir(directory):
-                try:
-                    index = self._index(directory)
-                except NotFound:
-                    continue
-                repos.append(
-                    {
-                        "name": directory.name,
-                        "branch": index["branch"],
-                        "commit_count": len(index["commits"]),
-                    }
-                )
+        for directory in self.data_dir.iterdir():
+            if not _valid_repo_name(directory.name):
+                continue
+            try:
+                repos.append(self.repo_info(directory.name))
+            except NotFound:
+                continue
         return repos
 
     def commits(self, repo: str) -> dict:
@@ -104,26 +158,29 @@ class Store:
         commits = []
         for commit in index["commits"]:
             head = self._snapshot(directory, commit["sha"])
-            base = self._first_parent(directory, head)
+            base = self._default_base(directory, head, commit)
             diff = diff_graphs(base, head)
             commits.append({**commit, "stats": diff.stats, "summary": summarize(base, head, diff)})
-        result = {"repo": repo, "branch": index["branch"], "commits": commits}
+        result = {"repo": repo, "branch": self._branch(index), "commits": commits}
         self._commit_lists[repo] = (index, result)
         return result
 
     def snapshot(self, repo: str, sha: str) -> dict:
         directory = self._repo_dir(repo)
-        return self._snapshot(directory, self._resolve_sha(directory, sha)).to_json()
+        entry = self._resolve_commit(self._index(directory), sha)
+        return self._snapshot(directory, entry["sha"]).to_json()
 
     def diff(self, repo: str, head: str, base: str | None, hops: int) -> dict:
         if not 0 <= hops <= 3:
             raise BadRequest("hops must be between 0 and 3")
         directory = self._repo_dir(repo)
-        head_graph = self._snapshot(directory, self._resolve_sha(directory, head))
+        index = self._index(directory)
+        entry = self._resolve_commit(index, head)
+        head_graph = self._snapshot(directory, entry["sha"])
         base_graph = (
-            self._first_parent(directory, head_graph)
+            self._default_base(directory, head_graph, entry)
             if base is None
-            else self._snapshot(directory, self._resolve_sha(directory, base))
+            else self._snapshot(directory, self._resolve_commit(index, base)["sha"])
         )
         diff = diff_graphs(base_graph, head_graph)
         included = neighbourhood(base_graph, head_graph, diff, hops)
@@ -144,8 +201,9 @@ class Store:
             raise BadRequest("start must be less than or equal to end")
 
         directory = self._repo_dir(repo)
-        sha = self._resolve_sha(directory, sha)
-        repo_path = self._index(directory).get("repo_path")
+        index = self._index(directory)
+        sha = self._resolve_commit(index, sha)["sha"]
+        repo_path = index.get("repo_path")
         if not repo_path:
             raise NotFound(f"No source repository path recorded for {repo!r}. Re-run the analyzer.")
         git = ["git", "-C", repo_path]

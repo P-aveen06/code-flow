@@ -1,5 +1,6 @@
 """Exercise the API with snapshots and source from the shop demo's Git history."""
 
+import json
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -50,7 +51,53 @@ def test_list_repos(client: TestClient) -> None:
     response = client.get("/api/repos")
 
     assert response.status_code == 200
-    assert response.json() == [{"name": "shop-demo", "branch": "main", "commit_count": 8}]
+    assert response.json() == [
+        {
+            "id": "shop-demo",
+            "name": "shop-demo",
+            "url": None,
+            "subdir": "",
+            "branch": "main",
+            "commit_count": 8,
+            "status": "ready",
+            "message": "Ready",
+            "warning": None,
+        }
+    ]
+
+
+def test_ready_status_for_local_repo(client: TestClient) -> None:
+    response = client.get(f"{REPO_URL}/status")
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": "shop-demo",
+        "name": "shop-demo",
+        "status": "ready",
+        "message": "Ready",
+        "current": 8,
+        "total": 8,
+        "warning": None,
+        "error": None,
+        "seconds": 0,
+    }
+    assert client.get("/api/repos/missing/status").status_code == 404
+
+
+def test_legacy_index_uses_first_parent(demo_data: Path, tmp_path: Path, checkout_commit: Commit):
+    repo = tmp_path / "shop-demo"
+    shutil.copytree(demo_data / "shop-demo", repo)
+    index_file = repo / "commits.json"
+    index = json.loads(index_file.read_text())
+    for commit in index["commits"]:
+        del commit["base"]
+    index_file.write_text(json.dumps(index))
+
+    with TestClient(create_app(Settings(tmp_path, "http://example.test"))) as client:
+        response = client.get(f"{REPO_URL}/diff", params={"head": checkout_commit.sha})
+        assert response.status_code == 200
+        assert response.json()["base"] == checkout_commit.parents[0]
+        commits = client.get(f"{REPO_URL}/commits").json()["commits"]
+        assert commits[4]["stats"] == response.json()["diff"]["stats"]
 
 
 def test_commits(client: TestClient, checkout_commit: Commit) -> None:

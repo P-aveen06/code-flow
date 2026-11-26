@@ -18,6 +18,9 @@ code-flow-analyzer = { path = "../analyzer", editable = true }
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
+[tool.pytest.ini_options]
+markers = ["network: opt-in tests that access GitHub"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

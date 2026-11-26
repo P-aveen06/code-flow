@@ -1,6 +1,7 @@
 """Build, store, and load per-commit call graphs for a Git repository."""
 
 import json
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,32 @@ class AmbiguousSHA(ValueError):
     """More than one indexed commit matches the requested prefix."""
 
 
+class BlobParseCache:
+    """Reuse parsed Python blobs for the same file path and source root."""
+
+    def __init__(self, max_entries: int | None = None) -> None:
+        self.max_entries = max_entries
+        self._files: OrderedDict[tuple[str, str, str], ParsedFile | None] = OrderedDict()
+
+    def parse(
+        self, path: str, blob_sha: str, source_root: str, read_blob: Callable[[str], bytes]
+    ) -> ParsedFile | None:
+        key = (path, blob_sha, source_root)
+        if key in self._files:
+            self._files.move_to_end(key)
+            return self._files[key]
+        source = read_blob(blob_sha)
+        try:
+            source.decode("utf-8")
+            parsed = parse_file(path, source, source_root)
+        except (UnicodeDecodeError, RecursionError):
+            parsed = None
+        self._files[key] = parsed
+        if self.max_entries is not None and len(self._files) > self.max_entries:
+            self._files.popitem(last=False)
+        return parsed
+
+
 @dataclass
 class CommitResult:
     """Report graph counts and any files skipped while writing this snapshot."""
@@ -30,6 +57,7 @@ class CommitResult:
     edge_count: int
     flag_count: int
     written: bool
+    base: str
     skipped: list[str] = field(default_factory=list)
 
 
@@ -55,24 +83,27 @@ def analyze_repo(
     source_root: str = "",
     keep_external: bool = False,
     on_progress: Callable[[int, int, Commit], None] | None = None,
+    touching: str | None = None,
+    parse_cache: BlobParseCache | None = None,
 ) -> list[CommitResult]:
     """Write missing snapshots and report progress before each indexed commit, oldest first."""
     repo = Path(repo).resolve()
-    # Reserve one extra first-parent commit as the base for the oldest indexed commit.
-    limit = max_commits + 1 if max_commits is not None and max_commits > 0 else max_commits
-    snapshot_commits = list_commits(repo, branch, limit)
-    has_base = max_commits is not None and len(snapshot_commits) > max_commits
-    commits = snapshot_commits[1:] if has_base else snapshot_commits
+    commits = list_commits(repo, branch, max_commits, paths=(touching,) if touching else None)
+    oldest_base = []
+    if commits and commits[0].parents:
+        oldest_base = list_commits(repo, commits[0].parents[0], 1)
+    snapshot_commits = oldest_base + commits
+    base = oldest_base[0].sha if oldest_base else ""
     repo_name = repo.name
     out_dir = Path(out_dir)
     snapshots = out_dir / "snapshots"
     snapshots.mkdir(parents=True, exist_ok=True)
     root = PurePosixPath(source_root)
-    cache: dict[tuple[str, str], ParsedFile | None] = {}
+    cache = parse_cache if parse_cache is not None else BlobParseCache()
     results = []
 
     with batch_blobs(repo) as read_blob:
-        for current, commit in enumerate(snapshot_commits, start=0 if has_base else 1):
+        for current, commit in enumerate(snapshot_commits, start=0 if oldest_base else 1):
             if current and on_progress is not None:
                 on_progress(current, len(commits), commit)
             snapshot_path = snapshots / f"{commit.sha}.json"
@@ -85,15 +116,7 @@ def analyze_repo(
                 for path, blob_sha in list_python_files(repo, commit.sha, include, exclude):
                     if not PurePosixPath(path).is_relative_to(root):
                         continue
-                    key = (path, blob_sha)
-                    if key not in cache:
-                        source = read_blob(blob_sha)
-                        try:
-                            source.decode("utf-8")
-                            cache[key] = parse_file(path, source, source_root)
-                        except (UnicodeDecodeError, RecursionError):
-                            cache[key] = None
-                    parsed = cache[key]
+                    parsed = cache.parse(path, blob_sha, source_root, read_blob)
                     if parsed is None:
                         skipped.append(path)
                     else:
@@ -119,9 +142,11 @@ def analyze_repo(
                     len(data["edges"]),
                     len(data["flags"]),
                     written,
+                    base,
                     skipped,
                 )
             )
+            base = commit.sha
 
     _write_json(
         out_dir / "commits.json",
@@ -131,7 +156,7 @@ def analyze_repo(
             "repo_path": str(repo),
             "branch": branch,
             "source_root": source_root,
-            "commits": [asdict(commit) for commit in commits],
+            "commits": [{**asdict(result.commit), "base": result.base} for result in results],
         },
     )
     return results
@@ -144,7 +169,17 @@ def load_index(out_dir: str | Path) -> dict:
 
 def load_commits(out_dir: str | Path) -> list[Commit]:
     """Load the commits in the index's oldest-first order."""
-    return [Commit(**commit) for commit in load_index(out_dir)["commits"]]
+    return [
+        Commit(**{key: value for key, value in entry.items() if key != "base"})
+        for entry in load_index(out_dir)["commits"]
+    ]
+
+
+def diff_base(entry: dict) -> str:
+    """Return the indexed base SHA, using the first parent for older indexes."""
+    if "base" in entry:
+        return entry["base"]
+    return entry["parents"][0] if entry["parents"] else ""
 
 
 def load_snapshot(out_dir: str | Path, sha: str) -> Graph:
@@ -155,7 +190,12 @@ def load_snapshot(out_dir: str | Path, sha: str) -> Graph:
 
 def resolve_sha(out_dir: str | Path, ref: str) -> str:
     """Find the full SHA for an indexed commit SHA or unique prefix."""
-    matches = [commit.sha for commit in load_commits(out_dir) if ref and commit.sha.startswith(ref)]
+    return resolve_commit(load_index(out_dir), ref)["sha"]
+
+
+def resolve_commit(index: dict, ref: str) -> dict:
+    """Find the index entry for a commit SHA or unique prefix."""
+    matches = [entry for entry in index["commits"] if ref and entry["sha"].startswith(ref)]
     if not matches:
         raise UnknownSHA(f"Unknown commit SHA or prefix: {ref!r}")
     if len(matches) > 1:

@@ -113,7 +113,7 @@ source at a commit.
   "branch": "main",
   "source_root": "",
   "commits": [
-    {"sha": "abc123", "parents": [], "author": "code-flow demo", "date": "2026-11-20T09:00:00Z", "message": "Add cart"}
+    {"sha": "abc123", "parents": [], "author": "code-flow demo", "date": "2026-11-20T09:00:00Z", "message": "Add cart", "base": ""}
   ]
 }
 ```
@@ -123,10 +123,11 @@ dotted module names. An empty string uses the repo root. An output directory
 reuses snapshots by SHA, so use a fresh directory when changing include or
 exclude patterns, `source_root`, or `keep_external`.
 
-With a commit cap, the analyzer also writes the oldest listed commit's first
-parent snapshot when that parent is available in the Git history. The parent
-serves as the diff base and stays out of `commits.json`. At a root commit or
-shallow history boundary, the oldest commit uses an empty graph as its base.
+The `touching` option (`--touching DIR` in the CLI) lists only first-parent
+commits that change the specified subfolder. Each diff compares against the
+entry's `base` SHA, which points to the previous listed commit. The oldest
+entry uses its unlisted first-parent snapshot when available, or `""` for an
+empty graph at a root commit or shallow history boundary.
 
 ## Diff JSON (`code-flow/diff@1`)
 
@@ -160,17 +161,40 @@ output directory name such as `shop-demo`, with no `/`, `\`, or `..`. SHA
 parameters accept full SHAs or unique prefixes, and responses use full SHAs.
 
 - `GET /api/health` returns `{"status": "ok", "analyzer_version": "0.1.0"}`.
-- `GET /api/repos` returns `[{"name": "shop-demo", "branch": "main", "commit_count": 8}]`
-  for subdirectories containing `commits.json`, sorted by name.
+- `GET /api/repos` lists indexed repos and import jobs, sorted by `name`.
+  Each entry has `id`, `name`, `url`, `subdir`, `branch`, `commit_count`,
+  `status`, `message`, and `warning`. Local analyzer output has `url: null`
+  and `subdir: ""`.
+- `POST /api/repos` accepts a JSON object with `url`, optional `subdir`
+  (default `""` for the repo root), and optional `max_commits` (integer 1–200,
+  default 30). Use a public `https://github.com/<owner>/<repo>` URL with an
+  optional `.git` suffix and trailing slash. Owner and repo names use ASCII
+  letters, digits, `.`, `_`, or `-`, with `.` and names containing `..` rejected.
+  Use a repo-relative POSIX subfolder path without `..` components, a drive
+  prefix, backslashes, or NULs. Invalid requests return 400. A new job returns
+  202 with `{"id": "<owner>__<repo>", "status": "queued"}`. A request for an
+  active ID returns 202 with its current status. Re-importing after completion
+  fetches the default branch into the existing clone, reuses cached parses and
+  snapshots for the same source root, and replaces the output on success.
+- `GET /api/repos/{id}/status` returns `id`, `name`, `status`, `message`,
+  `current` and `total` commit counts, `seconds` elapsed, and nullable `warning`
+  and `error` fields. Status is `queued`, `cloning`, `analyzing`, `ready`, or
+  `error`. An empty latest graph or no selected commits gives a `ready` status
+  with a warning that code-flow analyzes Python only for now. Failures give a
+  readable `error`, such as `Repository not found or not public` or a missing
+  subfolder message.
+- Clones live in `data/repos/<owner>__<repo>`. Analysis outputs live in
+  `data/<id>/`, with source URL, name, subfolder, commit limit, and import time
+  in `data/<id>/source.json`.
 - `GET /api/repos/{repo}/commits` returns `{"repo": "shop-demo", "branch": "main", "commits": […]}`.
-  Entries are oldest first and include `sha`, `parents`, `author`, `date`, and
-  `message` plus `stats` (the five diff counts) and `summary`. Each comparison
-  uses the first parent's snapshot or an empty graph for the root commit.
+  Entries are oldest first and include the commit index fields plus `stats`
+  (the five diff counts) and `summary`. Legacy indexes without `base` use the
+  first parent or an empty graph for a root commit.
 - `GET /api/repos/{repo}/snapshots/{sha}` returns that commit's `code-flow/graph@1` JSON.
 - `GET /api/repos/{repo}/diff?head=SHA&base=SHA&hops=1` returns `base`, `head`,
   `summary`, the `code-flow/diff@1` JSON in `diff`, and overlay `nodes` and
-  `edges`. Omit `base` to compare with the first parent or with an empty
-  graph (`"base": ""`) for a root commit. `hops` defaults to 1 and accepts 0–3.
+  `edges`. Omit `base` to use the commit index's diff base.
+  `hops` defaults to 1 and accepts 0–3.
   The overlay contains the union of both graphs within the changed
   neighbourhood. Nodes are sorted by `id` and include `name`, `qualname`,
   `module`, `kind`, `file`, `line`, `end_line`, and `status` (`added`,
@@ -287,6 +311,7 @@ code-flow/
   server/
     pyproject.toml
     app/{config,main,store,flagsmith_client}.py
+    app/importer.py    queues GitHub imports and reports progress
     tests/
   web/
     package.json, vite.config.ts

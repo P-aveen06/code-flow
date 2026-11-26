@@ -8,7 +8,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from codeflow import __version__
-from codeflow.analyze import analyze_repo, load_snapshot, resolve_sha
+from codeflow.analyze import (
+    analyze_repo,
+    diff_base,
+    load_index,
+    load_snapshot,
+    resolve_commit,
+    resolve_sha,
+)
 from codeflow.diff import diff_graphs
 from codeflow.export_mermaid import to_mermaid
 from codeflow.git_history import GitHistoryError
@@ -28,13 +35,19 @@ def _analyze(args: argparse.Namespace) -> None:
         exclude=args.exclude,
         source_root=args.source_root,
         keep_external=args.keep_external,
+        touching=args.touching,
     )
     previous = None
     total_added = total_removed = total_changed = 0
     for result in results:
         commit = result.commit
         head = load_snapshot(args.out, commit.sha)
-        nodes = diff_graphs(previous or _first_parent(args.out, head), head).nodes
+        base = (
+            previous
+            if previous and previous.commit.sha == result.base
+            else _base_graph(args.out, head, result.base)
+        )
+        nodes = diff_graphs(base, head).nodes
         added, removed, changed = len(nodes.added), len(nodes.removed), len(nodes.changed)
         print(f"{commit.sha[:7]} +{added} −{removed} ~{changed} {commit.message}")
         total_added += added
@@ -50,21 +63,21 @@ def _load_graph(directory: Path, ref: str) -> Graph:
     return load_snapshot(directory, resolve_sha(directory, ref))
 
 
-def _first_parent(directory: Path, head: Graph) -> Graph:
-    if not head.commit.parents:
+def _base_graph(directory: Path, head: Graph, sha: str) -> Graph:
+    if not sha:
         return head.empty_base()
-    parent = head.commit.parents[0]
     try:
-        return load_snapshot(directory, parent)
+        return load_snapshot(directory, sha)
     except FileNotFoundError as exc:
-        raise ValueError(
-            f"No snapshot for first parent {parent}. Analyze it or pass --base."
-        ) from exc
+        raise ValueError(f"No snapshot for diff base {sha}. Analyze it or pass --base.") from exc
 
 
 def _diff(args: argparse.Namespace) -> None:
-    head = _load_graph(args.dir, args.head)
-    base = _first_parent(args.dir, head) if args.base is None else _load_graph(args.dir, args.base)
+    index = load_index(args.dir)
+    entry = resolve_commit(index, args.head)
+    head = load_snapshot(args.dir, entry["sha"])
+    base_sha = diff_base(entry) if args.base is None else resolve_commit(index, args.base)["sha"]
+    base = _base_graph(args.dir, head, base_sha)
     diff = diff_graphs(base, head)
     if args.format == "mermaid":
         print(to_mermaid(base, head, diff, args.hops))
@@ -130,13 +143,18 @@ def main(argv: list[str] | None = None) -> int:
     analyze_parser.add_argument("--include", action="extend", nargs="+", metavar="GLOB")
     analyze_parser.add_argument("--exclude", action="extend", nargs="+", metavar="GLOB")
     analyze_parser.add_argument("--source-root", default="", metavar="DIR")
+    analyze_parser.add_argument(
+        "--touching", metavar="PATH", help="Only list commits changing PATH"
+    )
     analyze_parser.add_argument("--keep-external", action="store_true")
     analyze_parser.set_defaults(run=_analyze)
 
     diff_parser = commands.add_parser("diff", help="Compare two graph snapshots")
     diff_parser.add_argument("dir", type=Path)
     diff_parser.add_argument("--head", required=True, metavar="REF")
-    diff_parser.add_argument("--base", metavar="REF", help="Defaults to the head's first parent")
+    diff_parser.add_argument(
+        "--base", metavar="REF", help="Defaults to the head's indexed diff base"
+    )
     diff_parser.add_argument("--format", choices=("json", "mermaid", "summary"), default="json")
     diff_parser.add_argument("--hops", type=_nonnegative_int, default=1)
     diff_parser.set_defaults(run=_diff)

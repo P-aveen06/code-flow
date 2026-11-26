@@ -37,9 +37,12 @@ def _git(repo: str | Path, *args: str, error: str | None = None) -> bytes:
 
 
 def list_commits(
-    repo: str | Path, branch: str = "HEAD", max_count: int | None = None
+    repo: str | Path,
+    branch: str = "HEAD",
+    max_count: int | None = None,
+    paths: Sequence[str] | None = None,
 ) -> list[Commit]:
-    """Return the newest selected first-parent commits in chronological history order."""
+    """Return first-parent commits affecting the given paths, oldest first."""
     _git(repo, "rev-parse", "--git-dir", error=f"Not a Git repository: {repo}")
     tip = (
         _git(
@@ -55,6 +58,7 @@ def list_commits(
     )
 
     args = [
+        "--literal-pathspecs",
         "rev-list",
         "--first-parent",
         "--reverse",
@@ -68,7 +72,7 @@ def list_commits(
         args.append(f"--max-count={max_count}")
 
     commits = []
-    for line in _git(repo, *args, tip, "--").decode(errors="replace").split("\n"):
+    for line in _git(repo, *args, tip, "--", *(paths or ())).decode(errors="replace").split("\n"):
         if not line:
             continue
         sha, parents, author, date, message = line.split("\0", 4)

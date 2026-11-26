@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from codeflow import __version__
-from codeflow.analyze import load_commits
+from codeflow.analyze import load_commits, load_index
 from codeflow.cli import main
 
 
@@ -157,3 +157,42 @@ def test_analyze_options_and_capped_parent(make_repo, tmp_path):
         "removed": [],
         "changed": ["main:run"],
     }
+
+
+def test_touching_uses_indexed_bases_for_counts_and_diff(make_repo, tmp_path):
+    repo = make_repo(
+        [
+            {"src/main.py": "def initial(): pass\n"},
+            {"notes.md": "first"},
+            {"src/main.py": "def second(): pass\n"},
+            {"notes.md": "second"},
+            {"src/main.py": "def second(): pass\ndef third(): pass\n"},
+            {"notes.md": "latest"},
+        ]
+    )
+    out = tmp_path / "output"
+    analysis = code_flow(
+        "analyze",
+        repo.path,
+        "--out",
+        out,
+        "--source-root",
+        "src",
+        "--touching",
+        "src",
+        "--max-commits",
+        "2",
+    )
+    assert analysis.returncode == 0, analysis.stderr
+    first, second = load_index(out)["commits"]
+    assert analysis.stdout.splitlines() == [
+        f"{first['sha'][:7]} +1 −1 ~0 Commit 3",
+        f"{second['sha'][:7]} +1 −0 ~0 Commit 5",
+        "Total: 2 commits, +2 −1 ~0",
+    ]
+    assert first["base"] == repo.git("rev-parse", "HEAD~4") == first["parents"][0]
+    assert second["base"] == first["sha"] != second["parents"][0]
+    for commit in (first, second):
+        diff = code_flow("diff", out, "--head", commit["sha"])
+        assert diff.returncode == 0, diff.stderr
+        assert json.loads(diff.stdout)["base"] == commit["base"]

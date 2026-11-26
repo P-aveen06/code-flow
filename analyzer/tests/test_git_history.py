@@ -40,6 +40,29 @@ def test_first_parent_commits_and_max_count(make_repo):
     assert [commit.sha for commit in list_commits(repo.path, "side")] == [first, side]
 
 
+def test_path_filter_follows_first_parent_and_caps_matching_commits(make_repo):
+    repo = make_repo([{"api/cart.py": "", "docs/readme.md": "initial"}])
+    root = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "-c", "side")
+    side = repo.commit({"api/cart.py": "def total(): pass\n"})
+    repo.git("switch", "main")
+    docs = repo.commit({"docs/readme.md": "updated"})
+    repo.git("merge", "--no-ff", "-m", "Merge cart change", "side")
+    merge = repo.git("rev-parse", "HEAD")
+    last = repo.commit({"outside.py": ""})
+
+    commits = list_commits(repo.path, paths=["api"])
+    assert [commit.sha for commit in commits] == [root, merge]
+    assert commits[-1].parents == [docs, side]
+    assert list_commits(repo.path, paths=["api"], max_count=1) == commits[-1:]
+    assert list_commits(repo.path, paths=["missing"]) == []
+    assert [commit.sha for commit in list_commits(repo.path, paths=["api", "outside.py"])] == [
+        root,
+        merge,
+        last,
+    ]
+
+
 def test_python_filters_and_blob_bytes(make_repo):
     repo = make_repo(
         [

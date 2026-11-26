@@ -49,7 +49,10 @@ def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkey
         "repo_path": str(repo.path.resolve()),
         "branch": "HEAD",
         "source_root": "",
-        "commits": [asdict(first.commit), asdict(second.commit)],
+        "commits": [
+            {**asdict(first.commit), "base": ""},
+            {**asdict(second.commit), "base": first.commit.sha},
+        ],
     }
 
     first_bytes = first.snapshot_path.read_bytes()
@@ -61,8 +64,8 @@ def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkey
 
     cached = analyze_repo(repo.path, out)
     assert cached == [
-        analyze.CommitResult(first.commit, first.snapshot_path, 2, 0, 0, False),
-        analyze.CommitResult(second.commit, second.snapshot_path, 3, 1, 0, False),
+        analyze.CommitResult(first.commit, first.snapshot_path, 2, 0, 0, False, ""),
+        analyze.CommitResult(second.commit, second.snapshot_path, 3, 1, 0, False, first.commit.sha),
     ]
     assert spy.call_count == 3
 
@@ -190,12 +193,14 @@ def test_shallow_history_gets_a_base_when_the_parent_becomes_available(make_repo
     out = tmp_path / "output"
 
     (head,) = analyze_repo(shallow, out, max_commits=1)
+    assert load_index(out)["commits"][0]["base"] == ""
     assert load_snapshot(out, head.commit.sha).commit.parents == []
     assert list((out / "snapshots").glob("*.json")) == [head.snapshot_path]
 
     repo.git("-C", str(shallow), "fetch", "--quiet", "--deepen=1", "origin")
     (updated,) = analyze_repo(shallow, out, max_commits=1)
     base_sha = repo.git("rev-parse", "HEAD^")
+    assert load_index(out)["commits"][0]["base"] == base_sha
     assert updated.commit.sha == head.commit.sha
     assert load_snapshot(out, updated.commit.sha).commit.parents == [base_sha]
     assert [node.id for node in load_snapshot(out, base_sha).nodes] == ["api:old"]
