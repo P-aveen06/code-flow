@@ -7,8 +7,8 @@ from unittest.mock import Mock
 import pytest
 
 from codeflow import analyze
-from codeflow.analyze import analyze_repo, load_commits, load_snapshot, resolve_sha
-from codeflow.graph import Commit
+from codeflow.analyze import analyze_repo, load_commits, load_index, load_snapshot, resolve_sha
+from codeflow.graph import Commit, Guard
 
 
 def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkeypatch):
@@ -21,9 +21,10 @@ def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkey
     )
     spy = Mock(wraps=analyze.parse_file)
     monkeypatch.setattr(analyze, "parse_file", spy)
+    monkeypatch.chdir(tmp_path)
     out = tmp_path / "output"
 
-    first, second = analyze_repo(repo.path, out)
+    first, second = analyze_repo(repo.path.name, out)
 
     assert [call.args[0] for call in spy.call_args_list] == ["cart.py", "catalog.py", "api.py"]
     assert {path.name for path in (out / "snapshots").iterdir()} == {
@@ -42,9 +43,10 @@ def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkey
     assert (second.node_count, second.edge_count, second.flag_count) == (3, 1, 0)
     assert first.written and second.written
     assert load_commits(out) == [first.commit, second.commit]
-    assert json.loads((out / "commits.json").read_text(encoding="utf-8")) == {
+    assert load_index(out) == {
         "schema": "code-flow/commits@1",
         "repo": "repo",
+        "repo_path": str(repo.path.resolve()),
         "branch": "HEAD",
         "source_root": "",
         "commits": [asdict(first.commit), asdict(second.commit)],
@@ -66,6 +68,37 @@ def test_snapshots_are_incremental_and_deterministic(make_repo, tmp_path, monkey
 
     fresh = analyze_repo(repo.path, tmp_path / "fresh-output")
     assert [result.snapshot_path.read_bytes() for result in fresh] == [first_bytes, second_bytes]
+
+
+def test_snapshot_keeps_flag_guards_through_elif_chain(make_repo, tmp_path):
+    repo = make_repo(
+        [
+            {
+                "api.py": """
+def checkout():
+    if not is_feature_enabled("new_checkout"):
+        return legacy()
+    elif expedited:
+        return rush()
+    else:
+        return standard()
+
+def legacy(): pass
+def rush(): pass
+def standard(): pass
+"""
+            }
+        ]
+    )
+    out = tmp_path / "output"
+    (result,) = analyze_repo(repo.path, out)
+
+    graph = load_snapshot(out, result.commit.sha)
+    assert {edge.target: edge.guard for edge in graph.edges} == {
+        "api:legacy": Guard("new_checkout", "off"),
+        "api:rush": Guard("new_checkout", "on"),
+        "api:standard": Guard("new_checkout", "on"),
+    }
 
 
 def test_source_root_selection_and_options(make_repo, tmp_path):

@@ -58,6 +58,10 @@ class Graph:
     edges: list[Edge]
     flags: list[FlagCheck]
 
+    def empty_base(self) -> "Graph":
+        """Return the empty graph used to compare a root commit."""
+        return Graph(self.schema, self.repo, Commit("", [], "", "", ""), [], [], [])
+
     def to_json(self) -> dict:
         result = asdict(self)
         result["nodes"] = sorted(result["nodes"], key=lambda node: node["id"])

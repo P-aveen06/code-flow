@@ -300,16 +300,22 @@ class _Walker:
         clauses = [node] + [
             child for child in node.named_children if child.type in ("elif_clause", "else_clause")
         ]
-        last_guard = None
+        guarded_chain = False
+        fallthrough = None
         for clause in clauses:
             condition = clause.child_by_field_name("condition")
             if condition:
                 self.walk(condition, scope, kind, inherited, variables.copy())
-                last_guard = guard_from_condition(condition, variables, self.flag_methods)
-                branch_guard = last_guard
+                own_guard = guard_from_condition(condition, variables, self.flag_methods)
+                if clause == node:
+                    guarded_chain = own_guard is not None
+                branch_guard = own_guard or (fallthrough if guarded_chain else None)
+                # A flag-led chain keeps the last failed flag test across ordinary elifs.
+                if own_guard or not guarded_chain:
+                    fallthrough = opposite(own_guard)
                 body = clause.child_by_field_name("consequence")
             else:
-                branch_guard = opposite(last_guard)
+                branch_guard = fallthrough
                 body = clause.child_by_field_name("body")
             self.walk(body, scope, kind, branch_guard or inherited, variables.copy())
         # Branch assignments may not execute: do not keep potentially stale bindings.

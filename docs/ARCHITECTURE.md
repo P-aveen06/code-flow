@@ -101,12 +101,15 @@ This is deliberately heuristic. Edges come only from parsing, never from an LLM.
 
 `<out>/commits.json` lists the selected first-parent commits oldest first.
 Each entry uses the same commit fields as the graph JSON (`message` is the
-commit subject and `date` is the author date in UTC).
+commit subject and `date` is the author date in UTC). `repo_path` is the
+absolute path of the analyzed Git repository, which the server uses to read
+source at a commit.
 
 ```json
 {
   "schema": "code-flow/commits@1",
   "repo": "shop-demo",
+  "repo_path": "/path/to/shop-demo",
   "branch": "main",
   "source_root": "",
   "commits": [
@@ -142,6 +145,40 @@ A whole-repo graph is unreadable. Every view renders the **changed
 neighbourhood**: added, removed and changed nodes plus their 1-hop callers and
 callees, grouped into compound nodes by module (ELK.js layered layout,
 hierarchical). The user can expand to 2 hops or show the full module.
+
+## HTTP API
+
+The server listens on port 8787 and serves JSON under `/api`. The
+`CODEFLOW_DATA_DIR` default is `data/` at the code-flow repo root. Relative
+overrides resolve against the working directory. `{repo}` is a plain analyzer
+output directory name such as `shop-demo`, with no `/`, `\`, or `..`. SHA
+parameters accept full SHAs or unique prefixes, and responses use full SHAs.
+
+- `GET /api/health` returns `{"status": "ok", "analyzer_version": "0.1.0"}`.
+- `GET /api/repos` returns `[{"name": "shop-demo", "branch": "main", "commit_count": 8}]`
+  for subdirectories containing `commits.json`, sorted by name.
+- `GET /api/repos/{repo}/commits` returns `{"repo": "shop-demo", "branch": "main", "commits": […]}`.
+  Entries are oldest first and include `sha`, `parents`, `author`, `date`, and
+  `message` plus `stats` (the five diff counts) and `summary`. Each comparison
+  uses the first parent's snapshot or an empty graph for the root commit.
+- `GET /api/repos/{repo}/snapshots/{sha}` returns that commit's `code-flow/graph@1` JSON.
+- `GET /api/repos/{repo}/diff?head=SHA&base=SHA&hops=1` returns `base`, `head`,
+  `summary`, the `code-flow/diff@1` JSON in `diff`, and overlay `nodes` and
+  `edges`. Omit `base` to compare with the first parent or with an empty
+  graph (`"base": ""`) for a root commit. `hops` defaults to 1 and accepts 0–3.
+  The overlay contains the union of both graphs within the changed
+  neighbourhood. Nodes are sorted by `id` and include `name`, `qualname`,
+  `module`, `kind`, `file`, `line`, `end_line`, and `status` (`added`,
+  `removed`, `changed`, or `context`). Edges are sorted by `(source, target)`
+  and include `guard` and `status` (`added`, `removed`, or `context`).
+  Both include `in_base` and `in_head` for the side-by-side view. Node
+  locations and edge guards come from head when present, otherwise from base.
+- `GET /api/repos/{repo}/code?sha=SHA&file=PATH&start=N&end=M` returns
+  `{"sha": "…", "file": "shop/checkout.py", "start": 15, "end": 19, "lines": [{"number": 15, "text": "def new_checkout(…):"}, …]}`.
+  Paths are repo-relative without `..`. Lines are 1-based and inclusive.
+  Bounds are clamped to the file. Omit both to get the whole file.
+- Unknown repos, SHAs, or files return 404 with `{"detail": "…"}`. Bad
+  parameters return 400 or FastAPI's 422 for type errors.
 
 ## Colours
 
@@ -204,9 +241,10 @@ Detection (analyzer, `codeflow/flags.py`):
 - Calls whose method name is one of `is_feature_enabled`, `get_feature_value`,
   `has_feature`, `feature_enabled`, `get_value` with a string-literal first
   argument. The list is configurable.
-- If such a call is the condition of an `if` / `elif` (also `not …`, and a local
-  variable assigned from the call and then tested), calls inside the body get
-  `guard: {flag, when: "on"}` and calls in the `else` get `when: "off"`.
+- Direct, negated, or local-variable flag checks guard their branch body
+  with `on` or `off` as appropriate, and chains starting with a flag check
+  carry the opposite of the latest flag guard into later `elif` and `else`
+  bodies unless a clause or nested branch has its own flag guard.
 
 Live state (server):
 - Reads the analyzed app's environment flags from the self-hosted Flagsmith
@@ -238,7 +276,7 @@ code-flow/
     tests/
   server/
     pyproject.toml
-    app/{main,store,flagsmith_client}.py
+    app/{config,main,store,flagsmith_client}.py
     tests/
   web/
     package.json, vite.config.ts

@@ -31,23 +31,43 @@ def test_direct_conditions_and_else(condition, on, off):
     assert parsed.flags[0].line == 2
 
 
-def test_elif_else_uses_last_condition():
+def test_elif_own_flag_wins_and_supplies_the_next_fallthrough():
     _, calls = guarded_calls(
         "if flags.has_feature('a'):\n do_a()\nelif not flags.has_feature('b'):\n"
-        " do_b()\nelse:\n do_else()"
+        " do_b()\nelif other:\n do_other()\nelse:\n do_else()"
     )
     assert calls == {
         "do_a": Guard("a", "on"),
         "do_b": Guard("b", "off"),
+        "do_other": Guard("b", "on"),
         "do_else": Guard("b", "on"),
     }
 
 
-def test_else_after_nonflag_elif_is_unguarded():
+def test_flag_fallthrough_reaches_each_later_body():
     _, calls = guarded_calls(
-        "if flags.has_feature('a'):\n do_a()\nelif other:\n do_b()\nelse:\n do_else()"
+        "if flags.has_feature('a'):\n do_a()\nelif other:\n do_b()\n"
+        "elif another:\n do_c()\nelse:\n do_else()"
     )
-    assert calls["do_else"] is None
+    assert calls == {
+        "do_a": Guard("a", "on"),
+        "do_b": Guard("a", "off"),
+        "do_c": Guard("a", "off"),
+        "do_else": Guard("a", "off"),
+    }
+
+
+def test_nonflag_first_condition_keeps_existing_elif_behavior():
+    _, calls = guarded_calls(
+        "if ordinary:\n do_first()\nelif flags.has_feature('a'):\n do_a()\n"
+        "elif other:\n do_b()\nelse:\n do_else()"
+    )
+    assert calls == {"do_first": None, "do_a": Guard("a", "on"), "do_b": None, "do_else": None}
+
+    _, calls = guarded_calls(
+        "if ordinary:\n do_first()\nelif flags.has_feature('a'):\n do_a()\nelse:\n do_else()"
+    )
+    assert calls == {"do_first": None, "do_a": Guard("a", "on"), "do_else": Guard("a", "off")}
 
 
 @pytest.mark.parametrize("condition,when", [("enabled", "on"), ("not (enabled)", "off")])

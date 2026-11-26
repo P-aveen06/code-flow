@@ -12,6 +12,14 @@ from codeflow.graph import Commit, Graph
 from codeflow.parse_python import ParsedFile, parse_file
 
 
+class UnknownSHA(ValueError):
+    """No indexed commit matches the requested SHA or prefix."""
+
+
+class AmbiguousSHA(ValueError):
+    """More than one indexed commit matches the requested prefix."""
+
+
 @dataclass
 class CommitResult:
     """Report graph counts and any files skipped while writing this snapshot."""
@@ -48,8 +56,9 @@ def analyze_repo(
     keep_external: bool = False,
 ) -> list[CommitResult]:
     """Write missing snapshots and the commit index, then report results oldest first."""
+    repo = Path(repo).resolve()
     commits = list_commits(repo, branch, max_commits)
-    repo_name = Path(repo).resolve().name
+    repo_name = repo.name
     out_dir = Path(out_dir)
     snapshots = out_dir / "snapshots"
     snapshots.mkdir(parents=True, exist_ok=True)
@@ -101,6 +110,7 @@ def analyze_repo(
         {
             "schema": "code-flow/commits@1",
             "repo": repo_name,
+            "repo_path": str(repo),
             "branch": branch,
             "source_root": source_root,
             "commits": [asdict(commit) for commit in commits],
@@ -109,10 +119,14 @@ def analyze_repo(
     return results
 
 
+def load_index(out_dir: str | Path) -> dict:
+    """Load the commit index and its repository metadata."""
+    return json.loads((Path(out_dir) / "commits.json").read_text(encoding="utf-8"))
+
+
 def load_commits(out_dir: str | Path) -> list[Commit]:
     """Load the commits in the index's oldest-first order."""
-    data = json.loads((Path(out_dir) / "commits.json").read_text(encoding="utf-8"))
-    return [Commit(**commit) for commit in data["commits"]]
+    return [Commit(**commit) for commit in load_index(out_dir)["commits"]]
 
 
 def load_snapshot(out_dir: str | Path, sha: str) -> Graph:
@@ -125,7 +139,7 @@ def resolve_sha(out_dir: str | Path, ref: str) -> str:
     """Find the full SHA for an indexed commit SHA or unique prefix."""
     matches = [commit.sha for commit in load_commits(out_dir) if ref and commit.sha.startswith(ref)]
     if not matches:
-        raise ValueError(f"Unknown commit SHA or prefix: {ref!r}")
+        raise UnknownSHA(f"Unknown commit SHA or prefix: {ref!r}")
     if len(matches) > 1:
-        raise ValueError(f"Ambiguous commit SHA prefix: {ref!r}")
+        raise AmbiguousSHA(f"Ambiguous commit SHA prefix: {ref!r}")
     return matches[0]

@@ -80,7 +80,7 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] Tests: fixture repo built in a tmp dir; snapshot and diff assertions
 
 ### M2 Server + web
-- [ ] Server routes: `GET /api/repos`, `GET /api/repos/{repo}/commits`, `GET /api/repos/{repo}/snapshots/{sha}`, `GET /api/repos/{repo}/diff?base&head&hops`, `GET /api/repos/{repo}/code?sha&file&start&end`
+- [x] Server routes: `GET /api/repos`, `GET /api/repos/{repo}/commits`, `GET /api/repos/{repo}/snapshots/{sha}`, `GET /api/repos/{repo}/diff?base&head&hops`, `GET /api/repos/{repo}/code?sha&file&start&end`
 - [ ] Web: timeline (commit list with +/−/~ counts), diff canvas, node click opens code pane
 - [ ] `layout/elk.ts`: ELK layered, compound nodes per module, left-to-right
 - [ ] Views: `Overlay.tsx`, `SideBySide.tsx` (two canvases, synced viewport), `OverlaySummary.tsx`

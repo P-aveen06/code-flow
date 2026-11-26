@@ -12,12 +12,8 @@ from codeflow.analyze import analyze_repo, load_snapshot, resolve_sha
 from codeflow.diff import diff_graphs
 from codeflow.export_mermaid import to_mermaid
 from codeflow.git_history import GitHistoryError
-from codeflow.graph import Commit, FlagCheck, Graph
+from codeflow.graph import FlagCheck, Graph
 from codeflow.summary import summarize
-
-
-def _empty_base(head: Graph) -> Graph:
-    return Graph(head.schema, head.repo, Commit("", [], "", "", ""), [], [], [])
 
 
 def _analyze(args: argparse.Namespace) -> None:
@@ -38,7 +34,7 @@ def _analyze(args: argparse.Namespace) -> None:
     for result in results:
         commit = result.commit
         head = load_snapshot(args.out, commit.sha)
-        nodes = diff_graphs(previous or _empty_base(head), head).nodes
+        nodes = diff_graphs(previous or head.empty_base(), head).nodes
         added, removed, changed = len(nodes.added), len(nodes.removed), len(nodes.changed)
         print(f"{commit.sha[:7]} +{added} −{removed} ~{changed} {commit.message}")
         total_added += added
@@ -56,7 +52,7 @@ def _load_graph(directory: Path, ref: str) -> Graph:
 
 def _first_parent(directory: Path, head: Graph) -> Graph:
     if not head.commit.parents:
-        return _empty_base(head)
+        return head.empty_base()
     parent = head.commit.parents[0]
     try:
         return load_snapshot(directory, parent)
