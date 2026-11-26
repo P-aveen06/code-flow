@@ -104,11 +104,11 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 
 ### M4 Experiment
 - [x] Turn on Experimentation in Paveen's Docker Flagsmith (`EXPERIMENTATION_ENABLED=true`, experimentation services + ClickHouse from Flagsmith's `docker-compose.yml`); connect the warehouse for the `code-flow` environment (done Nov 26: `EXPERIMENTATION_ENABLED` only, events in Postgres; warehouse "Flagsmith database" enabled for code-flow/Production by the setup script)
-- [ ] Create metric from event `diff_understood` and the experiment on `flow_view` (34/33/33); write the exact steps into README
-- [ ] Web: `getExperimentFlag('flow_view')` for exposure, `trackEvent('diff_understood', { value: ms })` / `trackEvent('diff_confusing')` on the buttons, `enableEvents: true`
-- [ ] `simulator/simulate.py` + `behaviour.yaml`: N identities, `get_experiment_flag` per identity, sample outcome and time from the behaviour model, `track_event`, `close()`; `--n`, `--rate`, `--seed`
+- [x] Create metric from event `diff_understood` and the experiment on `flow_view` (34/33/33); write the exact steps into README
+- [x] Web: `getExperimentFlag('flow_view')` for exposure, `trackEvent('diff_understood', { value: ms })` / `trackEvent('diff_confusing')` on the buttons, `enableEvents: true`
+- [x] `simulator/simulate.py` + `behaviour.yaml`: N identities, `get_experiment_flag` per identity, sample outcome and time from the behaviour model, `track_event`, `close()`; `--n`, `--rate`, `--seed`
 - [ ] Optional: server SQLite mirror + small results table in the web app as a backup
-- [ ] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README
+- [x] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README
 ### M5 Demo + polish
 - [ ] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
 - [ ] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
