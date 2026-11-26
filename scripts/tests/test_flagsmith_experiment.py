@@ -3,6 +3,7 @@
 import copy
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,8 +42,10 @@ class FakeClient:
         self.metrics = []
         self.experiments = []
         self.results = None
+        self.results_responses = []
         self.exposures = None
         self.fail_start = False
+        self.throttled_refreshes = set()
         self.feature = {
             "id": 16,
             "name": "flow_view",
@@ -84,6 +87,8 @@ class FakeClient:
         self.calls.append((method, path, copy.deepcopy(body)))
         if method == "GET":
             if path == f"{DETAIL}results/":
+                if self.results_responses:
+                    return {"results": self.results_responses.pop(0)}
                 return {"results": self.results}
             if path == f"{DETAIL}exposures/":
                 return {"exposures": self.exposures}
@@ -119,7 +124,24 @@ class FakeClient:
         if method == "POST" and path == f"{DETAIL}complete/":
             self.experiments[0].update(status="completed", **body)
             return copy.deepcopy(self.experiments[0])
+        if method == "POST" and path in (
+            f"{DETAIL}exposures/refresh/",
+            f"{DETAIL}results/refresh/",
+        ):
+            if path in self.throttled_refreshes:
+                raise script.AdminError("POST", 429)
+            return None  # HTTP 202 has an empty body.
         pytest.fail(f"Unexpected fake API request {method}")
+
+
+@pytest.fixture
+def running_experiment(capsys):
+    client = FakeClient()
+    api = script.ExperimentAPI(client, dry_run=False)
+    script.run(api, "create")
+    client.calls.clear()
+    capsys.readouterr()
+    return client, api
 
 
 def test_create_uses_serializer_fields_and_is_idempotent(capsys):
@@ -214,6 +236,10 @@ def test_rollout_completes_once_and_reports_winner(variant, body, capsys):
         (["create", "--dry-run"], "POST environments/<environment-key>/experiment-metrics/"),
         (["--dry-run", "status"], "GET environments/<environment-key>/experiments/41/results/"),
         (
+            ["refresh", "--wait", "10", "--dry-run"],
+            "POST environments/<environment-key>/experiments/41/results/refresh/",
+        ),
+        (
             ["rollout", "--variant", "overlay", "--dry-run"],
             "POST environments/<environment-key>/experiments/41/complete/",
         ),
@@ -248,6 +274,9 @@ def test_cli_dry_runs_send_only_gets_and_hide_keys(
 
     stdout, stderr = capsys.readouterr()
     assert expected_request in stdout
+    if arguments[0] == "refresh":
+        assert "POST environments/<environment-key>/experiments/41/exposures/refresh/" in stdout
+        assert ("GET", f"{DETAIL}results/", None) not in client.calls
     assert stderr == ""
     assert all(key not in stdout for key in (ENV_KEY, admin_key, server_key))
     assert client.calls
@@ -332,3 +361,119 @@ def test_status_sums_cached_exposures_when_results_are_missing(capsys):
     assert any("No cached results" in line for line in lines)
     assert next(line for line in lines if line.startswith("side_by_side")).endswith("17")
     assert next(line for line in lines if line.startswith("overlay ")).endswith("15")
+    assert any(
+        "Current counts are side_by_side 17, overlay 15, overlay_summary 0." in line
+        for line in lines
+    )
+
+
+@pytest.mark.parametrize(
+    ("reviewers", "conversions", "threshold", "counts"),
+    [
+        (
+            (24, 41, 35),
+            (5, 5, 5),
+            "50 reviewers",
+            "side_by_side 24, overlay 41, overlay_summary 35",
+        ),
+        ((50, 50, 50), (5, 4, 1), "5 conversions", "side_by_side 5, overlay 4, overlay_summary 1"),
+    ],
+)
+def test_status_explains_below_minimum_results(
+    running_experiment, reviewers, conversions, threshold, counts, capsys
+):
+    client, api = running_experiment
+    client.results = {
+        "payload": {
+            "metrics": [
+                {
+                    "metric_id": 31,
+                    "variants": {
+                        key: {"n": n, "sum": total}
+                        for key, n, total in zip(
+                            ("control", "overlay", "overlay_summary"),
+                            reviewers,
+                            conversions,
+                            strict=True,
+                        )
+                    },
+                    "inference": {"overlay": None, "overlay_summary": None},
+                }
+            ]
+        }
+    }
+
+    script.run(api, "status")
+
+    output = capsys.readouterr().out
+    assert f"Flagsmith needs >= {threshold} per variant" in output
+    assert f"Current counts are {counts}." in output
+    assert client.writes == []
+
+
+@pytest.mark.parametrize("throttled", [False, True])
+def test_refresh_posts_to_both_endpoints(running_experiment, throttled, capsys):
+    client, api = running_experiment
+    if throttled:
+        client.throttled_refreshes.add(f"{DETAIL}exposures/refresh/")
+
+    script.run(api, "refresh")
+
+    assert client.writes == [
+        ("POST", f"{DETAIL}exposures/refresh/", {}),
+        ("POST", f"{DETAIL}results/refresh/", {}),
+    ]
+    assert ("GET", f"{DETAIL}results/", None) not in client.calls
+    output = capsys.readouterr().out
+    if throttled:
+        assert "Flagsmith allows one exposures refresh every 5 minutes" in output
+    else:
+        assert "Requested exposures refresh" in output
+    assert "Requested results refresh" in output
+    assert ENV_KEY not in output
+
+
+def test_refresh_waits_for_a_fresh_results_payload(running_experiment, monkeypatch, capsys):
+    client, api = running_experiment
+    cached = {
+        "as_of": "2026-11-26T08:05:00Z",
+        "refresh_requested_at": "2026-11-26T08:05:00.5Z",
+        "payload": {
+            "metrics": [
+                {"metric_id": 31, "variants": {"control": {"n": 100, "sum": 40}}, "inference": {}}
+            ]
+        },
+    }
+    client.results_responses = [None, cached, {**cached, "as_of": "2026-11-26T08:05:01Z"}]
+    sleeps = []
+    times = iter([0, 0, 2])
+    monkeypatch.setattr(
+        script, "time", SimpleNamespace(monotonic=times.__next__, sleep=sleeps.append)
+    )
+
+    script.run(api, "refresh", wait_seconds=10)
+
+    assert client.calls[-3:] == [("GET", f"{DETAIL}results/", None)] * 3
+    assert sleeps == [2, 2]
+    output = capsys.readouterr().out
+    assert "40 / 40.0%" in output
+    assert "Timed out" not in output
+
+
+def test_refresh_wait_reports_timeout(running_experiment, monkeypatch, capsys):
+    client, api = running_experiment
+    sleeps = []
+    times = iter([0, 0, 1])
+    monkeypatch.setattr(
+        script, "time", SimpleNamespace(monotonic=times.__next__, sleep=sleeps.append)
+    )
+
+    script.run(api, "refresh", wait_seconds=1)
+
+    assert client.calls[-3:] == [
+        ("GET", f"{DETAIL}results/", None),
+        ("GET", f"{DETAIL}results/", None),
+        ("GET", f"{DETAIL}exposures/", None),
+    ]
+    assert sleeps == [1]
+    assert "Timed out after 1s waiting for refreshed results" in capsys.readouterr().out

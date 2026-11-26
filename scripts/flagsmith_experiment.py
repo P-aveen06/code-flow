@@ -1,4 +1,4 @@
-"""Create, inspect, or complete the code-flow experiment on Flagsmith 2.295.2."""
+"""Create, inspect, refresh, or complete the code-flow experiment on Flagsmith 2.295.2."""
 
 import argparse
 import fcntl
@@ -6,6 +6,8 @@ import json
 import os
 import re
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 from flagsmith_setup import (
@@ -34,6 +36,9 @@ METRICS = (
     ("Diff time to understand (ms)", "mean", "down", "decrease"),
 )
 EVENT = {"version": 1, "event": "diff_understood"}
+MIN_REVIEWERS_PER_VARIANT = 50
+MIN_CONVERSIONS_PER_VARIANT = 5
+RESULTS_POLL_SECONDS = 2
 
 
 class ExperimentAPI:
@@ -224,12 +229,57 @@ def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
         )
 
 
+def print_inference_minimum(minimum: int, unit: str, counts: dict[str, int | float]) -> None:
+    current = ", ".join(f"{label} {count:,.0f}" for label, count in counts.items())
+    print(
+        f"Flagsmith needs >= {minimum} {unit} per variant to compute lift, credible intervals, "
+        f"and win probability. Current counts are {current}."
+    )
+
+
+def explain_missing_inference(
+    stats: dict[str, Record], missing_treatments: list[str], occurrence: bool
+) -> None:
+    if not missing_treatments:
+        return
+
+    # Flagsmith checks the control and treatment separately for each comparison.
+    compared = [stats[label] for label in (CONTROL, *missing_treatments)]
+    needs_reviewers = any(variant["n"] < MIN_REVIEWERS_PER_VARIANT for variant in compared)
+    needs_conversions = occurrence and any(
+        variant["sum"] < MIN_CONVERSIONS_PER_VARIANT for variant in compared
+    )
+    if needs_reviewers:
+        print_inference_minimum(
+            MIN_REVIEWERS_PER_VARIANT,
+            "reviewers",
+            {label: row["n"] for label, row in stats.items()},
+        )
+    if needs_conversions:
+        print_inference_minimum(
+            MIN_CONVERSIONS_PER_VARIANT,
+            "conversions",
+            {label: row["sum"] for label, row in stats.items()},
+        )
+    if not (needs_reviewers or needs_conversions):
+        if stats[CONTROL]["sum"] <= 0:
+            print("Flagsmith needs a positive control mean to compute relative lift.")
+        else:
+            print(
+                "Flagsmith returned no lift, credible interval, or win probability for some variants."
+            )
+
+
 def show_metric(name: str, aggregation: str, result: Record, variants: dict[str, str]) -> None:
     occurrence = aggregation == "occurrence"
     print(f"\n{name}")
+    stats_by_variant = {
+        label: result["variants"].get(key, {"n": 0, "sum": 0}) for label, key in variants.items()
+    }
     rows = []
+    missing_treatments = []
     for label, key in variants.items():
-        stats = result["variants"].get(key, {"n": 0, "sum": 0})
+        stats = stats_by_variant[label]
         exposures, total = stats["n"], stats["sum"]
         if occurrence:
             outcome = f"{total:,.0f} / {total / exposures:.1%}" if exposures else "0 / —"
@@ -240,7 +290,10 @@ def show_metric(name: str, aggregation: str, result: Record, variants: dict[str,
             lift = f"{inference['lift']:+.1%}"
             interval = f"[{inference['ci_low']:+.1%}, {inference['ci_high']:+.1%}]"
             win = f"{inference['chance_to_win']:.1%}"
-        rows.append((label, f"{exposures:,}", outcome, lift, interval, win))
+        elif label != CONTROL:
+            missing_treatments.append(label)
+        display_name = f"{label} (control)" if label == CONTROL else label
+        rows.append((display_name, f"{exposures:,}", outcome, lift, interval, win))
     outcome_title = "Conversions / rate" if occurrence else "Mean ms / exposure"
     print_table(
         (
@@ -253,11 +306,32 @@ def show_metric(name: str, aggregation: str, result: Record, variants: dict[str,
         ),
         rows,
     )
+    explain_missing_inference(stats_by_variant, missing_treatments, occurrence)
 
 
-def read_computation(api: ExperimentAPI, path: str, name: str) -> Record | None:
+def computation_is_current(computation: Record | None) -> bool:
+    if not computation or not computation.get("payload"):
+        return False
+    if computation.get("is_final") or not (requested_at := computation.get("refresh_requested_at")):
+        return True
+    as_of = computation.get("as_of")
+    return bool(as_of and datetime.fromisoformat(as_of) >= datetime.fromisoformat(requested_at))
+
+
+def read_computation(
+    api: ExperimentAPI, path: str, name: str, wait_seconds: int = 0
+) -> Record | None:
+    deadline = time.monotonic() + wait_seconds if wait_seconds else 0
     try:
-        computation = api.get(f"{path}{name}/")[name]
+        while True:
+            computation = api.get(f"{path}{name}/")[name]
+            if not wait_seconds or computation_is_current(computation):
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print(f"Timed out after {wait_seconds}s waiting for refreshed {name}.")
+                break
+            time.sleep(min(RESULTS_POLL_SECONDS, remaining))
     except AdminError as error:
         if error.status not in (404, 405):
             raise
@@ -268,11 +342,13 @@ def read_computation(api: ExperimentAPI, path: str, name: str) -> Record | None:
     return computation["payload"] if computation else None
 
 
-def status(api: ExperimentAPI, path: str, feature: Record, experiment: Record) -> None:
+def status(
+    api: ExperimentAPI, path: str, feature: Record, experiment: Record, wait_seconds: int = 0
+) -> None:
     print(f"{EXPERIMENT_NAME} is {experiment_state(experiment)}.")
-    variants = {f"{CONTROL} (control)": "control"}
+    variants = {CONTROL: "control"}
     variants.update({name: option["key"] for name, option in variant_options(feature).items()})
-    results = read_computation(api, path, "results")
+    results = read_computation(api, path, "results", wait_seconds)
     if results:
         by_id = {metric["metric_id"]: metric for metric in results["metrics"]}
         by_name = {row["metric_name"]: row["metric"] for row in experiment["metrics"]}
@@ -284,19 +360,38 @@ def status(api: ExperimentAPI, path: str, feature: Record, experiment: Record) -
         if displayed:
             return
 
-    print(
-        "No cached results for the code-flow metrics. Use Refresh in the Flagsmith dashboard after traffic arrives."
-    )
+    print("No cached results for the code-flow metrics. Run refresh after traffic arrives.")
     if exposures := read_computation(api, path, "exposures"):
         points = exposures["timeseries"]["points"]
-        rows = [
-            (label, f"{sum(point['new_identities'].get(key, 0) for point in points):,}")
+        counts = {
+            label: sum(point["new_identities"].get(key, 0) for point in points)
             for label, key in variants.items()
+        }
+        rows = [
+            (f"{label} (control)" if label == CONTROL else label, f"{count:,}")
+            for label, count in counts.items()
         ]
         print_table(("Variant", "Exposures"), rows)
+        if any(count < MIN_REVIEWERS_PER_VARIANT for count in counts.values()):
+            print_inference_minimum(MIN_REVIEWERS_PER_VARIANT, "reviewers", counts)
 
 
-def run(api: ExperimentAPI, command: str, variant: str | None = None) -> None:
+def refresh(api: ExperimentAPI, path: str) -> None:
+    for name in ("exposures", "results"):
+        try:
+            api.post(f"{path}{name}/refresh/", {})
+        except AdminError as error:
+            if error.status != 429:
+                raise
+            print(f"Flagsmith allows one {name} refresh every 5 minutes. Try again shortly.")
+        else:
+            if not api.dry_run:
+                print(f"Requested {name} refresh.")
+
+
+def run(
+    api: ExperimentAPI, command: str, variant: str | None = None, *, wait_seconds: int = 0
+) -> None:
     organisations = api.list("organisations/")
     if len(organisations) != 1:
         raise SetupError("The admin API key must identify exactly one Flagsmith organisation.")
@@ -312,7 +407,7 @@ def run(api: ExperimentAPI, command: str, variant: str | None = None) -> None:
     experiments = api.list(f"{environment_path}experiments/?q={FEATURE_NAME}")
     experiment = find_record(experiments, "name", EXPERIMENT_NAME, "experiment")
     if experiment is None and command != "create":
-        if command == "rollout":
+        if command in ("refresh", "rollout"):
             raise SetupError(f"No experiment named {EXPERIMENT_NAME} exists.")
         print(f"No experiment named {EXPERIMENT_NAME} exists.")
         return
@@ -325,7 +420,11 @@ def run(api: ExperimentAPI, command: str, variant: str | None = None) -> None:
         create(api, environment_path, feature, experiments, experiment)
     elif experiment is not None:
         path = f"{environment_path}experiments/{experiment['id']}/"
-        if variant is not None:
+        if command == "refresh":
+            refresh(api, path)
+            if wait_seconds and not api.dry_run:
+                status(api, path, feature, experiment, wait_seconds)
+        elif variant is not None:
             rollout(api, path, feature, experiment, variant)
         else:
             status(api, path, feature, experiment)
@@ -341,13 +440,21 @@ def main() -> int:
     for name, help_text in (
         ("create", "Create the metrics and start the experiment."),
         ("status", "Show the state and cached results."),
+        ("refresh", "Request a refresh of experiment exposures and results."),
         ("rollout", "Complete the experiment and apply a winner."),
     ):
         subcommand = commands.add_parser(name, help=help_text)
         subcommand.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
         if name == "rollout":
             subcommand.add_argument("--variant", choices=(CONTROL, *TREATMENTS), required=True)
+        if name == "refresh":
+            subcommand.add_argument(
+                "--wait", type=int, default=0, metavar="SECONDS", help="Wait for refreshed results."
+            )
     args = parser.parse_args()
+    wait_seconds = getattr(args, "wait", 0)
+    if wait_seconds < 0:
+        parser.error("--wait must be zero or more seconds.")
 
     try:
         settings = read_env(args.env_file)
@@ -359,13 +466,13 @@ def main() -> int:
         if args.dry_run or args.command == "status":
             if args.dry_run:
                 print("Dry run. Only GET requests will be sent.")
-            run(api, args.command, variant)
+            run(api, args.command, variant, wait_seconds=wait_seconds)
         else:
             # Serialize writers in this checkout. Flagsmith permits duplicate metric names.
             directory = os.open(Path(__file__).resolve().parent, os.O_RDONLY)
             try:
                 fcntl.flock(directory, fcntl.LOCK_EX)
-                run(api, args.command, variant)
+                run(api, args.command, variant, wait_seconds=wait_seconds)
             finally:
                 os.close(directory)
     except SetupError as error:
