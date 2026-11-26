@@ -2,33 +2,19 @@
 
 import json
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from codeflow.analyze import analyze_repo, load_commits, load_snapshot
+from codeflow.analyze import load_commits, load_snapshot
 from codeflow.graph import Commit
 from fastapi.testclient import TestClient
 
+from app import config
 from app.config import Settings
 from app.main import create_app
 
 REPO_URL = "/api/repos/shop-demo"
-CHECKOUT_MESSAGE = "Add new_checkout behind flag new_checkout"
-
-
-@pytest.fixture(scope="module")
-def demo_data(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    if shutil.which("git") is None:
-        pytest.skip("git is required to build the shop demo")
-    root = tmp_path_factory.mktemp("shop-demo")
-    repo = root / "shop-demo"
-    script = Path(__file__).resolve().parents[2] / "examples" / "make_shop_demo.sh"
-    subprocess.run(["bash", str(script), str(repo)], check=True, capture_output=True)
-    data_dir = root / "data"
-    analyze_repo(repo, data_dir / "shop-demo", branch="main")
-    return data_dir
 
 
 @pytest.fixture
@@ -36,15 +22,6 @@ def client(demo_data: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestCli
     monkeypatch.setenv("CODEFLOW_DATA_DIR", str(demo_data))
     with TestClient(create_app()) as test_client:
         yield test_client
-
-
-@pytest.fixture
-def checkout_commit(demo_data: Path) -> Commit:
-    return next(
-        commit
-        for commit in load_commits(demo_data / "shop-demo")
-        if commit.message == CHECKOUT_MESSAGE
-    )
 
 
 def test_list_repos(client: TestClient) -> None:
@@ -227,6 +204,7 @@ def test_unknown_and_invalid_repos(client: TestClient) -> None:
 
 def test_data_dir_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_read_dotenv", lambda _: {})
     monkeypatch.delenv("CODEFLOW_DATA_DIR", raising=False)
     assert Settings.from_env().data_dir == Path(__file__).resolve().parents[2] / "data"
     monkeypatch.setenv("CODEFLOW_DATA_DIR", "./data")

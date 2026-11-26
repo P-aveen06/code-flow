@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import Settings
+from app.flag_findings import find_flags
+from app.flagsmith_client import FlagsmithClient
 from app.importer import RepoImporter, validate_import
 from app.store import BadRequest, NotFound, Store
 
@@ -22,10 +24,14 @@ def create_app(
     *,
     git_url_builder: Callable[[str], str] | None = None,
     executor: Executor | None = None,
+    flagsmith_client: FlagsmithClient | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings.data_dir)
     importer = RepoImporter(store, git_url_builder, executor)
+    flagsmith = flagsmith_client or FlagsmithClient(
+        settings.flagsmith_server_key, settings.flagsmith_api_url
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -103,6 +109,24 @@ def create_app(
     def snapshot(repo: str, sha: str) -> dict:
         with store.lock:
             return store.snapshot(repo, sha)
+
+    @app.get("/api/repos/{repo}/flags")
+    def flags(repo: str, sha: str | None = None) -> dict:
+        with store.lock:
+            snapshot, earlier_checks = store.flag_history(repo, sha)
+        environment, scope = settings.flag_scope(repo)
+        state = flagsmith.get_state()
+        return {
+            "repo": repo,
+            "sha": snapshot.commit.sha,
+            "flagsmith": {
+                "connected": state.flags is not None,
+                "environment": environment,
+                "fetched_at": state.fetched_at,
+                "error": state.error,
+            },
+            "flags": find_flags(snapshot, earlier_checks, scope, state.flags),
+        }
 
     @app.get("/api/repos/{repo}/diff")
     def diff(repo: str, head: str, base: str | None = None, hops: int = 1) -> dict:

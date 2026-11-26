@@ -7,7 +7,13 @@ name = "code-flow-server"
 version = "0.1.0"
 description = "HTTP API for code-flow"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn[standard]", "code-flow-analyzer"]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "code-flow-analyzer",
+    "flagsmith>=6.7.0",
+    "urllib3",
+]
 
 [dependency-groups]
 dev = ["pytest", "httpx", "ruff"]

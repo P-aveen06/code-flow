@@ -156,9 +156,11 @@ hierarchical). The user can expand to 2 hops or show the full module.
 
 The server listens on port 8787 and serves JSON under `/api`. The
 `CODEFLOW_DATA_DIR` default is `data/` at the code-flow repo root. Relative
-overrides resolve against the working directory. `{repo}` is a plain analyzer
-output directory name such as `shop-demo`, with no `/`, `\`, or `..`. SHA
-parameters accept full SHAs or unique prefixes, and responses use full SHAs.
+paths from the repo-root `.env` resolve against the repo root. Paths from
+process environment variables resolve against the working directory.
+`{repo}` is a plain analyzer output directory name such as `shop-demo`,
+with no `/`, `\`, or `..`. SHA parameters accept full SHAs or unique prefixes,
+and responses use full SHAs.
 
 - `GET /api/health` returns `{"status": "ok", "analyzer_version": "0.1.0"}`.
 - `GET /api/repos` lists indexed repos and import jobs, sorted by `name`.
@@ -191,6 +193,14 @@ parameters accept full SHAs or unique prefixes, and responses use full SHAs.
   (the five diff counts) and `summary`. Legacy indexes without `base` use the
   first parent or an empty graph for a root commit.
 - `GET /api/repos/{repo}/snapshots/{sha}` returns that commit's `code-flow/graph@1` JSON.
+- `GET /api/repos/{repo}/flags?sha=SHA` returns `repo`, full `sha`,
+  `flagsmith` (`connected`, `environment`, UTC `fetched_at`, `error`), and
+  `flags`. Omit `sha` to use the newest listed commit. Each flag includes
+  `name`, `status`, `enabled`, `value`, `in_flagsmith`, `checks`
+  (`file`, `line`, `function`, `call`), `guarded_edges`
+  (`source`, `target`, `when`, `live`), `stale`, `stale_reason`, and
+  `dead_calls` (`source`, `target`). The order is orphan, live, off, unused,
+  then by name within each status. Code-only results use `unknown`.
 - `GET /api/repos/{repo}/diff?head=SHA&base=SHA&hops=1` returns `base`, `head`,
   `summary`, the `code-flow/diff@1` JSON in `diff`, and overlay `nodes` and
   `edges`. Omit `base` to use the commit index's diff base.
@@ -296,22 +306,32 @@ Detection (analyzer, `codeflow/flags.py`):
   carry the opposite of the latest flag guard into later `elif` and `else`
   bodies unless a clause or nested branch has its own flag guard.
 
-Live state (server):
-- Reads live flag state from the shared environment using `FLAGSMITH_API_URL`
-  and `CODEFLOW_FLAGSMITH_SERVER_KEY`.
+The server reads live flag state from the shared environment.
+
+- The Python SDK remotely evaluates environment flags without an identity.
+  It uses `FLAGSMITH_API_URL` (default `http://localhost:8000/api/v1/`) and
+  `CODEFLOW_FLAGSMITH_SERVER_KEY`, with process environment variables taking
+  precedence over the repo-root `.env`. Lookups use a four-second timeout and
+  are cached for ten seconds across repositories.
 - `make flagsmith-setup` reads the project tags and writes
   `data/flagsmith_scopes.json` (`code-flow/flagsmith-scopes@1`). Its `repos`
-  object maps each analyzed repo ID to the flag names on its tag. Flagsmith
-  mode uses that scope for live, off, stale, orphan, and unused comparisons.
-  The admin key is used during setup only.
-
-Findings shown in the panel:
-- **live / off**: which branch of each flag-gated split users hit now.
-- **stale**: flag is fully on (or fully off) in Flagsmith and the check has been
-  in the code, unchanged, for at least N commits / D days of history. Suggests
-  deleting the dead branch, naming the functions that become unreachable.
-- **orphan**: flag checked in the analyzed repo that is missing from its Flagsmith scope.
-- **unused**: flag in the repo's Flagsmith scope with no checks in its analyzed code.
+  object maps each analyzed repo ID to its flag names. The server reads the
+  file from the data directory by default, with `CODEFLOW_FLAGSMITH_SCOPES_PATH`
+  as an override. A repo's live state is limited to its scope and excludes
+  `code_flow_flags`. The admin key is used during setup only.
+- With no server key or a failed lookup, the API returns `connected: false`
+  with an error, a null `fetched_at`, and only checked flags, with `unknown`
+  status, `in_flagsmith: false`, and null `enabled`, `value`, and guarded-edge
+  `live` fields.
+- **live / off** flags are checked in code and enabled or disabled in Flagsmith.
+  Guarded edges whose `when` disagrees with that state are `dead_calls`.
+- **orphan** flags are checked in code and absent from the repo's scoped live
+  state. Their guarded-edge `live` values are null. **unused** flags are present
+  in the repo's scoped live state and have no checks at `sha`.
+- **stale** flags are disabled or enabled with a null value and have the same
+  nonempty set of `(file, function, call)` locations in every listed commit
+  through `sha`, with a minimum of five commits. Dead calls for stale flags
+  identify candidates for deletion.
 
 ## Repository layout (target)
 

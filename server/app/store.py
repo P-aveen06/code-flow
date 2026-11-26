@@ -15,7 +15,7 @@ from codeflow.analyze import (
     resolve_commit,
 )
 from codeflow.diff import EdgeChange, GraphDiff, diff_graphs, neighbourhood
-from codeflow.graph import Graph
+from codeflow.graph import FlagCheck, Graph
 from codeflow.summary import summarize
 
 
@@ -47,6 +47,7 @@ class Store:
         self.lock = Lock()
         self._snapshots: dict[tuple[Path, str], Graph] = {}
         self._commit_lists: dict[str, tuple[dict, dict]] = {}
+        self._flag_checks: dict[tuple[Path, str], list[FlagCheck]] = {}
 
     def _is_repo_dir(self, directory: Path) -> bool:
         return directory.is_dir() and directory.resolve().parent == self.data_dir
@@ -105,6 +106,9 @@ class Store:
             self._commit_lists.pop(repo_id, None)
             self._snapshots = {
                 key: graph for key, graph in self._snapshots.items() if key[0] != directory
+            }
+            self._flag_checks = {
+                key: checks for key, checks in self._flag_checks.items() if key[0] != directory
             }
 
     def repo_info(self, repo: str) -> dict:
@@ -169,6 +173,35 @@ class Store:
         directory = self._repo_dir(repo)
         entry = self._resolve_commit(self._index(directory), sha)
         return self._snapshot(directory, entry["sha"]).to_json()
+
+    def flag_history(self, repo: str, sha: str | None) -> tuple[Graph, list[list[FlagCheck]]]:
+        """Load the selected graph and flag checks from preceding listed commits."""
+        directory = self._repo_dir(repo)
+        index = self._index(directory)
+        commits = index["commits"]
+        if not commits:
+            raise NotFound(f"No analyzed commits for {repo!r}")
+        entry = commits[-1] if sha is None else self._resolve_commit(index, sha)
+        snapshot = self._snapshot(directory, entry["sha"])
+        earlier_checks = [
+            self._snapshot_checks(directory, commit["sha"])
+            for commit in commits[: commits.index(entry)]
+        ]
+        return snapshot, earlier_checks
+
+    def _snapshot_checks(self, directory: Path, sha: str) -> list[FlagCheck]:
+        key = (directory, sha)
+        if key in self._snapshots:
+            return self._snapshots[key].flags
+        if key not in self._flag_checks:
+            path = directory / "snapshots" / f"{sha}.json"
+            try:
+                snapshot = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                # Without this snapshot we cannot establish unchanged checks.
+                return []
+            self._flag_checks[key] = [FlagCheck(**check) for check in snapshot["flags"]]
+        return self._flag_checks[key]
 
     def diff(self, repo: str, head: str, base: str | None, hops: int) -> dict:
         if not 0 <= hops <= 3:
