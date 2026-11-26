@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "code-flow-server"
 version = "0.1.0"
 description = "HTTP API for code-flow"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",

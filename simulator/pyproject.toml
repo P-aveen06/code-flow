@@ -2,6 +2,7 @@
 name = "code-flow-simulator"
 version = "0.1.0"
 description = "Simulated reviewer traffic for the code-flow experiment"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["flagsmith>=6.7.0", "pyyaml"]
 

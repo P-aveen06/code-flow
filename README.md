@@ -313,4 +313,4 @@ Claude (Claude Code) planned the milestones, wrote the task prompts, and reviewe
 
 ## License
 
-License: to be decided (open-source core).
+MIT — see [LICENSE](LICENSE).

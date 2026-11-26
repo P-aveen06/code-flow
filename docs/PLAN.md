@@ -127,4 +127,4 @@ and a PR is opened against `main`.
 
 - Flagsmith URL of the Docker instance (default `http://localhost:8000`) and the environment keys (put them in a local `.env`, never in chat or git).
 - Whether the Docker setup can run Flagsmith **Experimentation** (needs `EXPERIMENTATION_ENABLED=true` and the ClickHouse service; the track requires it).
-- License for the open-source core (MIT or Apache-2.0 suggested).
+- ~~License for the open-source core~~ Resolved Nov 26: MIT (`LICENSE`).
