@@ -11,11 +11,13 @@ from tree_sitter import Language, Node, Parser
 
 from codeflow.flags import (
     DEFAULT_FLAG_METHODS,
+    FlagKeyReference,
+    GuardBranch,
+    ReferenceGuard,
     dotted_name,
     flag_check_of_call,
-    flag_name_of_call,
     guard_from_condition,
-    opposite,
+    literal_string,
     unwrap,
 )
 from codeflow.graph import FlagCheck, Guard
@@ -36,6 +38,15 @@ class CallSite:
     callee: str
     line: int
     guard: Guard | None = None
+    guard_branch: GuardBranch | None = None
+
+
+@dataclass
+class FlagReference:
+    name: str
+    line: int
+    scope: str
+    call: str
 
 
 @dataclass
@@ -49,6 +60,9 @@ class ParsedFile:
     flags: list[FlagCheck] = field(default_factory=list)
     receiver_types: dict[str, dict[str, str]] = field(default_factory=dict)
     receiver_shadows: dict[str, list[str]] = field(default_factory=dict)
+    string_constants: dict[str, str] = field(default_factory=dict)
+    flag_bindings: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    flag_references: list[FlagReference] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -59,6 +73,8 @@ class ParsedFile:
         for value in data["calls"]:
             call = dict(value)
             call["guard"] = Guard(**call["guard"]) if call["guard"] else None
+            if branch := call.get("guard_branch"):
+                call["guard_branch"] = GuardBranch.from_dict(branch)
             calls.append(CallSite(**call))
         return cls(
             path=data["path"],
@@ -74,6 +90,11 @@ class ParsedFile:
             receiver_shadows={
                 scope: list(names) for scope, names in data.get("receiver_shadows", {}).items()
             },
+            string_constants=dict(data.get("string_constants", {})),
+            flag_bindings={
+                scope: dict(names) for scope, names in data.get("flag_bindings", {}).items()
+            },
+            flag_references=[FlagReference(**value) for value in data.get("flag_references", [])],
         )
 
 
@@ -104,7 +125,7 @@ def body_hash(node: Node) -> str:
     return sha1(b" ".join(tokens(node))).hexdigest()
 
 
-def collect_import(node: Node, parsed: ParsedFile) -> None:
+def import_bindings(node: Node, parsed: ParsedFile) -> list[tuple[str, str]]:
     prefix = ""
     if node.type == "import_from_statement":
         module = node.child_by_field_name("module_name").text.decode()
@@ -118,6 +139,7 @@ def collect_import(node: Node, parsed: ParsedFile) -> None:
             prefix = ".".join(prefix_parts + ([suffix] if suffix else []))
         else:
             prefix = module
+    bindings = []
     for item in node.children_by_field_name("name"):
         name_node = item.child_by_field_name("name") if item.type == "aliased_import" else item
         name = name_node.text.decode()
@@ -129,7 +151,26 @@ def collect_import(node: Node, parsed: ParsedFile) -> None:
         target = f"{prefix}.{name}" if prefix else name
         if node.type == "import_statement" and not alias:
             target = local
-        parsed.imports[local] = target
+        bindings.append((local, target))
+    return bindings
+
+
+def binding_names(node: Node | None) -> list[str]:
+    if node is None:
+        return []
+    if node.type == "identifier":
+        return [node.text.decode()]
+    if node.type in (
+        "as_pattern_target",
+        "expression_list",
+        "list_pattern",
+        "list_splat_pattern",
+        "parenthesized_expression",
+        "pattern_list",
+        "tuple_pattern",
+    ):
+        return [name for child in node.named_children for name in binding_names(child)]
+    return []
 
 
 def _without_none(annotation: ast.expr) -> ast.expr:
@@ -184,6 +225,35 @@ class _Walker:
         self.parsed = parsed
         self.flag_methods = flag_methods
         self.receiver_bindings: dict[str, dict[str, set[str | None]]] = {}
+        self.flag_bindings: dict[str, dict[str, str | None]] = {}
+        self.global_names: dict[str, set[str]] = {}
+
+    def bind_flag_name(
+        self, scope: str, name: str, imported: str | None = None, constant: str | None = None
+    ) -> None:
+        if scope and name in self.global_names.get(scope, ()):
+            # Writes from a function make the module value uncertain.
+            self.flag_bindings.setdefault("", {})[name] = None
+            self.parsed.string_constants.pop(name, None)
+            return
+        bindings = self.flag_bindings.setdefault(scope, {})
+        if imported is not None and bindings.get(name) == imported:
+            return
+        if name in bindings:
+            bindings[name] = None
+            if not scope:
+                self.parsed.string_constants.pop(name, None)
+        else:
+            bindings[name] = imported
+            if constant is not None:
+                self.parsed.string_constants[name] = constant
+
+    def collect_flag_bindings(self) -> None:
+        heads = {flag.name.partition(".")[0] for flag in self.parsed.flag_references}
+        for scope, bindings in self.flag_bindings.items():
+            relevant = {name: bindings[name] for name in bindings.keys() & heads}
+            if relevant:
+                self.parsed.flag_bindings[scope] = relevant
 
     def receiver_binding(self, scope: str, name: str) -> set[str | None]:
         return self.receiver_bindings.setdefault(scope, {}).setdefault(name, set())
@@ -198,7 +268,9 @@ class _Walker:
                 name = name.named_children[0]
                 annotation = None
             if name.type == "identifier":
-                types = self.receiver_binding(scope, name.text.decode())
+                parameter_name = name.text.decode()
+                self.bind_flag_name(scope, parameter_name)
+                types = self.receiver_binding(scope, parameter_name)
                 if annotation:
                     type_name = _annotation_name(annotation.text.decode())
                     if type_name:
@@ -227,8 +299,8 @@ class _Walker:
         node: Node,
         scope: str = "",
         scope_kind: str = "module",
-        guard: Guard | None = None,
-        variables: dict[str, str] | None = None,
+        guard: Guard | GuardBranch | None = None,
+        variables: dict[str, str | FlagKeyReference] | None = None,
     ) -> None:
         if variables is None:
             variables = {}
@@ -236,32 +308,71 @@ class _Walker:
             self.definition(node, scope, scope_kind)
             return
         if node.type in ("import_statement", "import_from_statement"):
-            collect_import(node, self.parsed)
+            for name, target in import_bindings(node, self.parsed):
+                self.parsed.imports[name] = target
+                self.bind_flag_name(scope, name, imported=target)
             return
         if node.type == "if_statement":
             self.branches(node, scope, scope_kind, guard, variables)
             return
         if node.type == "assignment":
-            left = node.child_by_field_name("left")
-            right = node.child_by_field_name("right")
-            if left.type == "identifier":
-                name = left.text.decode()
-                if scope_kind != "class":
-                    types = self.receiver_binding(scope, name)
-                    if right:
-                        types.add(_constructor_name(right))
-                if right:
-                    flag = flag_name_of_call(right, self.flag_methods)
-                    variables.pop(name, None)
-                    if flag is not None:
-                        variables[name] = flag
-        if node.type == "call":
-            self.call(node, scope if scope_kind == "function" else "", guard)
+            self.assignment(node, scope, scope_kind, variables)
+        elif node.type == "global_statement":
+            self.global_names.setdefault(scope, set()).update(
+                child.text.decode() for child in node.named_children if child.type == "identifier"
+            )
+        elif node.type in (
+            "augmented_assignment",
+            "for_statement",
+            "named_expression",
+            "as_pattern",
+        ):
+            field = {"named_expression": "name", "as_pattern": "alias"}.get(node.type, "left")
+            for name in binding_names(node.child_by_field_name(field)):
+                self.bind_flag_name(scope, name)
+        elif node.type == "delete_statement":
+            for name in binding_names(node.named_child(0)):
+                self.bind_flag_name(scope, name)
+        elif node.type == "call":
+            self.call(node, scope, scope_kind, guard)
         for child in node.named_children:
             self.walk(child, scope, scope_kind, guard, variables)
 
+    def assignment(
+        self, node: Node, scope: str, kind: str, variables: dict[str, str | FlagKeyReference]
+    ) -> None:
+        left = node.child_by_field_name("left")
+        if left is None or left.type != "identifier":
+            for name in binding_names(left):
+                self.bind_flag_name(scope, name)
+            return
+
+        name = left.text.decode()
+        right = node.child_by_field_name("right")
+        constant = None
+        if (
+            not scope
+            and node.parent.type == "expression_statement"
+            and node.parent.parent.type == "module"
+            and right is not None
+            and unwrap(right).type == "string"
+        ):
+            constant = literal_string(right)
+        self.bind_flag_name(scope, name, constant=constant)
+
+        if kind != "class":
+            types = self.receiver_binding(scope, name)
+            if right:
+                types.add(_constructor_name(right))
+        if right:
+            check = flag_check_of_call(right, self.flag_methods)
+            variables.pop(name, None)
+            if check:
+                variables[name] = check[1]
+
     def definition(self, node: Node, scope: str, scope_kind: str) -> None:
         name = node.child_by_field_name("name").text.decode()
+        self.bind_flag_name(scope, name)
         qualname = f"{scope}.{name}" if scope else name
         is_class = node.type == "class_definition"
         kind = "class" if is_class else "method" if scope_kind == "class" else "function"
@@ -279,45 +390,51 @@ class _Walker:
             self.receiver_parameters(node.child_by_field_name("parameters"), qualname)
         self.walk(node.child_by_field_name("body"), qualname, "class" if is_class else "function")
 
-    def call(self, node: Node, caller: str, guard: Guard | None) -> None:
+    def call(self, node: Node, scope: str, kind: str, guard: Guard | GuardBranch | None) -> None:
+        caller = scope if kind == "function" else ""
         callee = dotted_name(node.child_by_field_name("function"))
         check = flag_check_of_call(node, self.flag_methods)
         line = node.start_point.row + 1
         if check:
             method, flag = check
-            self.parsed.flags.append(FlagCheck(flag, self.parsed.path, line, caller, method))
+            if isinstance(flag, FlagKeyReference):
+                self.parsed.flag_references.append(FlagReference(flag.name, line, scope, method))
+            else:
+                self.parsed.flags.append(FlagCheck(flag, self.parsed.path, line, caller, method))
         if caller and callee:
-            self.parsed.calls.append(CallSite(caller, callee, line, guard))
+            if isinstance(guard, GuardBranch):
+                self.parsed.calls.append(CallSite(caller, callee, line, guard.resolve(), guard))
+            else:
+                self.parsed.calls.append(CallSite(caller, callee, line, guard))
 
     def branches(
         self,
         node: Node,
         scope: str,
         kind: str,
-        inherited: Guard | None,
-        variables: dict[str, str],
+        inherited: Guard | GuardBranch | None,
+        variables: dict[str, str | FlagKeyReference],
     ) -> None:
         clauses = [node] + [
             child for child in node.named_children if child.type in ("elif_clause", "else_clause")
         ]
-        guarded_chain = False
-        fallthrough = None
+        conditions: list[Guard | ReferenceGuard | None] = []
         for clause in clauses:
             condition = clause.child_by_field_name("condition")
             if condition:
                 self.walk(condition, scope, kind, inherited, variables.copy())
-                own_guard = guard_from_condition(condition, variables, self.flag_methods)
-                if clause == node:
-                    guarded_chain = own_guard is not None
-                branch_guard = own_guard or (fallthrough if guarded_chain else None)
-                # A flag-led chain keeps the last failed flag test across ordinary elifs.
-                if own_guard or not guarded_chain:
-                    fallthrough = opposite(own_guard)
+                conditions.append(guard_from_condition(condition, variables, self.flag_methods))
                 body = clause.child_by_field_name("consequence")
             else:
-                branch_guard = fallthrough
                 body = clause.child_by_field_name("body")
-            self.walk(body, scope, kind, branch_guard or inherited, variables.copy())
+            branch = GuardBranch(conditions.copy(), condition is None, inherited)
+            if isinstance(inherited, GuardBranch) or any(
+                isinstance(test, ReferenceGuard) for test in conditions
+            ):
+                guard = branch
+            else:
+                guard = branch.resolve()
+            self.walk(body, scope, kind, guard, variables.copy())
         # Branch assignments may not execute: do not keep potentially stale bindings.
         assigned = self.assigned_names(node)
         for name in assigned:
@@ -347,4 +464,5 @@ def parse_file(
     walker = _Walker(parsed, flag_methods)
     walker.walk(parser.parse(source).root_node)
     walker.collect_receiver_types()
+    walker.collect_flag_bindings()
     return parsed

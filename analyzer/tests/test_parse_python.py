@@ -152,10 +152,42 @@ class Service:
 def test_parsed_file_json_round_trip():
     parsed = parse_file(
         "m.py",
-        b"from . import x\ncart = C()\nclass C:\n def f(self, cart: C):\n"
-        b"  if flags.has_feature('x'):\n   x.run()\n",
+        b"from . import x\nKEY = 'x'\ncart = C()\nclass C:\n def f(self, cart: C):\n"
+        b"  if flags.has_feature(KEY):\n   if flags.has_feature(x.OTHER_KEY):\n    x.run()\n",
     )
     assert ParsedFile.from_dict(json.loads(json.dumps(parsed.to_dict()))) == parsed
+
+
+def test_module_string_constants_ignore_ambiguous_bindings():
+    parsed = parse_file(
+        "m.py",
+        b"""KEY = 'one'
+OTHER = ('two')
+REASSIGNED = 'first'
+REASSIGNED = 'first'
+AUGMENTED = 'first'
+AUGMENTED += '_suffix'
+UNPACKED = 'first'
+UNPACKED, other = values
+CONDITIONAL = 'first'
+if ready:
+    CONDITIONAL = 'second'
+    NOT_ALWAYS = 'second'
+SHADOWED = 'first'
+from x import SHADOWED
+RESET = 'first'
+def reset():
+    global RESET
+    RESET = 'second'
+CHAINED = ALSO_CHAINED = 'neither'
+FORMATTED = f'{KEY}'
+class C:
+    CLASS_KEY = 'class'
+def run():
+    LOCAL_KEY = 'local'
+""",
+    )
+    assert parsed.string_constants == {"KEY": "one", "OTHER": "two"}
 
 
 def test_parsed_file_loads_without_receiver_metadata():
@@ -163,4 +195,7 @@ def test_parsed_file_loads_without_receiver_metadata():
     data = parsed.to_dict()
     del data["receiver_types"]
     del data["receiver_shadows"]
+    del data["string_constants"]
+    del data["flag_bindings"]
+    del data["flag_references"]
     assert ParsedFile.from_dict(data) == parsed

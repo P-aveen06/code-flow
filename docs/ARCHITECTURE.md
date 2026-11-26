@@ -222,9 +222,22 @@ parameters accept full SHAs or unique prefixes, and responses use full SHAs.
 
 ## Flags that control code-flow itself
 
-All flags live in Paveen's **self-hosted Flagsmith (Docker)**, project
-`code-flow`. URLs and keys come from environment variables (see
-`.env.example`); nothing secret is committed.
+Paveen's free, self-hosted Flagsmith organisation has room for one project.
+All flags use the existing `code-flow` project and one environment. The setup
+script selects Production if present, falls back to Development, and prints
+the selected environment.
+
+| Tag | Flags |
+|---|---|
+| `code-flow` | `flow_view`, `flagsmith_mode`, `ai_summary` |
+| `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
+| `repo:shop-demo` | `new_checkout`, `holiday_discount` |
+
+The web app, experiment, and simulator share one client-side environment key.
+The setup script writes the same key to `CODEFLOW_FLAGSMITH_ENV_KEY` and
+`VITE_CODEFLOW_FLAGSMITH_ENV_KEY`. Flagsmith mode uses the environment's
+server-side key, `CODEFLOW_FLAGSMITH_SERVER_KEY`. See `.env.example` for
+configuration.
 
 | Flag | Type | Purpose |
 |---|---|---|
@@ -273,24 +286,32 @@ Detection (analyzer, `codeflow/flags.py`):
   `get_feature_value`, `has_feature`, `feature_enabled`, `get_value`, and the
   OpenFeature `get_{boolean,string,integer,float,object}_value` and `_details`
   methods. Detection matches the method name on a variable or a chained
-  receiver such as `get_openfeature_client()`. It reads a string-literal first
-  argument or a string-literal `flag_key=` keyword.
+  receiver such as `get_openfeature_client()`. The first argument or `flag_key=`
+  can be a string literal, a bare name, or a dotted reference. The analyzer
+  resolves references to a single module-level string assignment in the same
+  module or through an import from another analyzed module. Reassigned,
+  ambiguous, and unresolved keys are ignored.
 - Direct, negated, or local-variable flag checks guard their branch body
   with `on` or `off` as appropriate, and chains starting with a flag check
   carry the opposite of the latest flag guard into later `elif` and `else`
   bodies unless a clause or nested branch has its own flag guard.
 
 Live state (server):
-- Reads the analyzed app's environment flags from the self-hosted Flagsmith
-  (`FLAGSMITH_API_URL`, `DEMO_APP_ENVIRONMENT_KEY`).
+- Reads live flag state from the shared environment using `FLAGSMITH_API_URL`
+  and `CODEFLOW_FLAGSMITH_SERVER_KEY`.
+- `make flagsmith-setup` reads the project tags and writes
+  `data/flagsmith_scopes.json` (`code-flow/flagsmith-scopes@1`). Its `repos`
+  object maps each analyzed repo ID to the flag names on its tag. Flagsmith
+  mode uses that scope for live, off, stale, orphan, and unused comparisons.
+  The admin key is used during setup only.
 
 Findings shown in the panel:
 - **live / off**: which branch of each flag-gated split users hit now.
 - **stale**: flag is fully on (or fully off) in Flagsmith and the check has been
   in the code, unchanged, for at least N commits / D days of history. Suggests
   deleting the dead branch, naming the functions that become unreachable.
-- **orphan**: flag checked in code but missing in Flagsmith.
-- **unused**: flag defined in Flagsmith but never checked in the code.
+- **orphan**: flag checked in the analyzed repo that is missing from its Flagsmith scope.
+- **unused**: flag in the repo's Flagsmith scope with no checks in its analyzed code.
 
 ## Repository layout (target)
 

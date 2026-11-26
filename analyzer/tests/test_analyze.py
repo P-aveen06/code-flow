@@ -150,6 +150,125 @@ def fallback(): pass
     }
 
 
+@pytest.mark.parametrize(
+    "binding,reference",
+    [
+        ('KEY = "checkout"', "KEY"),
+        ("from shop.keys import KEY", "KEY"),
+        ("from .keys import KEY as CHECKOUT", "CHECKOUT"),
+        ("import shop.keys as keys", "keys.KEY"),
+        ("import shop.keys", "shop.keys.KEY"),
+    ],
+)
+def test_snapshot_resolves_flag_key_constants(make_repo, tmp_path, binding, reference):
+    repo = make_repo(
+        [
+            {
+                "api/shop/keys.py": 'KEY = "checkout"\n',
+                "api/shop/cart.py": f"""\
+{binding}
+
+def checkout():
+    enabled = client.get_boolean_value(default_value=False, flag_key={reference})
+    if not enabled:
+        return legacy()
+    elif expedited:
+        return rush()
+    else:
+        return standard()
+
+def legacy(): pass
+def rush(): pass
+def standard(): pass
+""",
+            }
+        ]
+    )
+    out = tmp_path / "output"
+    (result,) = analyze_repo(repo.path, out, source_root="api")
+    graph = load_snapshot(out, result.commit.sha)
+
+    assert [(flag.name, flag.function, flag.call) for flag in graph.flags] == [
+        ("checkout", "shop.cart:checkout", "get_boolean_value"),
+    ]
+    assert {edge.target: edge.guard for edge in graph.edges} == {
+        "shop.cart:legacy": Guard("checkout", "off"),
+        "shop.cart:rush": Guard("checkout", "on"),
+        "shop.cart:standard": Guard("checkout", "on"),
+    }
+
+
+def test_unresolved_flag_keys_preserve_other_guards(make_repo, tmp_path):
+    repo = make_repo(
+        [
+            {
+                "keys.py": 'MUTABLE = "first"\nMUTABLE = "second"\n',
+                "cart.py": """\
+from keys import MUTABLE
+from elsewhere import EXTERNAL
+KEY = "checkout"
+
+def checkout():
+    if client.has_feature(KEY):
+        if client.has_feature(MUTABLE):
+            return legacy()
+    elif client.has_feature(UNKNOWN):
+        return rush()
+    else:
+        return standard()
+
+def shadowed(KEY):
+    if client.has_feature(KEY):
+        return legacy()
+
+def external():
+    if client.has_feature(EXTERNAL):
+        return legacy()
+
+def legacy(): pass
+def rush(): pass
+def standard(): pass
+""",
+            }
+        ]
+    )
+    out = tmp_path / "output"
+    (result,) = analyze_repo(repo.path, out)
+    graph = load_snapshot(out, result.commit.sha)
+
+    assert [flag.name for flag in graph.flags] == ["checkout"]
+    assert {(edge.source, edge.target): edge.guard for edge in graph.edges} == {
+        ("cart:checkout", "cart:legacy"): Guard("checkout", "on"),
+        ("cart:checkout", "cart:rush"): Guard("checkout", "off"),
+        ("cart:checkout", "cart:standard"): Guard("checkout", "off"),
+        ("cart:shadowed", "cart:legacy"): None,
+        ("cart:external", "cart:legacy"): None,
+    }
+
+
+def test_imported_flag_key_is_resolved_again_when_only_its_module_changes(compare_sources):
+    base, head = compare_sources(
+        {
+            "keys.py": 'KEY = "first"\n',
+            "cart.py": """\
+from keys import KEY
+
+def checkout():
+    if client.has_feature(KEY):
+        return standard()
+
+def standard(): pass
+""",
+        },
+        {"keys.py": 'KEY = "second"\n'},
+    )
+
+    assert [flag.name for flag in base.flags] == ["first"]
+    assert [flag.name for flag in head.flags] == ["second"]
+    assert base.edges[0].guard == Guard("first", "on")
+    assert head.edges[0].guard == Guard("second", "on")
+
+
 def test_progress_precedes_each_listed_snapshot_including_cached_ones(make_repo, tmp_path):
     repo = make_repo([{"first.py": ""}, {"second.py": ""}, {"third.py": ""}])
     out = tmp_path / "output"
