@@ -110,9 +110,9 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 - [ ] Optional: server SQLite mirror + small results table in the web app as a backup
 - [ ] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README (results read Nov 26, see docs/experiment-results.md; roll-out and dashboard screenshots pending)
 ### M5 Demo + polish
-- [ ] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
-- [ ] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
-- [ ] Demo video script (≤ 3 min): problem → timeline → diff views → Flagsmith mode flip → experiment results → roll-out
+- [x] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
+- [x] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
+- [ ] Demo video script (≤ 3 min): problem → timeline → diff views → Flagsmith mode flip → experiment results → roll-out (script in docs/demo-script.md; recording by Paveen pending)
 
 ## How the work is executed
 
