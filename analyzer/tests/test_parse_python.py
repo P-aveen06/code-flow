@@ -109,9 +109,58 @@ def test_async_definitions():
     assert parsed.calls[0].callee == "work"
 
 
+def test_receiver_types_and_shadows_by_scope():
+    parsed = parse_file(
+        "m.py",
+        b"""gateway = payment.Gateway()
+conflict = First()
+conflict = Second()
+
+class Service:
+    member = payment.Gateway()
+
+    def run(self, cart: Cart, /, quoted: 'Cart', optional: Optional[Cart] = None,
+            *, nullable: Cart | None, dotted: shop.cart.Cart, many: list[Cart],
+            union: Cart | Other, gateway=None):
+        local = alias = payment.Gateway()
+        local = payment.Gateway()
+        if cart:
+            ambiguous = First()
+        else:
+            ambiguous = Second()
+
+        def nested():
+            child = Other()
+""",
+    )
+    assert parsed.receiver_types == {
+        "": {"gateway": "payment.Gateway"},
+        "Service.run": {
+            "cart": "Cart",
+            "quoted": "Cart",
+            "optional": "Cart",
+            "nullable": "Cart",
+            "dotted": "shop.cart.Cart",
+            "local": "payment.Gateway",
+            "alias": "payment.Gateway",
+        },
+        "Service.run.nested": {"child": "Other"},
+    }
+    assert parsed.receiver_shadows == {"Service.run": ["gateway"]}
+
+
 def test_parsed_file_json_round_trip():
     parsed = parse_file(
         "m.py",
-        b"from . import x\nclass C:\n def f(self):\n  if flags.has_feature('x'):\n   x.run()\n",
+        b"from . import x\ncart = C()\nclass C:\n def f(self, cart: C):\n"
+        b"  if flags.has_feature('x'):\n   x.run()\n",
     )
     assert ParsedFile.from_dict(json.loads(json.dumps(parsed.to_dict()))) == parsed
+
+
+def test_parsed_file_loads_without_receiver_metadata():
+    parsed = parse_file("m.py", b"def f():\n pass\n")
+    data = parsed.to_dict()
+    del data["receiver_types"]
+    del data["receiver_shadows"]
+    assert ParsedFile.from_dict(data) == parsed

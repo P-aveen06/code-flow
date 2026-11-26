@@ -84,6 +84,13 @@ diffs possible.
    imported name (`from x import y`, `import x as z` then `z.y`).
 2. `self.foo()` / `cls.foo()` resolve to a method of the enclosing class (and
    its in-repo base classes when resolvable).
+
+   **2b.** `x.foo()` uses the same lookup when `x` has a single known in-repo
+   class from a parameter annotation (including quoted and optional forms) or
+   a constructor assignment in the function or module. Parameters and locals
+   shadow module instances, conflicting assignments leave the class unknown,
+   and chained receivers such as `x.attr.foo()` stay unresolved.
+
 3. `Module.attr()` resolves through the import table.
 4. Anything unresolved is dropped by default (`--keep-external` keeps it as an
    `external` node collapsed per top-level package).

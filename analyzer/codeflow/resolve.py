@@ -54,6 +54,22 @@ class _Resolver:
             parts.pop()
         return None
 
+    def class_id(self, name: str, file: ParsedFile, caller: str = "") -> str | None:
+        target = self.expand(name, file, caller)
+        if target in self.definitions and self.definitions[target].kind == "class":
+            return target
+        return None
+
+    def receiver_class(self, file: ParsedFile, caller: str, receiver: str) -> str | None:
+        local_type = file.receiver_types.get(caller, {}).get(receiver)
+        if local_type:
+            return self.class_id(local_type, file, caller)
+        if receiver not in file.receiver_shadows.get(caller, []):
+            module_type = file.receiver_types.get("", {}).get(receiver)
+            if module_type:
+                return self.class_id(module_type, file)
+        return None
+
     def method(
         self, class_id: str, name: str, bases_only: bool = False, seen: set[str] | None = None
     ) -> str | None:
@@ -68,8 +84,8 @@ class _Resolver:
         module, qualname = class_id.split(":", 1)
         file = self.files[module]
         for base in file.bases.get(qualname, []):
-            base_id = self.expand(base, file, qualname.rpartition(".")[0])
-            if base_id in self.definitions and self.definitions[base_id].kind == "class":
+            base_id = self.class_id(base, file, qualname.rpartition(".")[0])
+            if base_id:
                 target = self.method(base_id, name, seen=seen)
                 if target:
                     return target
@@ -80,6 +96,10 @@ class _Resolver:
         if separator and receiver in ("self", "cls", "super"):
             class_id = self.enclosing_class(file, caller)
             return self.method(class_id, name, receiver == "super") if class_id else None
+        if separator:
+            class_id = self.receiver_class(file, caller, receiver)
+            if class_id:
+                return self.method(class_id, name) if "." not in name else None
         return self.expand(callee, file, caller)
 
 

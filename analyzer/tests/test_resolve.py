@@ -122,6 +122,138 @@ def test_class_instantiation_and_local_class_method():
     assert pairs(edges) == {("m:f", "m:Cart"), ("m:f", "m:Cart.total")}
 
 
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "Cart",
+        '"Cart"',
+        "shop.cart.Cart",
+        "Cart | None",
+        "Optional[Cart]",
+        "None | Cart",
+        "Cart\n        | None",
+    ],
+)
+def test_typed_parameter(annotation):
+    edges = edges_for(
+        {
+            "m.py": f"import shop.cart\nfrom shop.cart import Cart\n"
+            f"def run(cart: {annotation}):\n cart.total()\n",
+            "shop/cart.py": "class Cart:\n def total(self):\n  pass\n",
+        }
+    )
+    assert pairs(edges) == {("m:run", "shop.cart:Cart.total")}
+
+
+def test_local_constructor_and_inherited_method():
+    edges = edges_for(
+        {
+            "m.py": "import payment as pay\ndef run():\n gateway = pay.Gateway()\n gateway.charge()\n",
+            "payment.py": "from base import Base\nclass Gateway(Base):\n pass\n",
+            "base.py": "class Base:\n def charge(self):\n  pass\n",
+        }
+    )
+    assert pairs(edges) == {("m:run", "payment:Gateway"), ("m:run", "base:Base.charge")}
+
+
+def test_module_constructor_and_shadowing():
+    edges = edges_for(
+        {
+            "m.py": """class Gateway:
+    def charge(self):
+        pass
+
+class Other:
+    def charge(self):
+        pass
+
+gateway = Gateway()
+
+def run():
+    gateway.charge()
+
+def untyped(gateway):
+    gateway.charge()
+
+def typed(gateway: Other):
+    gateway.charge()
+
+def assigned():
+    gateway = Other()
+    gateway.charge()
+
+def unknown():
+    gateway = None
+    gateway.charge()
+"""
+        }
+    )
+    assert pairs(edges) == {
+        ("m:run", "m:Gateway.charge"),
+        ("m:typed", "m:Other.charge"),
+        ("m:assigned", "m:Other"),
+        ("m:assigned", "m:Other.charge"),
+    }
+
+
+def test_conflicting_local_constructors_shadow_module_instance():
+    edges = edges_for(
+        {
+            "m.py": """class First:
+    def run(self):
+        pass
+
+class Second:
+    def run(self):
+        pass
+
+item = First()
+
+def use():
+    if condition:
+        item = First()
+    else:
+        item = Second()
+    item.run()
+"""
+        }
+    )
+    assert pairs(edges) == {("m:use", "m:First"), ("m:use", "m:Second")}
+
+
+@pytest.mark.parametrize("annotation", ["External", "factory", "list[Cart]", "Cart | Other"])
+def test_receiver_requires_one_in_repo_class(annotation):
+    edges = edges_for(
+        {
+            "m.py": f"""from external import External
+
+class Cart:
+    def total(self):
+        pass
+
+def factory():
+    def total():
+        pass
+
+def run(cart: {annotation}):
+    cart.total()
+"""
+        },
+        keep_external=True,
+    )
+    assert edges == []
+
+
+def test_chained_instance_receiver_is_unresolved():
+    edges = edges_for(
+        {
+            "m.py": "class Cart:\n class attr:\n  def total(self):\n   pass\n"
+            "def run(cart: Cart):\n cart.attr.total()\n"
+        }
+    )
+    assert edges == []
+
+
 def test_relative_import_resolution():
     edges = edges_for(
         {

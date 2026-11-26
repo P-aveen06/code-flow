@@ -1,5 +1,6 @@
-"""Parse one Python source file into cacheable definitions, imports, calls, and flags."""
+"""Parse Python definitions, imports, calls, receiver types, and flags."""
 
+import ast
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from hashlib import sha1
@@ -14,6 +15,7 @@ from codeflow.flags import (
     flag_name_of_call,
     guard_from_condition,
     opposite,
+    unwrap,
 )
 from codeflow.graph import FlagCheck, Guard
 
@@ -44,6 +46,8 @@ class ParsedFile:
     bases: dict[str, list[str]] = field(default_factory=dict)
     calls: list[CallSite] = field(default_factory=list)
     flags: list[FlagCheck] = field(default_factory=list)
+    receiver_types: dict[str, dict[str, str]] = field(default_factory=dict)
+    receiver_shadows: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -63,6 +67,12 @@ class ParsedFile:
             bases={name: list(bases) for name, bases in data["bases"].items()},
             calls=calls,
             flags=[FlagCheck(**value) for value in data["flags"]],
+            receiver_types={
+                scope: dict(types) for scope, types in data.get("receiver_types", {}).items()
+            },
+            receiver_shadows={
+                scope: list(names) for scope, names in data.get("receiver_shadows", {}).items()
+            },
         )
 
 
@@ -121,10 +131,95 @@ def collect_import(node: Node, parsed: ParsedFile) -> None:
         parsed.imports[local] = target
 
 
+def _without_none(annotation: ast.expr) -> ast.expr:
+    if isinstance(annotation, ast.Subscript) and ast.unparse(annotation.value) in (
+        "Optional",
+        "typing.Optional",
+    ):
+        return annotation.slice
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        if isinstance(annotation.right, ast.Constant) and annotation.right.value is None:
+            return annotation.left
+        if isinstance(annotation.left, ast.Constant) and annotation.left.value is None:
+            return annotation.right
+    return annotation
+
+
+def _annotation_expression(text: str) -> ast.expr:
+    # Annotations in parameter lists can use implicit line continuation.
+    return ast.parse(f"({text}\n)", mode="eval").body
+
+
+def _annotation_name(text: str) -> str | None:
+    try:
+        annotation = _annotation_expression(text)
+        if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            annotation = _annotation_expression(annotation.value)
+        annotation = _without_none(annotation)
+        if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            annotation = _annotation_expression(annotation.value)
+    except (SyntaxError, ValueError):
+        return None
+    if isinstance(annotation, (ast.Name, ast.Attribute)):
+        name = ast.unparse(annotation)
+        if all(part.isidentifier() for part in name.split(".")):
+            return name
+    return None
+
+
+def _constructor_name(value: Node | None) -> str | None:
+    while value is not None:
+        value = unwrap(value)
+        if value.type == "call":
+            return dotted_name(value.child_by_field_name("function"))
+        if value.type != "assignment":
+            break
+        value = value.child_by_field_name("right")
+    return None
+
+
 class _Walker:
     def __init__(self, parsed: ParsedFile, flag_methods: Sequence[str]):
         self.parsed = parsed
         self.flag_methods = flag_methods
+        self.receiver_bindings: dict[str, dict[str, set[str | None]]] = {}
+
+    def receiver_binding(self, scope: str, name: str) -> set[str | None]:
+        return self.receiver_bindings.setdefault(scope, {}).setdefault(name, set())
+
+    def receiver_parameters(self, parameters: Node, scope: str) -> None:
+        for parameter in parameters.named_children:
+            name = parameter.child_by_field_name("name") or parameter
+            annotation = parameter.child_by_field_name("type")
+            if parameter.type == "typed_parameter":
+                name = parameter.named_children[0]
+            if name.type in ("list_splat_pattern", "dictionary_splat_pattern"):
+                name = name.named_children[0]
+                annotation = None
+            if name.type == "identifier":
+                types = self.receiver_binding(scope, name.text.decode())
+                if annotation:
+                    type_name = _annotation_name(annotation.text.decode())
+                    if type_name:
+                        types.add(type_name)
+
+    def collect_receiver_types(self) -> None:
+        for scope, bindings in self.receiver_bindings.items():
+            known = {}
+            for name, candidates in bindings.items():
+                if len(candidates) == 1:
+                    candidate = next(iter(candidates))
+                    if candidate is not None:
+                        known[name] = candidate
+            if known:
+                self.parsed.receiver_types[scope] = known
+
+        module_types = self.parsed.receiver_types.get("", {})
+        for scope, bindings in self.receiver_bindings.items():
+            if scope:
+                shadowed = bindings.keys() & module_types.keys()
+                if shadowed:
+                    self.parsed.receiver_shadows[scope] = sorted(shadowed)
 
     def walk(
         self,
@@ -148,12 +243,17 @@ class _Walker:
         if node.type == "assignment":
             left = node.child_by_field_name("left")
             right = node.child_by_field_name("right")
-            if left.type == "identifier" and right:
+            if left.type == "identifier":
                 name = left.text.decode()
-                flag = flag_name_of_call(right, self.flag_methods)
-                variables.pop(name, None)
-                if flag is not None:
-                    variables[name] = flag
+                if scope_kind != "class":
+                    types = self.receiver_binding(scope, name)
+                    if right:
+                        types.add(_constructor_name(right))
+                if right:
+                    flag = flag_name_of_call(right, self.flag_methods)
+                    variables.pop(name, None)
+                    if flag is not None:
+                        variables[name] = flag
         if node.type == "call":
             self.call(node, scope if scope_kind == "function" else "", guard)
         for child in node.named_children:
@@ -174,6 +274,8 @@ class _Walker:
             self.parsed.bases[qualname] = (
                 [base.text.decode() for base in bases.named_children] if bases else []
             )
+        else:
+            self.receiver_parameters(node.child_by_field_name("parameters"), qualname)
         self.walk(node.child_by_field_name("body"), qualname, "class" if is_class else "function")
 
     def call(self, node: Node, caller: str, guard: Guard | None) -> None:
@@ -236,5 +338,7 @@ def parse_file(
 ) -> ParsedFile:
     parsed = ParsedFile(path, module_name(path, source_root))
     parser = Parser(Language(tree_sitter_python.language()))
-    _Walker(parsed, flag_methods).walk(parser.parse(source).root_node)
+    walker = _Walker(parsed, flag_methods)
+    walker.walk(parser.parse(source).root_node)
+    walker.collect_receiver_types()
     return parsed
