@@ -149,12 +149,13 @@ Flagsmith first if another checkout has sent traffic.
 ### Flow direction experiment
 
 `flow_direction` compares horizontal (ELK RIGHT) and vertical (ELK DOWN)
-layouts for long call flows in a 50/50 split. The hypothesis is that reviewers
-understand a top-down layout more often and faster. The default cutoff is four
-call layers at one hop, which selects five of the 14 flow-changing Flagsmith API
-commits. The planned web integration records layout exposure only for long
-flows, with `layout_understood` carrying elapsed milliseconds and
-`layout_confusing` recording a No response.
+layouts in a 50/50 split. The hypothesis is that reviewers understand top-down
+layouts more often and faster on long flows. The default cutoff of four call
+layers at one hop selects five of the 14 flow-changing Flagsmith API commits.
+Once the flag is set up, the viewer records exposure only for eligible long
+flows. Yes and No send elapsed milliseconds with `layout_understood` and
+`layout_confusing`, respectively. Preview direction works on any flow without
+sending layout experiment events.
 
 Preview the Flagsmith changes from the repo root, then run both assumption
 models on the default panel.

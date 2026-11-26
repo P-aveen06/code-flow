@@ -42,6 +42,18 @@ describe("placeEdgeLabels", () => {
     expect(edges[0].data.labelPlacement).toMatchObject({ center: { x: 300, y: 40 }, anchor: { x: 300, y: 40 } });
   });
 
+  it("centres the label midway along the longest vertical segment", () => {
+    const edge = call("vertical", "a", "b", "on");
+    edge.data.sections = [{
+      id: "vertical",
+      startPoint: { x: 20, y: 40 },
+      bendPoints: [{ x: 20, y: 65 }, { x: 130, y: 65 }, { x: 130, y: 460 }],
+      endPoint: { x: 200, y: 460 },
+    }];
+    const { edges } = placeEdgeLabels([box("a", 0, 0), box("b", 180, 460)], [edge]);
+    expect(edges[0].data.labelPlacement).toMatchObject({ center: { x: 130, y: 262.5 }, anchor: { x: 130, y: 262.5 } });
+  });
+
   it("nudges labels away from a node box and from each other", () => {
     const blocker = box("obstacle", 280, 20);
     const { edges } = placeEdgeLabels([...nodes, blocker], [

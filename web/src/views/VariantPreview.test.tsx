@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { VariantPreview } from "./VariantPreview";
+import { DirectionPreview, VariantPreview } from "./VariantPreview";
 
 describe("variant preview labels", () => {
   it("labels the control and highlights the Flagsmith assignment", () => {
@@ -31,5 +31,33 @@ describe("variant preview labels", () => {
     );
     expect(markup).toContain(">Flagsmith unavailable — showing side by side<");
     expect(markup).not.toContain("Assigned by Flagsmith:");
+  });
+});
+
+describe("direction preview labels", () => {
+  const props = { ready: true, onChange: vi.fn() };
+
+  it("labels its separate radio group and shows the assigned direction", () => {
+    const markup = renderToStaticMarkup(
+      <DirectionPreview direction="vertical" directionOverride={null} assignedDirection="vertical" longFlow {...props} />,
+    );
+    expect(markup).toContain('aria-labelledby="direction-preview-label" aria-describedby="direction-preview-status"');
+    expect(markup).toContain(">Preview direction<");
+    expect(markup).toContain(">Horizontal<");
+    expect(markup).toContain('aria-checked="true" tabindex="0">Vertical<');
+    expect(markup).toContain(">Assigned by Flagsmith: Vertical<");
+  });
+
+  it("explains short flows and allows an uncounted vertical preview", () => {
+    const short = renderToStaticMarkup(
+      <DirectionPreview direction="horizontal" directionOverride={null} assignedDirection={null} longFlow={false} {...props} />,
+    );
+    const preview = renderToStaticMarkup(
+      <DirectionPreview direction="vertical" directionOverride="vertical" assignedDirection={null} longFlow={false} {...props} />,
+    );
+    expect(short).toContain(">Short flow: horizontal (not in the experiment)<");
+    expect(preview).toContain('aria-checked="true" tabindex="0">Vertical<');
+    expect(preview).toContain("Dev override: <code>direction=vertical</code> (not counted in the experiment)");
+    expect(preview).toContain(">Back to my assigned direction<");
   });
 });

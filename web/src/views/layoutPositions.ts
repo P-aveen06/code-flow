@@ -3,19 +3,26 @@ import { useState } from "react";
 import { placeEdgeLabels } from "../layout/edgeLabels";
 import type { FlowLayout, FlowNode } from "../layout/elk";
 import { packedRoutes } from "../layout/packedRoutes";
-import type { FlowView } from "../view";
+import type { FlowDirection, FlowView } from "../view";
 
 type Positions = ReadonlyMap<string, XYPosition>;
 type SessionStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export function layoutPositionKey(repo: string, commit: string, view: FlowView) {
-  return `code-flow:layout:${JSON.stringify([repo, commit, view])}`;
+export function layoutPositionKey(repo: string, commit: string, view: FlowView, direction: FlowDirection) {
+  return `code-flow:layout:${JSON.stringify([repo, commit, view, direction])}`;
+}
+
+function legacyHorizontalKey(key: string) {
+  const suffix = ',"horizontal"]';
+  return key.endsWith(suffix) ? key.slice(0, -suffix.length) + "]" : null;
 }
 
 export function readLayoutPositions(key: string, storage?: SessionStorage): Positions {
   const positions = new Map<string, XYPosition>();
   try {
-    const raw: unknown = JSON.parse((storage ?? window.sessionStorage).getItem(key) ?? "null");
+    const session = storage ?? window.sessionStorage;
+    const legacy = legacyHorizontalKey(key);
+    const raw: unknown = JSON.parse(session.getItem(key) ?? (legacy && session.getItem(legacy)) ?? "null");
     if (Array.isArray(raw)) {
       for (const entry of raw) {
         if (!Array.isArray(entry)) continue;
@@ -36,12 +43,16 @@ export function writeLayoutPositions(key: string, positions: Positions, storage?
     const session = storage ?? window.sessionStorage;
     if (positions.size) session.setItem(key, JSON.stringify([...positions]));
     else session.removeItem(key);
+    const legacy = legacyHorizontalKey(key);
+    if (legacy) session.removeItem(legacy);
   } catch {
     // Keep using the in-memory positions.
   }
 }
 
-export function applyLayoutPositions(layout: FlowLayout, positions: Positions): FlowLayout {
+export function applyLayoutPositions(
+  layout: FlowLayout, positions: Positions, direction: FlowDirection = "horizontal",
+): FlowLayout {
   if (!positions.size) return layout;
 
   const moved = new Set<string>();
@@ -58,7 +69,7 @@ export function applyLayoutPositions(layout: FlowLayout, positions: Positions): 
     moved.has(id) || (parentId && moved.has(parentId))
   )).map(({ id }) => id));
   const affected = layout.edges.filter(({ source, target }) => movedEndpoints.has(source) || movedEndpoints.has(target));
-  const routes = packedRoutes(nodes, affected);
+  const routes = packedRoutes(nodes, affected, direction);
   const edges = layout.edges.map((edge) => {
     const sections = routes.get(edge.id);
     return sections ? { ...edge, data: { ...edge.data, sections } } : edge;

@@ -162,6 +162,8 @@ export interface DiffViewModel {
   base: string;
   head: string;
   summary: string;
+  flow_depth: number;
+  long_flow: boolean;
   diff: GraphDiff;
   nodes: OverlayNode[];
   edges: OverlayEdge[];

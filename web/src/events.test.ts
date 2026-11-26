@@ -85,3 +85,40 @@ describe("Flagsmith review events", () => {
     expect(getReviewEvents().at(-1)).toEqual(review);
   });
 });
+
+describe("layout review events", () => {
+  it.each([
+    ["diff_understood", "layout_understood"],
+    ["diff_confusing", "layout_confusing"],
+  ] as const)("sends %s and %s with the same review time", (outcome, layoutOutcome) => {
+    const client = { trackEvent: vi.fn() };
+    const review = buildReviewEvent({ ...context, devOverride: false }, outcome, 100, 450);
+    recordReviewEvent(review, client, { client, exposed: true, override: null });
+
+    expect(client.trackEvent).toHaveBeenNthCalledWith(1, outcome, {
+      identifier: "demo-1", value: 350, metadata: { variant: "overlay_summary" },
+    });
+    expect(client.trackEvent).toHaveBeenNthCalledWith(2, layoutOutcome, { value: 350 });
+  });
+
+  it("counts layout reviews during view previews when the direction is assigned", () => {
+    const client = { trackEvent: vi.fn() };
+    const review = buildReviewEvent(context, "diff_understood", 100, 450);
+    recordReviewEvent(review, client, { client, exposed: true, override: null });
+
+    expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith("layout_understood", { value: 350 });
+  });
+
+  it.each([
+    { exposed: false, override: null },
+    { exposed: true, override: "vertical" },
+  ])("keeps the view review when the layout is excluded (%j)", (assignment) => {
+    const client = { trackEvent: vi.fn() };
+    const review = buildReviewEvent({ ...context, devOverride: false }, "diff_confusing", 100, 450);
+    recordReviewEvent(review, client, { client, ...assignment });
+
+    expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith("diff_confusing", {
+      identifier: "demo-1", value: 350, metadata: { variant: "overlay_summary" },
+    });
+  });
+});

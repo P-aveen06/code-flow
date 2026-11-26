@@ -1,5 +1,6 @@
 import type { FlowLayout } from "../layout/elk";
 import type { DiffViewModel, FlagFinding, OverlayNode } from "../types";
+import type { FlowDirection } from "../view";
 import { FlowCanvas } from "./FlowCanvas";
 import type { DiagramFullscreen } from "./fullscreen";
 import type { LayoutPositionControls } from "./layoutPositions";
@@ -7,6 +8,7 @@ import type { LayoutPositionControls } from "./layoutPositions";
 export interface DiffViewProps {
   diff: DiffViewModel;
   layout: FlowLayout;
+  direction: FlowDirection;
   layoutPositions: LayoutPositionControls;
   fullscreen: DiagramFullscreen;
   selectedNodeId?: string;

@@ -1,12 +1,16 @@
-import flagsmith from "@flagsmith/flagsmith";
+import flagsmith, { FlagSource } from "@flagsmith/flagsmith";
+import type { IFlagsmithFeature } from "@flagsmith/flagsmith";
 import { useEffect, useState } from "react";
-import { chooseFlowView, parseFlowView, readViewOverride } from "./view";
+import {
+  chooseFlowView, parseFlowDirection, parseFlowView, readDirectionOverride, readViewOverride,
+} from "./view";
 import type { FlowView } from "./view";
 
 const reviewerKey = "code-flow:reviewer";
 const pollInterval = 10_000;
 let tabReviewerId: string | undefined;
 let initialization: Promise<void> | undefined;
+const directionExposures = new Set<string>();
 
 function getTabReviewerId() {
   return (tabReviewerId ??= crypto.randomUUID?.() ?? Array.from(
@@ -68,6 +72,7 @@ function initFlagsmith(environmentID: string) {
 interface FlagResult {
   reviewerId: string;
   assignmentKey?: string;
+  directionFlag: IFlagsmithFeature | null;
   flagsmithMode: boolean;
 }
 
@@ -97,7 +102,7 @@ export function useCodeFlowFlags(search: string) {
     const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
     let active = true;
     let timer: number | undefined;
-    const fallback = () => setResult({ reviewerId, flagsmithMode: false });
+    const fallback = () => setResult({ reviewerId, directionFlag: null, flagsmithMode: false });
 
     if (!key) {
       fallback();
@@ -111,10 +116,12 @@ export function useCodeFlowFlags(search: string) {
         await (initialKey ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
         if (!active) return;
 
-        const flag = flagsmith.getAllFlags().flow_view;
+        const { flow_view: flag, flow_direction: directionFlag } = flagsmith.getAllFlags();
         const assignmentKey = JSON.stringify([flag?.value, flag?.variant, flag?.enabled, flag?.experiment]);
         setResult({
           reviewerId, assignmentKey,
+          directionFlag: flagsmith.loadingState?.source === FlagSource.SERVER && !flagsmith.loadingState.error
+            ? directionFlag ?? null : null,
           flagsmithMode: flagsmith.hasFeature("flagsmith_mode"),
         });
       } catch {
@@ -150,5 +157,68 @@ export function useCodeFlowFlags(search: string) {
     flowView: chooseFlowView(viewOverride, () => assignedView),
     flagsmithMode: flags?.flagsmithMode ?? false,
     reviewEventClient: viewOverride === null && assignedView !== null ? flagsmith : null,
+    directionFlag: flags?.directionFlag,
+  };
+}
+
+function flagDirection(flag: IFlagsmithFeature | null | undefined) {
+  return flag?.enabled ? parseFlowDirection(flag.value) : null;
+}
+
+export function directionExposureKey(
+  reviewerId: string, longFlow: boolean | undefined, override: string | null,
+  flag: IFlagsmithFeature | null | undefined,
+) {
+  const direction = flagDirection(flag);
+  if (longFlow !== true || override !== null || !direction || !flag?.experiment?.inExperiment) return null;
+  return JSON.stringify([reviewerId, flag.experiment.id, flag.variant, direction]);
+}
+
+export function exposeDirectionAssignment(
+  key: string | null, exposures: Set<string>, readExperimentFlag: () => IFlagsmithFeature | null,
+) {
+  if (key === null) return false;
+  if (exposures.has(key)) return true;
+  const flag = readExperimentFlag();
+  if (!flagDirection(flag) || !flag?.experiment?.inExperiment) return false;
+  exposures.add(key);
+  return true;
+}
+
+export function readFlowDirection(
+  search: string, longFlow: boolean | undefined,
+  flag: IFlagsmithFeature | null | undefined,
+) {
+  const directionOverride = readDirectionOverride(search);
+  const assignedDirection = longFlow === true ? flagDirection(flag) : null;
+  return {
+    direction: parseFlowDirection(directionOverride ?? assignedDirection) ?? "horizontal",
+    directionOverride, assignedDirection,
+    ready: directionOverride !== null || longFlow === false || (longFlow === true && flag !== undefined),
+  };
+}
+
+export function useDirectionExposure(
+  reviewerId: string, key: string | null, rendered: boolean,
+) {
+  const [exposure, setExposure] = useState<{ key: string; recorded: boolean }>();
+
+  useEffect(() => {
+    if (!rendered || key === null) return;
+    const recorded = exposeDirectionAssignment(key, directionExposures, () => {
+      const currentFlag = flagsmith.getAllFlags().flow_direction;
+      if (flagsmith.getContext().identity?.identifier !== reviewerId
+        || flagsmith.loadingState?.source !== FlagSource.SERVER
+        || flagsmith.loadingState.error
+        || directionExposureKey(reviewerId, true, null, currentFlag) !== key) return null;
+      return flagsmith.getExperimentFlag("flow_direction");
+    });
+    setExposure({ key, recorded });
+  }, [key, rendered, reviewerId]);
+
+  return {
+    client: flagsmith,
+    exposed: rendered && key !== null && exposure?.key === key && exposure.recorded,
+    ready: key === null || exposure?.key === key,
   };
 }

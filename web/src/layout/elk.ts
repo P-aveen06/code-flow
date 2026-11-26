@@ -1,6 +1,7 @@
 import type { Edge, Node, Rect } from "@xyflow/react";
 import type { ElkEdgeSection, ElkNode } from "elkjs/lib/elk.bundled.js";
 import type { OverlayEdge, OverlayNode } from "../types";
+import type { FlowDirection } from "../view";
 import { callKey, contextLabel } from "../views/collapse";
 import type { ContextChip } from "../views/collapse";
 import { symbolSize } from "../views/styles";
@@ -73,10 +74,22 @@ function position(node: ElkNode) {
 
 export async function layoutFlow(
   nodes: OverlayNode[], edges: OverlayEdge[], chips: ContextChip[] = [], comparison = false,
+  direction: FlowDirection = "horizontal",
 ): Promise<FlowLayout> {
+  const vertical = direction === "vertical";
   const modules = new Map<string, ElkNode & { children: ElkNode[] }>();
   const leaves = new Map<string, SymbolNode | ChipNode>();
   const standalone: ElkNode[] = [];
+
+  function leaf(id: string, size: { width: number; height: number }): ElkNode {
+    return vertical ? {
+      id, ...size, layoutOptions: { "elk.portConstraints": "FIXED_SIDE" },
+      ports: [
+        { id: `${id}:in`, width: 0, height: 0, layoutOptions: { "elk.port.side": "NORTH" } },
+        { id: `${id}:out`, width: 0, height: 0, layoutOptions: { "elk.port.side": "SOUTH" } },
+      ],
+    } : { id, ...size };
+  }
 
   // Pack modules with changed symbols before modules that only provide context.
   const ordered = [...nodes].sort((a, b) => Number(a.status === "context") - Number(b.status === "context"));
@@ -87,24 +100,24 @@ export async function layoutFlow(
       group = { id, children: [], layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.module } };
       modules.set(id, group);
     }
-    const elk = { id: symbol.id, ...symbolSize(symbol.qualname) };
+    const size = symbolSize(symbol.qualname);
     const node: SymbolNode = {
-      ...elk, type: "symbol", data: { symbol }, position: { x: 0, y: 0 }, parentId: id, focusable: false,
+      id: symbol.id, ...size, type: "symbol", data: { symbol }, position: { x: 0, y: 0 }, parentId: id, focusable: false,
     };
-    leaves.set(elk.id, node);
-    group.children.push(elk);
+    leaves.set(node.id, node);
+    group.children.push(leaf(node.id, size));
   }
 
   for (const chip of chips) {
     const group = modules.get(`module::${chip.module}`);
     const label = group ? `+${chip.count} unchanged` : contextLabel(chip);
-    const elk = { id: chip.id, width: Math.max(104, Math.ceil(label.length * 7) + 18), height: 28 };
+    const size = { width: Math.max(104, Math.ceil(label.length * 7) + 18), height: 28 };
     const node: ChipNode = {
-      ...elk, type: "context", data: { chip, label }, position: { x: 0, y: 0 },
+      id: chip.id, ...size, type: "context", data: { chip, label }, position: { x: 0, y: 0 },
       parentId: group?.id, focusable: false, draggable: false,
     };
-    leaves.set(elk.id, node);
-    (group?.children ?? standalone).push(elk);
+    leaves.set(node.id, node);
+    (group?.children ?? standalone).push(leaf(node.id, size));
   }
 
   const flowEdges: FlowEdge[] = edges.map((edge) => {
@@ -121,40 +134,48 @@ export async function layoutFlow(
 
   const graph: ElkNode = {
     id: "graph",
-    layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.graph },
+    layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.graph, "elk.direction": vertical ? "DOWN" : "RIGHT" },
     children: [...modules.values(), ...standalone],
     edges: flowEdges.map(({ id, source, target }) => ({
       id,
-      sources: [source],
-      targets: [target],
+      sources: [vertical ? `${source}:out` : source],
+      targets: [vertical ? `${target}:in` : target],
     })),
   };
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
   let result = await elk.layout(structuredClone(graph));
   const changed = new Set(nodes.filter(({ status }) => status !== "context").map(({ id }) => id));
+  const axis = vertical ? "y" : "x";
+  const extent = vertical ? "height" : "width";
   const focus = (result.children ?? []).flatMap((group) => (group.children ?? [])
     .filter((node) => changed.has(node.id))
-    .map((node) => ({ left: (group.x ?? 0) + (node.x ?? 0), width: node.width ?? 0 })));
-  const focusWidth = Math.max(...focus.map(({ left, width }) => left + width)) - Math.min(...focus.map(({ left }) => left));
+    .map((node) => ({ start: (group[axis] ?? 0) + (node[axis] ?? 0), size: node[extent] ?? 0 })));
+  const focusSpan = Math.max(...focus.map(({ start, size }) => start + size)) - Math.min(...focus.map(({ start }) => start));
   const guardedCalls = new Set(flowEdges.filter(({ data }) => data.guard).map(({ id }) => id));
-  // Guard labels sit outside module boxes. Pack the full diagram when it is
-  // too wide to show those labels without shrinking the comparison panes.
-  const packed = focusWidth > (comparison ? 850 : 1600)
-    || (guardedCalls.size > 0 && (result.width ?? 0) > (comparison ? 680 : 1450));
+  // Guard labels sit outside module boxes, so pack sooner when they need space.
+  const packed = focusSpan > (comparison ? 850 : 1600)
+    || (guardedCalls.size > 0 && (result[extent] ?? 0) > (comparison ? 680 : 1450));
   if (packed) {
+    // Vertical packing uses the wider rows to break up tall columns of modules.
+    const packedOptions = comparison ? {
+      ...ELK_OPTIONS.packed,
+      ...ELK_OPTIONS.packedComparison,
+      "elk.aspectRatio": vertical ? ELK_OPTIONS.packed["elk.aspectRatio"] : ELK_OPTIONS.packedComparison["elk.aspectRatio"],
+    } : ELK_OPTIONS.packed;
+    const packedEdges = new Set(flowEdges.filter(({ id, source, target }) => {
+      const parent = leaves.get(source)?.parentId;
+      // Keep incidental context calls from spreading apart the comparison's changed symbols.
+      const laysOut = !comparison || source === target || guardedCalls.has(id) || (changed.has(source) && changed.has(target));
+      return laysOut && parent && parent === leaves.get(target)?.parentId;
+    }).map(({ id }) => id));
     result = await elk.layout({
       ...graph,
-      layoutOptions: comparison ? { ...ELK_OPTIONS.packed, ...ELK_OPTIONS.packedComparison } : ELK_OPTIONS.packed,
+      layoutOptions: packedOptions,
       children: graph.children?.map((group) => group.children ? {
         ...group, layoutOptions: { ...group.layoutOptions, ...ELK_OPTIONS.stackedModule },
       } : group),
-      edges: graph.edges?.filter(({ id, sources: [source], targets: [target] }) => {
-        const parent = leaves.get(source)?.parentId;
-        // Keep incidental context calls from spreading apart the comparison's changed symbols.
-        const laysOut = !comparison || source === target || guardedCalls.has(id) || (changed.has(source) && changed.has(target));
-        return laysOut && parent && parent === leaves.get(target)?.parentId;
-      }),
+      edges: graph.edges?.filter(({ id }) => packedEdges.has(id)),
     });
   }
   const { children: groups = [], edges: routedEdges = [] } = result;
@@ -183,7 +204,7 @@ export async function layoutFlow(
     }
   }
 
-  const extraRoutes = packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length));
+  const extraRoutes = packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length), direction);
   for (const { id, data } of flowEdges) {
     data.sections = extraRoutes.get(id) ?? sectionsById.get(id) ?? [];
   }

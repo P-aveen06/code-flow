@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { OverlayEdge, OverlayNode } from "../types";
+import { diagramFit, nodeBounds } from "../views/fit";
+import { flowHandlePositions } from "../views/FlowCanvas";
+import { routePoints } from "./edgeLabels";
 import { ELK_OPTIONS, layoutFlow } from "./elk";
 
 function symbol(module: string, name: string): OverlayNode {
@@ -33,6 +36,28 @@ const edges: OverlayEdge[] = [
     in_head: true,
   },
 ];
+
+function expectVerticalRoutes(layout: Awaited<ReturnType<typeof layoutFlow>>) {
+  const boxes = nodeBounds(layout.nodes);
+  for (const edge of layout.edges) {
+    const source = boxes.get(edge.source)!;
+    const target = boxes.get(edge.target)!;
+    const sections = edge.data.sections;
+    const { startPoint } = sections.find(({ incomingSections }) => !incomingSections?.length)!;
+    const { endPoint } = sections.find(({ outgoingSections }) => !outgoingSections?.length)!;
+    expect(startPoint.x).toBeCloseTo(source.x + source.width / 2);
+    expect(startPoint.y).toBeCloseTo(source.y + source.height);
+    expect(endPoint.x).toBeCloseTo(target.x + target.width / 2);
+    expect(endPoint.y).toBeCloseTo(target.y);
+    for (const section of sections) {
+      const points = routePoints(section);
+      points.slice(1).forEach(({ x, y }, index) => {
+        const prior = points[index];
+        expect(x === prior.x || y === prior.y).toBe(true);
+      });
+    }
+  }
+}
 
 describe("layoutFlow", () => {
   it("reserves room between symbols, between disconnected modules and above the module's first row", async () => {
@@ -179,5 +204,49 @@ describe("layoutFlow", () => {
   it("is deterministic and accepts an empty graph", async () => {
     expect(await layoutFlow(nodes, edges)).toEqual(await layoutFlow(nodes, edges));
     expect(await layoutFlow([], [])).toEqual({ nodes: [], edges: [] });
+  });
+
+  it("keeps default horizontal geometry and left/right handles", async () => {
+    expect(await layoutFlow(nodes, edges, [], false, "horizontal")).toEqual(await layoutFlow(nodes, edges));
+    expect(flowHandlePositions("horizontal")).toEqual({ sourcePosition: "right", targetPosition: "left" });
+  });
+
+  it("flows downward through symbols and chips, with top/bottom handles, spacing and guard labels", async () => {
+    const chip = { id: "context::pricing", module: "pricing", count: 3, in_base: true, in_head: true };
+    const layout = await layoutFlow(nodes, [...edges, { ...edges[0], source: charge.id, target: chip.id }], [chip], false, "vertical");
+    const boxes = nodeBounds(layout.nodes);
+    const chain = [checkout.id, validate.id, charge.id, chip.id].map((id) => boxes.get(id)!);
+    for (let index = 1; index < chain.length; index++) {
+      const previous = chain[index - 1];
+      expect(chain[index].y - previous.y - previous.height).toBeGreaterThanOrEqual(
+        Number(ELK_OPTIONS.layeredSpacing["elk.layered.spacing.nodeNodeBetweenLayers"]),
+      );
+    }
+    expectVerticalRoutes(layout);
+    expect(flowHandlePositions("vertical")).toEqual({ sourcePosition: "bottom", targetPosition: "top" });
+    expect(layout.edges[1].label).toBe("new_checkout: on");
+    expect(layout.labelBounds).toBeDefined();
+
+    const { x, y, zoom } = diagramFit(layout, 750, 500, "bottom-right", false)!;
+    for (const box of [...boxes.values(), layout.labelBounds!]) {
+      expect(box.x * zoom + x).toBeGreaterThanOrEqual(0);
+      expect(box.y * zoom + y).toBeGreaterThanOrEqual(0);
+      expect((box.x + box.width) * zoom + x).toBeLessThanOrEqual(750);
+      expect((box.y + box.height) * zoom + y).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it("keeps packed comparison and recursive routes on the vertical handles", async () => {
+    const chain = Array.from({ length: 9 }, (_, index): OverlayNode => ({
+      ...symbol(`module_${index}`, "validate_payment"), status: "changed",
+    }));
+    const calls = chain.slice(1).map((node, index) => ({
+      ...edges[0], source: chain[index].id, target: node.id,
+    }));
+    calls.push({ ...edges[0], source: chain[0].id, target: chain[0].id });
+    const layout = await layoutFlow(chain, calls, [], true, "vertical");
+    const groups = layout.nodes.filter(({ type }) => type === "module");
+    expect(new Set(groups.map(({ position }) => position.x)).size).toBeGreaterThan(1);
+    expectVerticalRoutes(layout);
   });
 });

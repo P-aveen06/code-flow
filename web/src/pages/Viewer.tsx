@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCommits, fetchRepos, fetchSnapshot } from "../api";
 import { AppLink } from "../AppLink";
 import { recordReviewEvent } from "../events";
-import { useCodeFlowFlags } from "../flags";
+import { directionExposureKey, readFlowDirection, useCodeFlowFlags, useDirectionExposure } from "../flags";
+import type { FlowLayout } from "../layout/elk";
 import { navigate, repoPath } from "../router";
 import type { DiffViewModel, FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
-import { useDiff } from "../useDiff";
+import { useDiff, useDiffLayout } from "../useDiff";
 import type { Hops } from "../useDiff";
 import { useRepoFlags } from "../useRepoFlags";
 import { useRequest } from "../useRequest";
-import { replaceViewOverride } from "../view";
-import type { FlowView } from "../view";
+import { replaceDirectionOverride, replaceViewOverride } from "../view";
+import type { FlowDirection, FlowView } from "../view";
 import { CodePane } from "../views/CodePane";
 import type { CodeSource } from "../views/CodePane";
 import { FlagsmithPanel } from "../views/FlagsmithPanel";
@@ -20,7 +21,7 @@ import { OverlaySummary } from "../views/OverlaySummary";
 import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
-import { VariantPreview } from "../views/VariantPreview";
+import { DirectionPreview, VariantPreview } from "../views/VariantPreview";
 import type { ExpandedContext } from "../views/collapse";
 import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
 import { useDiagramFullscreen } from "../views/fullscreen";
@@ -103,6 +104,7 @@ interface RepoReviewProps {
 function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
   const {
     flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, assignedView, reviewEventClient,
+    directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
@@ -125,11 +127,20 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const [selection, setSelection] = useState<
     { diff: DiffViewModel; node: OverlayNode } | { head: string; check: FlagCheck } | null
   >(null);
-  const [rendered, setRendered] = useState<{ diff: DiffViewModel; view: FlowView } | null>(null);
-  const { request, diff, layout, hasCollapsedContext } = useDiff(
-    id, hasNodes && flagsReady ? head : undefined, hops, context.expanded, view === "side_by_side", checkIds,
+  const [rendered, setRendered] = useState<{
+    layout: FlowLayout; view: FlowView; direction: FlowDirection;
+  } | null>(null);
+  const request = useDiff(id, hasNodes ? head : undefined, hops);
+  const diff = request.status === "ready" ? request.data : null;
+  const longFlow = diff ? diff.long_flow === true : undefined;
+  const { direction, directionOverride, assignedDirection, ready: directionReady } = readFlowDirection(
+    search, longFlow, directionFlag,
   );
-  const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view));
+  const { layout, hasCollapsedContext } = useDiffLayout(
+    diff, context.expanded, view === "side_by_side", flagsReady && directionReady ? direction : null, checkIds,
+  );
+  const currentLayout = layout.status === "ready" ? layout.data : null;
+  const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view, direction));
   const contextExpanded = context.expanded === "all" || context.expanded.size > 0;
   const selectedNode = selection && "node" in selection && selection.diff === diff ? selection.node : null;
   let source: CodeSource | undefined;
@@ -144,9 +155,13 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     source = { sha: head, revision: "Head", file, line, endLine: line, name: `${file}:${line}` };
   }
   const markRendered = useCallback(() => {
-    if (diff) setRendered({ diff, view });
-  }, [diff, view]);
-  const reviewContext = diff && rendered?.diff === diff && rendered.view === view
+    if (currentLayout) setRendered({ layout: currentLayout, view, direction });
+  }, [currentLayout, view, direction]);
+  const diagramRendered = Boolean(currentLayout && rendered?.layout === currentLayout
+    && rendered.view === view && rendered.direction === direction);
+  const exposureKey = directionExposureKey(reviewerId, longFlow, directionOverride, directionFlag);
+  const layoutReview = useDirectionExposure(reviewerId, exposureKey, diagramRendered);
+  const reviewContext = diff && diagramRendered && layoutReview.ready
     ? { repo: id, view, reviewerId, head: diff.head, base: diff.base, devOverride: viewOverride !== null }
     : null;
   const View = view === "side_by_side" ? SideBySide : Overlay;
@@ -212,6 +227,11 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
         <div className="viewer-header__controls">
           <VariantPreview view={view} viewOverride={viewOverride} assignedView={assignedView}
             ready={flagsReady} onChange={replaceViewOverride} />
+          {hasNodes && head && (
+            <DirectionPreview direction={direction} directionOverride={directionOverride}
+              assignedDirection={assignedDirection} longFlow={longFlow}
+              ready={directionReady} onChange={replaceDirectionOverride} />
+          )}
           {hasNodes && (
             <div className="neighbours" title={neighboursHint}>
               <span id="neighbours-label">Show neighbours:</span>
@@ -270,19 +290,23 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
             <p className="panel-message" role="status">Loading flow diff…</p>
           )}
           {request.status === "error" && <p className="panel-message" role="alert">{request.message}</p>}
-          {diff && layout.status === "loading" && <p className="panel-message" role="status">Laying out the flow…</p>}
+          {diff && flagsReady && !directionReady && <p className="panel-message" role="status">Loading flow direction…</p>}
+          {diff && flagsReady && directionReady && layout.status === "loading" && (
+            <p className="panel-message" role="status">Laying out the flow…</p>
+          )}
           {diff && layout.status === "error" && (
             <p className="panel-message" role="alert">Could not lay out the flow. {layout.message}</p>
           )}
-          {diff && layout.status === "ready" && layout.data && (
+          {diff && currentLayout && (
             <div className="flow-comparison">
               {view === "overlay_summary" && <OverlaySummary summary={diff.summary} />}
               {flowChanged ? (
                 <>
                   <View
-                    key={view}
+                    key={`${view}:${direction}`}
                     diff={diff}
-                    layout={layout.data}
+                    layout={currentLayout}
+                    direction={direction}
                     layoutPositions={layoutPositions}
                     fullscreen={fullscreen}
                     selectedNodeId={selectedNode?.id}
@@ -304,10 +328,12 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           )}
           {hasNodes && head && (
             <ReviewBar
-              key={JSON.stringify([id, head, view, reviewerId, viewOverride])}
+              key={JSON.stringify([id, head, view, reviewerId, viewOverride, direction, directionOverride])}
               context={reviewContext}
-              sendsReviewEvents={reviewEventClient !== null}
-              onReview={(payload) => recordReviewEvent(payload, reviewEventClient)}
+              sendsReviewEvents={reviewEventClient !== null || layoutReview.exposed}
+              onReview={(payload) => recordReviewEvent(payload, reviewEventClient, {
+                ...layoutReview, override: directionOverride,
+              })}
             />
           )}
         </section>

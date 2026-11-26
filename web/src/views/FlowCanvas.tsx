@@ -6,6 +6,7 @@ import type { EdgeTypes, NodeProps, NodeTypes, OnMove, ReactFlowInstance } from 
 import { useEffect, useEffectEvent, useId, useMemo, useRef } from "react";
 import type { ChipNode, FlowEdge, FlowLayout, FlowNode, ModuleNode, SymbolNode } from "../layout/elk";
 import type { FlagFinding, NodeStatus, OverlayNode } from "../types";
+import type { FlowDirection } from "../view";
 import { contextLabel } from "./collapse";
 import { guardActivity, highlightedPaths } from "./flagFindings";
 import { diagramFit, includeLabelBounds } from "./fit";
@@ -21,10 +22,10 @@ function ModuleBox({ data }: NodeProps<ModuleNode>) {
   return <div className="flow-module" title={data.label}>{data.label}</div>;
 }
 
-function SymbolCard({ data: { symbol }, selected }: NodeProps<SymbolNode>) {
+function SymbolCard({ data: { symbol }, selected, sourcePosition, targetPosition }: NodeProps<SymbolNode>) {
   return (
     <>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
       <button
         type="button"
         className="flow-symbol"
@@ -37,16 +38,16 @@ function SymbolCard({ data: { symbol }, selected }: NodeProps<SymbolNode>) {
         </span>
         <span className="flow-symbol__hint">{symbolHint(symbol)}</span>
       </button>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle type="source" position={sourcePosition ?? Position.Right} isConnectable={false} />
     </>
   );
 }
 
-function ContextChip({ data: { chip, label } }: NodeProps<ChipNode>) {
+function ContextChip({ data: { chip, label }, sourcePosition, targetPosition }: NodeProps<ChipNode>) {
   const fullLabel = contextLabel(chip);
   return (
     <>
-      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <Handle type="target" position={targetPosition ?? Position.Left} isConnectable={false} />
       <button
         type="button"
         className="btn btn--sm flow-context"
@@ -54,7 +55,7 @@ function ContextChip({ data: { chip, label } }: NodeProps<ChipNode>) {
         aria-expanded={false}
         title={fullLabel}
       >{label}</button>
-      <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle type="source" position={sourcePosition ?? Position.Right} isConnectable={false} />
     </>
   );
 }
@@ -68,6 +69,7 @@ export type FlowInstance = ReactFlowInstance<FlowNode, FlowEdge>;
 
 interface FlowCanvasProps {
   layout: FlowLayout;
+  direction: FlowDirection;
   revision?: Revision;
   layoutPositions: LayoutPositionControls;
   fullscreen: DiagramFullscreen;
@@ -92,8 +94,14 @@ export function FlowCanvas(props: FlowCanvasProps) {
   );
 }
 
+export function flowHandlePositions(direction: FlowDirection) {
+  return direction === "vertical"
+    ? { sourcePosition: Position.Bottom, targetPosition: Position.Top }
+    : { sourcePosition: Position.Right, targetPosition: Position.Left };
+}
+
 function Canvas({
-  layout, revision, layoutPositions, fullscreen, selectedNodeId, selectedFlag, liveStates, onNodeClick,
+  layout, direction, revision, layoutPositions, fullscreen, selectedNodeId, selectedFlag, liveStates, onNodeClick,
   onExpandModule, onReady, onInit, onMove, autoFit = true, controlsPosition = "bottom-right", emptyMessage,
 }: FlowCanvasProps) {
   const canvasId = useId();
@@ -101,15 +109,19 @@ function Canvas({
   const readyLayout = useRef<FlowLayout | null>(null);
   const dragged = useRef(false);
   const { setViewport, viewportInitialized } = useReactFlow<FlowNode, FlowEdge>();
-  const positioned = useMemo(() => applyLayoutPositions(layout, layoutPositions.positions), [layout, layoutPositions.positions]);
+  const positioned = useMemo(
+    () => applyLayoutPositions(layout, layoutPositions.positions, direction),
+    [layout, layoutPositions.positions, direction],
+  );
   const displayed = useMemo(() => revision ? sideOf(positioned, revision) : positioned, [positioned, revision]);
   const highlight = useMemo(() => highlightedPaths(layout.nodes, layout.edges, selectedFlag), [layout, selectedFlag]);
   const nodes = useMemo(() => displayed.nodes.map((node) => ({
     ...node,
+    ...flowHandlePositions(direction),
     selected: node.id === selectedNodeId && !node.hidden,
     className: highlight && !highlight.nodeIds.has(node.id) ? "flow-node--dimmed" : undefined,
     zIndex: node.type === "module" ? 0 : 2,
-  })), [displayed.nodes, selectedNodeId, highlight]);
+  })), [displayed.nodes, direction, selectedNodeId, highlight]);
   const edges = useMemo(() => displayed.edges.map((edge) => {
     const activity = guardActivity(edge.data.guard, liveStates);
     const style = edgeStyle(edge.data.status, activity);

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chooseFlowView, FLOW_VIEWS, readViewOverride, replaceViewOverride } from "./view";
+import {
+  chooseFlowView, FLOW_DIRECTIONS, FLOW_VIEWS, readDirectionOverride, readViewOverride,
+  replaceDirectionOverride, replaceViewOverride,
+} from "./view";
 
 describe("chooseFlowView", () => {
   it.each(FLOW_VIEWS)("uses the experiment value %s", (view) => {
@@ -53,5 +56,22 @@ describe("replaceViewOverride", () => {
     expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(repo + query + "#flow"));
     expect(pushState).not.toHaveBeenCalled();
     expect(dispatchEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "popstate" }));
+  });
+
+  it.each(FLOW_DIRECTIONS)("replaces the direction with %s and keeps the view preview", (direction) => {
+    const page = repo + query + "&view=overlay_summary";
+    const { state, replaceState, pushState, dispatchEvent } = mockLocation(page + "#flow");
+    replaceDirectionOverride(direction);
+    expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(`${page}&direction=${direction}#flow`));
+    expect(pushState).not.toHaveBeenCalled();
+    expect(dispatchEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: "popstate" }));
+  });
+
+  it("clears the direction preview and preserves other parameters", () => {
+    const page = repo + query + "&view=overlay_summary";
+    const { state, replaceState } = mockLocation(page + "&direction=vertical#flow");
+    expect(readDirectionOverride(window.location.search)).toBe("vertical");
+    replaceDirectionOverride(null);
+    expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(page + "#flow"));
   });
 });
