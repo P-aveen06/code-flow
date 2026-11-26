@@ -6,6 +6,59 @@ size_effects:
   # Multiply the median by 1.06 for every changed function (1.06 ** size).
   time_increase: 0.06
 
+# PERSONA ASSUMPTIONS
+# The mix and effects are hypothetical, not user data.
+# Probability deltas add to the base rate after the size penalty. Time factors
+# multiply the size-adjusted median. For example, 0.02 adds 2 percentage points
+# and 1.04 adds 4% to the median. Weights are relative within each group.
+personas:
+  role:
+    junior_dev:
+      weight: 25
+      experience_years: [0, 3]
+      familiarity_weights: {none: 25, some: 55, high: 20}
+      effect: {probability_delta: -0.015, time_multiplier: 1.04}
+    senior_dev:
+      weight: 30
+      experience_years: [5, 16]
+      familiarity_weights: {none: 10, some: 45, high: 45}
+      effect: {probability_delta: 0.015, time_multiplier: 0.97}
+    pr_reviewer:
+      weight: 20
+      experience_years: [3, 18]
+      familiarity_weights: {none: 15, some: 45, high: 40}
+      effect: {probability_delta: 0.01, time_multiplier: 0.98}
+    solution_architect:
+      weight: 10
+      experience_years: [8, 25]
+      familiarity_weights: {none: 20, some: 55, high: 25}
+      effect: {probability_delta: 0.015, time_multiplier: 0.99}
+    new_joiner:
+      weight: 15
+      experience_years: [0, 12]
+      familiarity_weights: {none: 70, some: 25, high: 5}
+      effect: {probability_delta: -0.01, time_multiplier: 1.03}
+  # Experience is uniform within the role's range, including partial years.
+  # Effects scale per decade. At 5 years the delta is halved and time uses sqrt(0.98).
+  experience_years: {probability_delta: 0.012, time_multiplier: 0.98}
+  codebase_familiarity:
+    none: {probability_delta: -0.035, time_multiplier: 1.08}
+    some: {probability_delta: 0.0, time_multiplier: 1.0}
+    high: {probability_delta: 0.035, time_multiplier: 0.93}
+  reading_style:
+    visual:
+      weight: 55
+      effect: {probability_delta: 0.005, time_multiplier: 0.99}
+      # Variant effects apply only in the hypothesis model.
+      variant_effects:
+        overlay: {probability_delta: 0.012, time_multiplier: 0.98}
+        overlay_summary: {probability_delta: 0.012, time_multiplier: 0.98}
+    textual:
+      weight: 45
+      effect: {probability_delta: -0.005, time_multiplier: 1.01}
+      variant_effects:
+        overlay_summary: {probability_delta: 0.016, time_multiplier: 0.97}
+
 hypothesis:
   side_by_side:
     understood_probability: 0.55
@@ -20,7 +73,7 @@ hypothesis:
     median_ms: 30000
     sigma: 0.5
 
-# One shared lognormal distribution and success probability for all three variants.
+# Shared base probability and lognormal parameters for all three variants.
 # Sigma is the standard deviation on the log scale.
 "null":
   understood_probability: 0.66

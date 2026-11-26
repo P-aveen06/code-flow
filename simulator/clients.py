@@ -7,15 +7,20 @@ from urllib.parse import urlsplit
 from flagsmith import Flagsmith
 from flagsmith.analytics import EventProcessorConfig
 from flagsmith.models import DefaultFlag, ExperimentMetadata, Flag
+from flagsmith.types import TraitMapping
 
 FLOW_FLAG = "flow_view"
 DEFAULT_API_URL = "http://localhost:8000/api/v1/"
 
 
 class ExperimentClient(Protocol):
-    def get_experiment_flag(self, feature_name: str, *, identifier: str) -> Flag | DefaultFlag: ...
+    def get_experiment_flag(
+        self, feature_name: str, *, identifier: str, traits: TraitMapping
+    ) -> Flag | DefaultFlag: ...
 
-    def track_event(self, event: str, *, identifier: str, value: int) -> None: ...
+    def track_event(
+        self, event: str, *, identifier: str, value: int, traits: TraitMapping
+    ) -> None: ...
 
     def close(self) -> None: ...
 
@@ -25,9 +30,12 @@ class DryRunClient:
 
     def __init__(self) -> None:
         self.events: list[tuple[str, str, str | int]] = []
+        self.identity_traits: dict[str, TraitMapping] = {}
         self.closed = False
 
-    def get_experiment_flag(self, feature_name: str, *, identifier: str) -> Flag | DefaultFlag:
+    def get_experiment_flag(
+        self, feature_name: str, *, identifier: str, traits: TraitMapping
+    ) -> Flag | DefaultFlag:
         digest = hashlib.sha256(identifier.encode("utf-8")).digest()
         bucket = int.from_bytes(digest, "big") % 100
         if bucket < 34:
@@ -37,6 +45,7 @@ class DryRunClient:
         else:
             variant = "overlay_summary"
 
+        self.identity_traits[identifier] = dict(traits)
         self.events.append(("$flag_exposure", identifier, variant))
         return Flag(
             enabled=True,
@@ -47,7 +56,7 @@ class DryRunClient:
             experiment=ExperimentMetadata(id=1, name=FLOW_FLAG, in_experiment=True),
         )
 
-    def track_event(self, event: str, *, identifier: str, value: int) -> None:
+    def track_event(self, event: str, *, identifier: str, value: int, traits: TraitMapping) -> None:
         self.events.append((event, identifier, value))
 
     def close(self) -> None:

@@ -1,5 +1,6 @@
 """Run the reviewer simulation and calculate local experiment summaries."""
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from random import Random
@@ -10,6 +11,7 @@ from flagsmith.models import Flag
 
 from clients import FLOW_FLAG, ExperimentClient
 from model import VARIANTS, BehaviourModel, Decision
+from personas import Persona
 
 
 class SimulationError(Exception):
@@ -21,6 +23,7 @@ class VariantSummary:
     reviewers: int
     understood_rate: float | None
     median_ms: float | None
+    persona_counts: dict[str, Counter[str]]
 
 
 def run_simulation(
@@ -37,13 +40,15 @@ def run_simulation(
 ) -> dict[str, VariantSummary]:
     """Simulate one exposure and decision per identity, then flush the client."""
     random = Random(seed)
-    decisions: dict[str, list[Decision]] = {variant: [] for variant in VARIANTS}
+    reviews: dict[str, list[tuple[Persona, Decision]]] = {variant: [] for variant in VARIANTS}
     try:
         interval = 1 / rate
         for index in range(1, n + 1):
             started_at = clock()
             identifier = f"{prefix}-{index:04d}"
-            flag = client.get_experiment_flag(FLOW_FLAG, identifier=identifier)
+            persona = model.personas.sample(Random(f"{seed}:{identifier}"))
+            traits = persona.traits()
+            flag = client.get_experiment_flag(FLOW_FLAG, identifier=identifier, traits=traits)
             if not (
                 isinstance(flag, Flag)
                 and flag.enabled
@@ -57,10 +62,12 @@ def run_simulation(
             variant = flag.value
             if not isinstance(variant, str) or variant not in model.variants:
                 raise SimulationError("The flow_view flag returned an unknown view.")
-            decision = model.sample(variant, random.choice(diff_sizes), random)
+            decision = model.sample(variant, random.choice(diff_sizes), random, persona=persona)
             event = "diff_understood" if decision.understood else "diff_confusing"
-            client.track_event(event, identifier=identifier, value=decision.elapsed_ms)
-            decisions[variant].append(decision)
+            client.track_event(
+                event, identifier=identifier, value=decision.elapsed_ms, traits=traits
+            )
+            reviews[variant].append((persona, decision))
 
             remaining = interval - (clock() - started_at)
             if index < n and remaining > 0:
@@ -68,15 +75,20 @@ def run_simulation(
     finally:
         client.close()
 
-    return {variant: _summarize(results) for variant, results in decisions.items()}
+    return {variant: _summarize(results) for variant, results in reviews.items()}
 
 
-def _summarize(decisions: list[Decision]) -> VariantSummary:
-    if not decisions:
-        return VariantSummary(0, None, None)
-    count = len(decisions)
+def _summarize(reviews: list[tuple[Persona, Decision]]) -> VariantSummary:
+    count = len(reviews)
     return VariantSummary(
         reviewers=count,
-        understood_rate=sum(decision.understood for decision in decisions) / count,
-        median_ms=median(decision.elapsed_ms for decision in decisions),
+        understood_rate=sum(decision.understood for _, decision in reviews) / count
+        if count
+        else None,
+        median_ms=median(decision.elapsed_ms for _, decision in reviews) if count else None,
+        persona_counts={
+            "role": Counter(persona.role for persona, _ in reviews),
+            "codebase_familiarity": Counter(persona.codebase_familiarity for persona, _ in reviews),
+            "reading_style": Counter(persona.reading_style for persona, _ in reviews),
+        },
     )

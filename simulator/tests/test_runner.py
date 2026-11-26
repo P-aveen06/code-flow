@@ -2,6 +2,7 @@
 
 import pytest
 from flagsmith.models import DefaultFlag
+from flagsmith.types import TraitMapping
 
 from clients import DryRunClient
 from model import VARIANTS, load_models
@@ -30,9 +31,13 @@ def test_deterministic_with_seed_and_assignment_is_sticky() -> None:
     summary, client = _simulate("hypothesis", n=100)
     repeat_summary, repeat_client = _simulate("hypothesis", n=100)
     _, different_seed = _simulate("hypothesis", n=100, seed=8)
+    _, null_client = _simulate("null", n=100)
 
     assert repeat_summary == summary
     assert repeat_client.events == client.events
+    assert repeat_client.identity_traits == null_client.identity_traits == client.identity_traits
+    assert different_seed.identity_traits != client.identity_traits
+    assert len({tuple(traits.values()) for traits in client.identity_traits.values()}) == 100
     assert different_seed.events[::2] == client.events[::2]
     assert different_seed.events[1::2] != client.events[1::2]
 
@@ -73,6 +78,20 @@ def test_each_reviewer_has_one_exposure_and_one_outcome() -> None:
         assert isinstance(outcome[2], int) and outcome[2] > 0
 
 
+def test_persona_counts_follow_variant_assignments() -> None:
+    summary, client = _simulate("hypothesis", n=100)
+    for variant, stats in summary.items():
+        traits = [
+            client.identity_traits[identity]
+            for _, identity, assignment in client.events[::2]
+            if assignment == variant
+        ]
+        for name, counts in stats.persona_counts.items():
+            assert sum(counts.values()) == stats.reviewers
+            for value, count in counts.items():
+                assert count == sum(persona[name] == value for persona in traits)
+
+
 def test_throttle_accounts_for_request_time_and_only_sleeps_between_reviewers() -> None:
     waits: list[float] = []
     # The first reviewer takes 0.02 seconds and the second exceeds the 0.05 budget.
@@ -94,7 +113,9 @@ def test_throttle_accounts_for_request_time_and_only_sleeps_between_reviewers() 
 
 def test_close_after_an_ineligible_assignment() -> None:
     class IneligibleClient(DryRunClient):
-        def get_experiment_flag(self, feature_name: str, *, identifier: str) -> DefaultFlag:
+        def get_experiment_flag(
+            self, feature_name: str, *, identifier: str, traits: TraitMapping
+        ) -> DefaultFlag:
             return DefaultFlag(enabled=False, value="side_by_side")
 
     client = IneligibleClient()

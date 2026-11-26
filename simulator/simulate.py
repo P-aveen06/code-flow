@@ -11,6 +11,7 @@ from flagsmith.exceptions import FlagsmithClientError, FlagsmithFeatureDoesNotEx
 from clients import DEFAULT_API_URL, DryRunClient, ExperimentClient, flagsmith_client
 from diffs import load_diff_sizes
 from model import MODELS, load_models
+from personas import PersonaModel
 from runner import SimulationError, VariantSummary, run_simulation
 
 SIMULATOR_DIR = Path(__file__).resolve().parent
@@ -46,6 +47,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--model", choices=MODELS, default="hypothesis")
     parser.add_argument("--dry-run", action="store_true", help="assign and record events offline")
     parser.add_argument("--prefix", default="sim-reviewer", help="reviewer ID prefix")
+    parser.add_argument(
+        "--persona-summary", action="store_true", help="show simulated persona counts by variant"
+    )
     args = parser.parse_args(argv)
     if args.n < 1:
         parser.error("--n must be positive")
@@ -67,6 +71,21 @@ def _print_summary(
         understood = f"{stats.understood_rate:.1%}" if stats.understood_rate is not None else "-"
         elapsed = f"{stats.median_ms:,.0f}" if stats.median_ms is not None else "-"
         print(f"{variant:<17} {stats.reviewers:>9} {understood:>15} {elapsed:>12}")
+
+
+def _print_persona_summary(summary: dict[str, VariantSummary], personas: PersonaModel) -> None:
+    print("\nSimulated persona counts")
+    print(f"{'Attribute':<22} {'Value':<20}" + "".join(f" {variant:>16}" for variant in summary))
+    for attribute, values in (
+        ("role", personas.roles),
+        ("codebase_familiarity", personas.familiarity),
+        ("reading_style", personas.reading_styles),
+    ):
+        for value in values:
+            counts = "".join(
+                f" {stats.persona_counts[attribute][value]:>16}" for stats in summary.values()
+            )
+            print(f"{attribute:<22} {value:<20}{counts}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
     _print_summary(summary, args.model, source, len(diff_sizes), args.dry_run)
+    if args.persona_summary:
+        _print_persona_summary(summary, model.personas)
     return 0
 
 

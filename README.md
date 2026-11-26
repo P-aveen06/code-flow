@@ -109,6 +109,13 @@ demonstrate the event pipeline and Flagsmith's analysis. Testing the
 hypothesis with real reviewers requires real review data. The null model
 gives every variant the same behaviour to check for spurious differences.
 
+Each simulated reviewer gets a seeded persona with a role, years of
+experience, codebase familiarity, and reading style. The persona mix and
+their modest effects on understanding and decision time are assumptions in
+`behaviour.yaml`. Flagsmith receives these attributes as identity traits,
+and `--persona-summary` shows their distribution by variant. A run of 100
+reviewers is a small sample, so Flagsmith's win probability may be inconclusive.
+
 ```sh
 make simulate-dry-run
 uv run --project simulator python simulator/simulate.py --dry-run --model null --n 3000 --rate 1000
