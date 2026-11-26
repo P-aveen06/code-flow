@@ -7,15 +7,17 @@ export interface DiffViewProps {
   layout: FlowLayout;
   selectedNodeId?: string;
   onNodeClick: (node: OverlayNode) => void;
+  onExpandModule: (module: string) => void;
   onReady: () => void;
 }
 
-export function Overlay({ layout, selectedNodeId, onNodeClick, onReady }: DiffViewProps) {
+export function Overlay({ layout, selectedNodeId, onNodeClick, onExpandModule, onReady }: DiffViewProps) {
   return (
     <FlowCanvas
       layout={layout}
       selectedNodeId={selectedNodeId}
       onNodeClick={onNodeClick}
+      onExpandModule={onExpandModule}
       onReady={onReady}
     />
   );

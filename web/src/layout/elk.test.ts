@@ -58,13 +58,46 @@ describe("layoutFlow", () => {
     expect(groups[1].position.x + last.position.x).toBeGreaterThan(groups[0].position.x + first.position.x);
   });
 
-  it("widens a short symbol when its hint needs more room", async () => {
-    const changedCheckout: OverlayNode = { ...checkout, status: "changed" };
-    const shortMethod: OverlayNode = { ...validate, kind: "method", status: "added" };
-    const { nodes: symbols } = await layoutFlow([changedCheckout, shortMethod], []);
+  it("keeps short cards compact and makes room to wrap a long name", async () => {
+    const longName = symbol("checkout", "charge_payment_after_running_validation");
+    const { nodes: symbols } = await layoutFlow([checkout, longName], []);
+    const short = symbols.find(({ id }) => id === checkout.id)!;
+    const wrapped = symbols.find(({ id }) => id === longName.id)!;
 
-    expect(symbols.find(({ id }) => id === shortMethod.id)?.width).toBe(140);
-    expect(symbols.find(({ id }) => id === changedCheckout.id)?.width).toBeGreaterThan(140);
+    expect(short.width).toBe(140);
+    expect(wrapped.width!).toBeLessThan(longName.qualname.length * 10.2);
+    expect(wrapped.height!).toBeGreaterThan(short.height!);
+  });
+
+  it("routes calls to a context chip and keeps module-only chips small", async () => {
+    const chip = { id: "context::pricing", module: "pricing", count: 3, in_base: true, in_head: true };
+    const layout = await layoutFlow([checkout], [{ ...edges[0], target: chip.id }], [chip]);
+    const packed = layout.nodes.find(({ id }) => id === chip.id)!;
+    expect(packed).toMatchObject({ type: "context", data: { chip, label: "+3 unchanged in pricing" } });
+    expect(packed.parentId).toBeUndefined();
+    expect(packed.height!).toBeLessThan(layout.nodes.find(({ id }) => id === checkout.id)!.height!);
+    expect(layout.edges[0].data.sections.length).toBeGreaterThan(0);
+  });
+
+  it("packs a wide comparison while still connecting the actual symbols", async () => {
+    const chain = Array.from({ length: 7 }, (_, index): OverlayNode => ({
+      ...symbol(`module_${index}`, "process_transaction"), status: "changed",
+    }));
+    const calls = chain.slice(1).map((node, index) => ({
+      ...edges[0], source: chain[index].id, target: node.id,
+    }));
+    const layout = await layoutFlow(chain, calls, [], true);
+    const groups = layout.nodes.filter(({ type }) => type === "module");
+    expect(new Set(groups.map(({ position }) => position.y)).size).toBeGreaterThan(1);
+
+    for (const edge of layout.edges) {
+      const target = layout.nodes.find(({ id }) => id === edge.target)!;
+      const group = groups.find(({ id }) => id === target.parentId)!;
+      const { endPoint } = edge.data.sections[0];
+      const left = group.position.x + target.position.x;
+      expect([left, left + target.width!]).toContain(endPoint.x);
+      expect(endPoint.y).toBe(group.position.y + target.position.y + target.height! / 2);
+    }
   });
 
   it("keeps internal and cross-module edges, including guard information", async () => {

@@ -7,7 +7,9 @@ export function sideOf(layout: FlowLayout, side: Revision): FlowLayout {
   const visibleIds = new Set<string>();
 
   for (const node of layout.nodes) {
-    if (node.type === "symbol" && node.data.symbol[presence]) {
+    if (node.type === "module") continue;
+    const item = node.type === "symbol" ? node.data.symbol : node.data.chip;
+    if (item[presence]) {
       visibleIds.add(node.id);
       if (node.parentId) visibleIds.add(node.parentId);
     }

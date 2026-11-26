@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { edgeStyle, guardLabel, nodeStyle } from "./styles";
+import { edgeStyle, guardLabel, nodeStyle, symbolNameLines } from "./styles";
 
 describe("flow styles", () => {
   it("uses status colors for symbols, with a dashed border for removals", () => {
@@ -19,5 +19,12 @@ describe("flow styles", () => {
     expect(guardLabel({ flag: "new_checkout", when: "on" })).toBe("new_checkout: on");
     expect(guardLabel({ flag: "new_checkout", when: "off" })).toBe("new_checkout: off");
     expect(guardLabel(null)).toBeUndefined();
+  });
+
+  it("wraps long symbol names at word boundaries when possible", () => {
+    expect(symbolNameLines("ExperimentRolloutDecisionSerializer.to_spec"))
+      .toEqual(["ExperimentRolloutDecision", "Serializer.to_spec"]);
+    expect(symbolNameLines("restrict_use_due_to_api_limit_grace_period_over").join(""))
+      .toBe("restrict_use_due_to_api_limit_grace_period_over");
   });
 });

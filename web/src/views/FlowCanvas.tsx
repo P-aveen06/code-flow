@@ -4,10 +4,11 @@ import {
 } from "@xyflow/react";
 import type { EdgeTypes, NodeProps, NodeTypes, OnMove, ReactFlowInstance } from "@xyflow/react";
 import { useEffect, useId, useMemo, useRef } from "react";
-import type { FlowEdge, FlowLayout, FlowNode, ModuleNode, SymbolNode } from "../layout/elk";
+import type { ChipNode, FlowEdge, FlowLayout, FlowNode, ModuleNode, SymbolNode } from "../layout/elk";
 import type { NodeStatus, OverlayNode } from "../types";
+import { contextLabel } from "./collapse";
 import { RoutedEdge } from "./RoutedEdge";
-import { edgeStyle, nodeStyle, statusLabels, symbolHint } from "./styles";
+import { edgeStyle, nodeStyle, statusLabels, symbolHint, symbolNameLines } from "./styles";
 
 function ModuleBox({ data }: NodeProps<ModuleNode>) {
   return <div className="flow-module" title={data.label}>{data.label}</div>;
@@ -24,7 +25,9 @@ function SymbolCard({ data: { symbol }, selected }: NodeProps<SymbolNode>) {
         aria-expanded={selected}
         title={symbol.qualname}
       >
-        <span className="flow-symbol__name">{symbol.qualname}</span>
+        <span className="flow-symbol__name">
+          {symbolNameLines(symbol.qualname).map((line, index) => <span key={index}>{line}</span>)}
+        </span>
         <span className="flow-symbol__hint">{symbolHint(symbol)}</span>
       </button>
       <Handle type="source" position={Position.Right} isConnectable={false} />
@@ -32,16 +35,35 @@ function SymbolCard({ data: { symbol }, selected }: NodeProps<SymbolNode>) {
   );
 }
 
-const nodeTypes = { module: ModuleBox, symbol: SymbolCard } satisfies NodeTypes;
+function ContextChip({ data: { chip, label } }: NodeProps<ChipNode>) {
+  const fullLabel = contextLabel(chip);
+  return (
+    <>
+      <Handle type="target" position={Position.Left} isConnectable={false} />
+      <button
+        type="button"
+        className="btn btn--sm flow-context"
+        aria-label={`Expand ${fullLabel}`}
+        aria-expanded={false}
+        title={fullLabel}
+      >{label}</button>
+      <Handle type="source" position={Position.Right} isConnectable={false} />
+    </>
+  );
+}
+
+const nodeTypes = { module: ModuleBox, symbol: SymbolCard, context: ContextChip } satisfies NodeTypes;
 const edgeTypes = { routed: RoutedEdge } satisfies EdgeTypes;
 const legendStatuses: NodeStatus[] = ["added", "removed", "changed", "context"];
 const fitOptions = { padding: 0.14, maxZoom: 1.25, includeHiddenNodes: true };
+const readableZoom = 0.65;
 export type FlowInstance = ReactFlowInstance<FlowNode, FlowEdge>;
 
 interface FlowCanvasProps {
   layout: FlowLayout;
   selectedNodeId?: string;
   onNodeClick: (node: OverlayNode) => void;
+  onExpandModule: (module: string) => void;
   onReady?: () => void;
   onInit?: (instance: FlowInstance) => void;
   onMove?: OnMove;
@@ -59,7 +81,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
 }
 
 function Canvas({
-  layout, selectedNodeId, onNodeClick, onReady, onInit, onMove,
+  layout, selectedNodeId, onNodeClick, onExpandModule, onReady, onInit, onMove,
   autoFit = true, controlsPosition = "bottom-right", emptyMessage,
 }: FlowCanvasProps) {
   const canvasId = useId();
@@ -88,6 +110,10 @@ function Canvas({
     let fitFrame = 0;
     let readyFrame = 0;
     let disposed = false;
+    const changed = layout.nodes.filter((node) => node.type === "symbol" && node.data.symbol.status !== "context");
+    const initialFit = changed.length ? {
+      ...fitOptions, nodes: changed, minZoom: readableZoom, maxZoom: 1,
+    } : fitOptions;
     function markReady() {
       if (disposed || readyLayout.current === layout) return;
       cancelAnimationFrame(readyFrame);
@@ -101,7 +127,7 @@ function Canvas({
           markReady();
           return;
         }
-        const fit = fitView(fitOptions);
+        const fit = fitView(initialFit);
         if (readyLayout.current !== layout && !readyFrame) {
           void fit.then(markReady, markReady);
           // React Flow can keep a fit queued while waiting for measurements.
@@ -132,11 +158,9 @@ function Canvas({
         edgeTypes={edgeTypes}
         onInit={onInit}
         onMove={onMove}
-        onNodesChange={autoFit ? (changes) => {
-          if (changes.some(({ type }) => type === "dimensions")) void fitView(fitOptions);
-        } : undefined}
         onNodeClick={(_, node) => {
           if (node.type === "symbol") onNodeClick(node.data.symbol);
+          if (node.type === "context") onExpandModule(node.data.chip.module);
         }}
         minZoom={0.06}
         nodesDraggable={false}

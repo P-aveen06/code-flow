@@ -12,6 +12,20 @@ export function symbolHint({ kind, status }: OverlayNode): string {
   return `${kind} · ${statusLabels[status]}`;
 }
 
+export function symbolNameLines(name: string): string[] {
+  const lineLength = 28;
+  const lines: string[] = [];
+  while (name.length > lineLength) {
+    const breaks = [...name.slice(0, lineLength + 1).matchAll(/[_.]|[a-z][A-Z]/g)];
+    const separator = breaks.at(-1)?.index ?? 0;
+    const end = separator >= lineLength / 2 ? Math.min(separator + 1, lineLength) : lineLength;
+    lines.push(name.slice(0, end));
+    name = name.slice(end);
+  }
+  lines.push(name);
+  return lines;
+}
+
 const statusColors: Record<NodeStatus, string> = {
   added: "var(--color-success)",
   removed: "var(--color-danger)",

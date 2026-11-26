@@ -21,7 +21,7 @@ function comparisonPane(union: FlowLayout, side: Revision) {
   };
 }
 
-export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onReady }: DiffViewProps) {
+export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onExpandModule, onReady }: DiffViewProps) {
   const instances = useRef<Partial<Record<Revision, FlowInstance>>>({});
   const before = useMemo(() => comparisonPane(layout, "base"), [layout]);
   const after = useMemo(() => comparisonPane(layout, "head"), [layout]);
@@ -49,6 +49,7 @@ export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onReady 
           layout={before.layout}
           selectedNodeId={selectedNodeId}
           onNodeClick={onNodeClick}
+          onExpandModule={onExpandModule}
           onReady={onReady}
           onInit={(instance) => registerInstance("base", instance)}
           onMove={(_, viewport) => syncViewport("head", viewport)}
@@ -62,6 +63,7 @@ export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onReady 
           layout={after.layout}
           selectedNodeId={selectedNodeId}
           onNodeClick={onNodeClick}
+          onExpandModule={onExpandModule}
           autoFit={false}
           onInit={(instance) => registerInstance("head", instance)}
           onMove={(_, viewport) => syncViewport("base", viewport)}

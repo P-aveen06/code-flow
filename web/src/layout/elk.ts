@@ -1,7 +1,10 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { ElkEdgeSection, ElkNode } from "elkjs/lib/elk.bundled.js";
 import type { OverlayEdge, OverlayNode } from "../types";
-import { guardLabel, symbolHint } from "../views/styles";
+import { callKey, contextLabel } from "../views/collapse";
+import type { ContextChip } from "../views/collapse";
+import { guardLabel, symbolNameLines } from "../views/styles";
+import { packedRoutes } from "./packedRoutes";
 
 const ELK_OPTIONS = {
   graph: {
@@ -10,15 +13,37 @@ const ELK_OPTIONS = {
     "elk.hierarchyHandling": "INCLUDE_CHILDREN",
     "elk.edgeRouting": "ORTHOGONAL",
     "org.eclipse.elk.json.edgeCoords": "ROOT",
-    "elk.spacing.nodeNode": "32",
-    "elk.layered.spacing.nodeNodeBetweenLayers": "96",
+    "elk.aspectRatio": "2.0",
+    "elk.spacing.nodeNode": "18",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "42",
+    "elk.layered.compaction.postCompaction.strategy": "EDGE_LENGTH",
+    // ELK wrapping can fail on hierarchy-crossing calls. Wide layouts use the packed options below.
+    "elk.layered.wrapping.strategy": "OFF",
   },
-  module: { "elk.padding": "[top=40,left=20,bottom=20,right=20]" },
+  module: { "elk.padding": "[top=32,left=12,bottom=12,right=12]" },
+  packed: {
+    "elk.algorithm": "box",
+    "elk.hierarchyHandling": "SEPARATE_CHILDREN",
+    "elk.aspectRatio": "1.9",
+    "elk.spacing.nodeNode": "18",
+    "org.eclipse.elk.json.edgeCoords": "ROOT",
+  },
+  packedComparison: { "elk.aspectRatio": "1.0", "elk.box.packingMode": "GROUP_DEC" },
+  stackedModule: {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "elk.padding": "[top=28,left=10,bottom=10,right=10]",
+    "elk.spacing.nodeNode": "10",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "10",
+    "elk.layered.layering.strategy": "COFFMAN_GRAHAM",
+    "elk.layered.layering.coffmanGraham.layerBound": "1",
+  },
 };
 
 export type SymbolNode = Node<{ symbol: OverlayNode }, "symbol">;
+export type ChipNode = Node<{ chip: ContextChip; label: string }, "context">;
 export type ModuleNode = Node<{ label: string }, "module">;
-export type FlowNode = SymbolNode | ModuleNode;
+export type FlowNode = SymbolNode | ChipNode | ModuleNode;
 type CallData = Omit<OverlayEdge, "source" | "target"> & {
   sections: ElkEdgeSection[];
   labelWidth: number;
@@ -34,31 +59,54 @@ function position(node: ElkNode) {
   return { x: node.x ?? 0, y: node.y ?? 0 };
 }
 
-export async function layoutFlow(nodes: OverlayNode[], edges: OverlayEdge[]): Promise<FlowLayout> {
+export async function layoutFlow(
+  nodes: OverlayNode[], edges: OverlayEdge[], chips: ContextChip[] = [], comparison = false,
+): Promise<FlowLayout> {
   const modules = new Map<string, ElkNode & { children: ElkNode[] }>();
-  const symbols = new Map(nodes.map((node) => [node.id, node]));
+  const leaves = new Map<string, SymbolNode | ChipNode>();
+  const standalone: ElkNode[] = [];
 
-  for (const node of nodes) {
-    const id = `module::${node.module}`;
+  // Pack modules with changed symbols before modules that only provide context.
+  const ordered = [...nodes].sort((a, b) => Number(a.status === "context") - Number(b.status === "context"));
+  for (const symbol of ordered) {
+    const id = `module::${symbol.module}`;
     let group = modules.get(id);
     if (!group) {
       group = { id, children: [], layoutOptions: ELK_OPTIONS.module };
       modules.set(id, group);
     }
-    // Approximate the 14px monospace name and sans-serif hint, with 26px for padding and border.
-    const nameWidth = node.qualname.length * 9;
-    const hintWidth = symbolHint(node).length * 7.5;
-    group.children.push({
-      id: node.id,
-      width: Math.max(140, Math.ceil(Math.max(nameWidth, hintWidth)) + 26),
-      height: 48,
-    });
+    const nameLines = symbolNameLines(symbol.qualname);
+    const longestLine = Math.max(...nameLines.map((line) => line.length));
+    // Match the 16.8px monospace name, with 26px for padding and border.
+    const elk = {
+      id: symbol.id,
+      width: Math.max(140, Math.ceil(longestLine * 10.2) + 26),
+      height: 36 + (nameLines.length - 1) * 20,
+    };
+    const node: SymbolNode = {
+      ...elk, type: "symbol", data: { symbol }, position: { x: 0, y: 0 }, parentId: id, focusable: false,
+    };
+    leaves.set(elk.id, node);
+    group.children.push(elk);
   }
 
-  const flowEdges: FlowEdge[] = edges.map(({ source, target, ...data }) => {
+  for (const chip of chips) {
+    const group = modules.get(`module::${chip.module}`);
+    const label = group ? `+${chip.count} unchanged` : contextLabel(chip);
+    const elk = { id: chip.id, width: Math.max(104, Math.ceil(label.length * 7) + 18), height: 28 };
+    const node: ChipNode = {
+      ...elk, type: "context", data: { chip, label }, position: { x: 0, y: 0 },
+      parentId: group?.id, focusable: false,
+    };
+    leaves.set(elk.id, node);
+    (group?.children ?? standalone).push(elk);
+  }
+
+  const flowEdges: FlowEdge[] = edges.map((edge) => {
+    const { source, target, ...data } = edge;
     const label = guardLabel(data.guard);
     return {
-      id: `edge:${JSON.stringify([source, target])}`,
+      id: `edge:${callKey(edge)}`,
       source,
       target,
       label,
@@ -67,12 +115,12 @@ export async function layoutFlow(nodes: OverlayNode[], edges: OverlayEdge[]): Pr
     };
   });
 
-  if (!nodes.length) return { nodes: [], edges: flowEdges };
+  if (!leaves.size) return { nodes: [], edges: flowEdges };
 
   const graph: ElkNode = {
     id: "graph",
     layoutOptions: ELK_OPTIONS.graph,
-    children: [...modules.values()],
+    children: [...modules.values(), ...standalone],
     edges: flowEdges.map(({ id, source, target, label, data }) => ({
       id,
       sources: [source],
@@ -87,11 +135,41 @@ export async function layoutFlow(nodes: OverlayNode[], edges: OverlayEdge[]): Pr
   };
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
-  const { children: groups = [], edges: routedEdges = [] } = await elk.layout(graph);
+  let result = await elk.layout(structuredClone(graph));
+  const changed = new Set(nodes.filter(({ status }) => status !== "context").map(({ id }) => id));
+  const focus = (result.children ?? []).flatMap((group) => (group.children ?? [])
+    .filter((node) => changed.has(node.id))
+    .map((node) => ({ left: (group.x ?? 0) + (node.x ?? 0), width: node.width ?? 0 })));
+  const focusWidth = Math.max(...focus.map(({ left, width }) => left + width)) - Math.min(...focus.map(({ left }) => left));
+  // Stack symbols inside their modules and pack the modules into rows when the
+  // layered layout spreads changed symbols too far apart.
+  const packed = focusWidth > (comparison ? 850 : 1600);
+  if (packed) {
+    const guards = new Set(flowEdges.filter(({ label }) => label).map(({ id }) => id));
+    result = await elk.layout({
+      ...graph,
+      layoutOptions: comparison ? { ...ELK_OPTIONS.packed, ...ELK_OPTIONS.packedComparison } : ELK_OPTIONS.packed,
+      children: graph.children?.map((group) => group.children ? {
+        ...group, layoutOptions: ELK_OPTIONS.stackedModule,
+      } : group),
+      edges: graph.edges?.filter(({ id, sources: [source], targets: [target] }) => {
+        const parent = leaves.get(source)?.parentId;
+        // Keep incidental context calls from spreading apart the comparison's changed symbols.
+        const laysOut = !comparison || source === target || guards.has(id) || (changed.has(source) && changed.has(target));
+        return laysOut && parent && parent === leaves.get(target)?.parentId;
+      }),
+    });
+  }
+  const { children: groups = [], edges: routedEdges = [] } = result;
   const sectionsById = new Map(routedEdges.map(({ id, sections }) => [id, sections]));
   const flowNodes: FlowNode[] = [];
 
   for (const group of groups) {
+    const leaf = leaves.get(group.id);
+    if (leaf) {
+      flowNodes.push({ ...leaf, position: position(group) });
+      continue;
+    }
     flowNodes.push({
       id: group.id,
       type: "module",
@@ -104,24 +182,18 @@ export async function layoutFlow(nodes: OverlayNode[], edges: OverlayEdge[]): Pr
     });
 
     for (const child of group.children ?? []) {
-      flowNodes.push({
-        id: child.id,
-        type: "symbol",
-        data: { symbol: symbols.get(child.id)! },
-        parentId: group.id,
-        position: position(child),
-        width: child.width,
-        height: child.height,
-        focusable: false,
-      });
+      flowNodes.push({ ...leaves.get(child.id)!, position: position(child) });
     }
   }
 
+  const extraRoutes = packed
+    ? packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length))
+    : null;
   return {
     nodes: flowNodes,
     edges: flowEdges.map((edge) => ({
       ...edge,
-      data: { ...edge.data, sections: sectionsById.get(edge.id) ?? [] },
+      data: { ...edge.data, sections: extraRoutes?.get(edge.id) ?? sectionsById.get(edge.id) ?? [] },
     })),
   };
 }
