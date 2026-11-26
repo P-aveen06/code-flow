@@ -71,4 +71,20 @@ describe("sideOf", () => {
     expect(sideOf(layout, "base").edges).toEqual([both, baseOnly, missingOnHead]);
     expect(sideOf(layout, "head").edges).toEqual([both, headOnly, missingOnBase]);
   });
+
+  it("chooses a visible guard-label representative independently in each pane", () => {
+    const guarded = (call: FlowEdge): FlowEdge => ({
+      ...call,
+      data: {
+        ...call.data,
+        guard: { flag: "new_checkout", when: "on" },
+        sections: [{ id: call.id, startPoint: { x: 90, y: 80 }, endPoint: { x: 220, y: 80 } }],
+      },
+    });
+    const before = guarded(edge(shared.id, removed.id, true, false));
+    const after = guarded(edge(shared.id, added.id, false, true));
+    const comparison = { ...layout, edges: [before, after] };
+    expect(sideOf(comparison, "base").edges.map(({ id, label }) => [id, label])).toEqual([[before.id, "new_checkout: on"]]);
+    expect(sideOf(comparison, "head").edges.map(({ id, label }) => [id, label])).toEqual([[after.id, "new_checkout: on"]]);
+  });
 });

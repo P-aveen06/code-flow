@@ -1,4 +1,4 @@
-import { BaseEdge, BezierEdge, EdgeLabelRenderer } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
 import type { ElkPoint } from "elkjs/lib/elk.bundled.js";
 import { routePoints } from "../layout/edgeLabels";
@@ -31,10 +31,13 @@ export function RoutedEdge(props: EdgeProps<FlowEdge>) {
   const { data, label, markerEnd, style, interactionWidth } = props;
   const sections = data?.sections;
   const placement = data?.labelPlacement;
-  const center = placement?.center;
+  const fallback = sections?.length ? undefined : getSmoothStepPath(props);
+  const center = placement?.center ?? (fallback && { x: fallback[1], y: fallback[2] });
   return (
     <>
-      {sections?.length ? sections.map((section) => (
+      {fallback ? (
+        <BaseEdge path={fallback[0]} markerEnd={markerEnd} interactionWidth={interactionWidth} style={style} />
+      ) : sections?.map((section) => (
         <BaseEdge
           key={section.id}
           path={roundedPath(routePoints(section))}
@@ -42,7 +45,7 @@ export function RoutedEdge(props: EdgeProps<FlowEdge>) {
           interactionWidth={interactionWidth}
           style={style}
         />
-      )) : <BezierEdge {...props} label={undefined} />}
+      ))}
       {placement && center && (placement.anchor.x !== center.x || placement.anchor.y !== center.y) && (
         <line
           className="flow-edge-label-leader"
@@ -50,7 +53,7 @@ export function RoutedEdge(props: EdgeProps<FlowEdge>) {
           style={{ opacity: style?.opacity, stroke: style?.stroke }}
         />
       )}
-      {center && (
+      {label && center && (
         <EdgeLabelRenderer>
           <span
             className="flow-edge-label"

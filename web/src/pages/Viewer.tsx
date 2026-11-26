@@ -23,6 +23,8 @@ import { Timeline } from "../views/Timeline";
 import { VariantPreview } from "../views/VariantPreview";
 import type { ExpandedContext } from "../views/collapse";
 import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
+import { useDiagramFullscreen } from "../views/fullscreen";
+import { layoutPositionKey, useLayoutPositions } from "../views/layoutPositions";
 import {
   formatCommitDate, formatFunctionCounts, hasFlowChange, nearestFlowChange, resolveCommit,
 } from "../views/timelineHelpers";
@@ -53,7 +55,8 @@ function DiagramGuide({ onClose }: { onClose: () => void }) {
   const [more, setMore] = useState(false);
 
   return (
-    <aside className="diagram-guide" id="diagram-guide" aria-labelledby="diagram-guide-title">
+    <aside className={more ? "diagram-guide diagram-guide--expanded" : "diagram-guide"}
+      id="diagram-guide" aria-labelledby="diagram-guide-title">
       <div className="diagram-guide__heading">
         <h3 id="diagram-guide-title">What am I looking at?</h3>
         <p>Boxes show Python symbols and arrows show calls. Click a symbol to read its code.</p>
@@ -126,6 +129,7 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   const { request, diff, layout, hasCollapsedContext } = useDiff(
     id, hasNodes && flagsReady ? head : undefined, hops, context.expanded, view === "side_by_side", checkIds,
   );
+  const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view));
   const contextExpanded = context.expanded === "all" || context.expanded.size > 0;
   const selectedNode = selection && "node" in selection && selection.diff === diff ? selection.node : null;
   let source: CodeSource | undefined;
@@ -147,12 +151,13 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     : null;
   const View = view === "side_by_side" ? SideBySide : Overlay;
   const flowChanged = selected && hasFlowChange(selected.stats);
+  const fullscreen = useDiagramFullscreen(Boolean(flowChanged && layout.status === "ready" && layout.data?.nodes.length));
   const nextChange = selected && !flowChanged ? nearestFlowChange(commits, selected.sha) : null;
 
   useEffect(() => {
     if (!selectedFlag) return;
     function clearHighlight(event: KeyboardEvent) {
-      if (event.key === "Escape") setFlagSelection(undefined);
+      if (event.key === "Escape" && !event.defaultPrevented) setFlagSelection(undefined);
     }
     window.addEventListener("keydown", clearHighlight);
     return () => window.removeEventListener("keydown", clearHighlight);
@@ -229,7 +234,8 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
       </header>
       <div className={source || flagsmithMode ? "workspace workspace--with-drawer" : "workspace"}>
         <Timeline commits={commits} selectedSha={head} onSelect={selectCommit} />
-        <section className="graph-panel" aria-labelledby="flow-title">
+        <section className={fullscreen.maximized ? "graph-panel graph-panel--maximized" : "graph-panel"}
+          aria-labelledby="flow-title" ref={fullscreen.panel}>
           <div className="panel-heading">
             <h2 id="flow-title">Flow diff</h2>
             {diff && (
@@ -277,6 +283,8 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
                     key={view}
                     diff={diff}
                     layout={layout.data}
+                    layoutPositions={layoutPositions}
+                    fullscreen={fullscreen}
                     selectedNodeId={selectedNode?.id}
                     selectedFlag={selectedFlag}
                     liveStates={liveStates}

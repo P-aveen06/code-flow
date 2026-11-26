@@ -1,3 +1,4 @@
+import { placeEdgeLabels } from "../layout/edgeLabels";
 import type { FlowLayout } from "../layout/elk";
 
 export type Revision = "base" | "head";
@@ -15,10 +16,10 @@ export function sideOf(layout: FlowLayout, side: Revision): FlowLayout {
     }
   }
 
-  return {
-    nodes: layout.nodes.filter(({ id }) => visibleIds.has(id)),
-    edges: layout.edges.filter(
+  return placeEdgeLabels(
+    layout.nodes.filter(({ id }) => visibleIds.has(id)),
+    layout.edges.filter(
       ({ source, target, data }) => data[presence] && visibleIds.has(source) && visibleIds.has(target),
     ),
-  };
+  );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OverlayEdge, OverlayNode } from "../types";
-import { layoutFlow } from "./elk";
+import { ELK_OPTIONS, layoutFlow } from "./elk";
 
 function symbol(module: string, name: string): OverlayNode {
   return {
@@ -35,6 +35,24 @@ const edges: OverlayEdge[] = [
 ];
 
 describe("layoutFlow", () => {
+  it("reserves room between symbols, between disconnected modules and above the module's first row", async () => {
+    const layout = await layoutFlow(nodes, [edges[0]]);
+    const checkoutGroup = layout.nodes.find(({ id }) => id === "module::checkout")!;
+    const paymentGroup = layout.nodes.find(({ id }) => id === "module::payment")!;
+    const first = layout.nodes.find(({ id }) => id === checkout.id)!;
+    const second = layout.nodes.find(({ id }) => id === validate.id)!;
+    expect(first.position.x).toBeGreaterThanOrEqual(24);
+    expect(first.position.y).toBeGreaterThanOrEqual(48);
+    expect(second.position.x - first.position.x - first.width!).toBeGreaterThanOrEqual(
+      Number(ELK_OPTIONS.layeredSpacing["elk.layered.spacing.nodeNodeBetweenLayers"]),
+    );
+
+    const [left, right] = [checkoutGroup, paymentGroup].sort((a, b) => a.position.x - b.position.x);
+    const [top, bottom] = [checkoutGroup, paymentGroup].sort((a, b) => a.position.y - b.position.y);
+    const gap = Math.max(right.position.x - left.position.x - left.width!, bottom.position.y - top.position.y - top.height!);
+    expect(gap).toBeGreaterThanOrEqual(Number(ELK_OPTIONS.layeredSpacing["elk.spacing.componentComponent"]));
+  });
+
   it("groups every symbol inside its module and lays out calls left to right", async () => {
     const layout = await layoutFlow(nodes, edges);
     const groups = layout.nodes.filter((node) => node.type === "module");

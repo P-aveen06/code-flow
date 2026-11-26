@@ -17,6 +17,8 @@ finding to highlight the calls guarded by the flag and the functions that
 check it. Select it again or press Escape to clear the highlight. Select a
 `file:line` link to open the corresponding source.
 
+Press `F` to toggle fullscreen for the diagram or `Esc` to exit.
+
 Run `npm run build && npm test` to check the web client. The demo routes are
 `/repo/shop-demo?commit=f376f9c&reviewer=demo-1` and
 `/repo/Flagsmith__flagsmith?commit=a9b66f5&reviewer=demo-1`.

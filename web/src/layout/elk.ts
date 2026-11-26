@@ -3,12 +3,22 @@ import type { ElkEdgeSection, ElkNode } from "elkjs/lib/elk.bundled.js";
 import type { OverlayEdge, OverlayNode } from "../types";
 import { callKey, contextLabel } from "../views/collapse";
 import type { ContextChip } from "../views/collapse";
-import { guardLabel, symbolNameLines } from "../views/styles";
-import { edgeLabelBounds, placeEdgeLabels } from "./edgeLabels";
+import { symbolSize } from "../views/styles";
+import { placeEdgeLabels } from "./edgeLabels";
 import { packedRoutes } from "./packedRoutes";
 import type { LabelPlacement } from "./edgeLabels";
 
-const ELK_OPTIONS = {
+export const ELK_OPTIONS = {
+  layeredSpacing: {
+    "elk.spacing.nodeNode": "36",
+    "elk.spacing.componentComponent": "64",
+    "elk.spacing.edgeNode": "28",
+    "elk.spacing.edgeEdge": "18",
+    "elk.spacing.portPort": "12",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "72",
+    "elk.layered.spacing.edgeNodeBetweenLayers": "32",
+    "elk.layered.spacing.edgeEdgeBetweenLayers": "18",
+  },
   graph: {
     "elk.algorithm": "layered",
     "elk.direction": "RIGHT",
@@ -16,27 +26,26 @@ const ELK_OPTIONS = {
     "elk.edgeRouting": "ORTHOGONAL",
     "org.eclipse.elk.json.edgeCoords": "ROOT",
     "elk.aspectRatio": "2.0",
-    "elk.spacing.nodeNode": "18",
-    "elk.layered.spacing.nodeNodeBetweenLayers": "42",
+    "elk.spacing.nodeNode": "64",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "88",
     "elk.layered.compaction.postCompaction.strategy": "EDGE_LENGTH",
     // ELK wrapping can fail on hierarchy-crossing calls. Wide layouts use the packed options below.
     "elk.layered.wrapping.strategy": "OFF",
   },
-  module: { "elk.padding": "[top=32,left=12,bottom=12,right=12]" },
+  module: { "elk.padding": "[top=48,left=24,bottom=24,right=24]" },
   packed: {
     "elk.algorithm": "box",
     "elk.hierarchyHandling": "SEPARATE_CHILDREN",
     "elk.aspectRatio": "1.9",
-    "elk.spacing.nodeNode": "18",
+    "elk.spacing.nodeNode": "52",
     "org.eclipse.elk.json.edgeCoords": "ROOT",
   },
   packedComparison: { "elk.aspectRatio": "1.0", "elk.box.packingMode": "GROUP_DEC" },
   stackedModule: {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
-    "elk.padding": "[top=28,left=10,bottom=10,right=10]",
-    "elk.spacing.nodeNode": "10",
-    "elk.layered.spacing.nodeNodeBetweenLayers": "10",
+    "elk.spacing.nodeNode": "24",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "32",
     "elk.layered.layering.strategy": "COFFMAN_GRAHAM",
     "elk.layered.layering.coffmanGraham.layerBound": "1",
   },
@@ -75,17 +84,10 @@ export async function layoutFlow(
     const id = `module::${symbol.module}`;
     let group = modules.get(id);
     if (!group) {
-      group = { id, children: [], layoutOptions: ELK_OPTIONS.module };
+      group = { id, children: [], layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.module } };
       modules.set(id, group);
     }
-    const nameLines = symbolNameLines(symbol.qualname);
-    const longestLine = Math.max(...nameLines.map((line) => line.length));
-    // Match the 16.8px monospace name, with 26px for padding and border.
-    const elk = {
-      id: symbol.id,
-      width: Math.max(140, Math.ceil(longestLine * 10.2) + 26),
-      height: 36 + (nameLines.length - 1) * 20,
-    };
+    const elk = { id: symbol.id, ...symbolSize(symbol.qualname) };
     const node: SymbolNode = {
       ...elk, type: "symbol", data: { symbol }, position: { x: 0, y: 0 }, parentId: id, focusable: false,
     };
@@ -99,7 +101,7 @@ export async function layoutFlow(
     const elk = { id: chip.id, width: Math.max(104, Math.ceil(label.length * 7) + 18), height: 28 };
     const node: ChipNode = {
       ...elk, type: "context", data: { chip, label }, position: { x: 0, y: 0 },
-      parentId: group?.id, focusable: false,
+      parentId: group?.id, focusable: false, draggable: false,
     };
     leaves.set(elk.id, node);
     (group?.children ?? standalone).push(elk);
@@ -107,12 +109,10 @@ export async function layoutFlow(
 
   const flowEdges: FlowEdge[] = edges.map((edge) => {
     const { source, target, ...data } = edge;
-    const label = guardLabel(data.guard);
     return {
       id: `edge:${callKey(edge)}`,
       source,
       target,
-      label,
       data: { ...data, sections: [] },
     };
   });
@@ -121,7 +121,7 @@ export async function layoutFlow(
 
   const graph: ElkNode = {
     id: "graph",
-    layoutOptions: ELK_OPTIONS.graph,
+    layoutOptions: { ...ELK_OPTIONS.layeredSpacing, ...ELK_OPTIONS.graph },
     children: [...modules.values(), ...standalone],
     edges: flowEdges.map(({ id, source, target }) => ({
       id,
@@ -137,7 +137,7 @@ export async function layoutFlow(
     .filter((node) => changed.has(node.id))
     .map((node) => ({ left: (group.x ?? 0) + (node.x ?? 0), width: node.width ?? 0 })));
   const focusWidth = Math.max(...focus.map(({ left, width }) => left + width)) - Math.min(...focus.map(({ left }) => left));
-  const guardedCalls = new Set(flowEdges.filter(({ label }) => label).map(({ id }) => id));
+  const guardedCalls = new Set(flowEdges.filter(({ data }) => data.guard).map(({ id }) => id));
   // Guard labels sit outside module boxes. Pack the full diagram when it is
   // too wide to show those labels without shrinking the comparison panes.
   const packed = focusWidth > (comparison ? 850 : 1600)
@@ -147,7 +147,7 @@ export async function layoutFlow(
       ...graph,
       layoutOptions: comparison ? { ...ELK_OPTIONS.packed, ...ELK_OPTIONS.packedComparison } : ELK_OPTIONS.packed,
       children: graph.children?.map((group) => group.children ? {
-        ...group, layoutOptions: ELK_OPTIONS.stackedModule,
+        ...group, layoutOptions: { ...group.layoutOptions, ...ELK_OPTIONS.stackedModule },
       } : group),
       edges: graph.edges?.filter(({ id, sources: [source], targets: [target] }) => {
         const parent = leaves.get(source)?.parentId;
@@ -183,17 +183,9 @@ export async function layoutFlow(
     }
   }
 
-  const extraRoutes = packed
-    ? packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length))
-    : null;
+  const extraRoutes = packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length));
   for (const { id, data } of flowEdges) {
-    data.sections = extraRoutes?.get(id) ?? sectionsById.get(id) ?? [];
+    data.sections = extraRoutes.get(id) ?? sectionsById.get(id) ?? [];
   }
-  const placements = placeEdgeLabels(flowNodes, flowEdges);
-  for (const { id, data } of flowEdges) data.labelPlacement = placements.get(id);
-  return {
-    nodes: flowNodes,
-    edges: flowEdges,
-    labelBounds: edgeLabelBounds(placements),
-  };
+  return placeEdgeLabels(flowNodes, flowEdges);
 }

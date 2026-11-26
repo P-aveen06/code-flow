@@ -1,10 +1,14 @@
 import type { FlowLayout } from "../layout/elk";
 import type { DiffViewModel, FlagFinding, OverlayNode } from "../types";
 import { FlowCanvas } from "./FlowCanvas";
+import type { DiagramFullscreen } from "./fullscreen";
+import type { LayoutPositionControls } from "./layoutPositions";
 
 export interface DiffViewProps {
   diff: DiffViewModel;
   layout: FlowLayout;
+  layoutPositions: LayoutPositionControls;
+  fullscreen: DiagramFullscreen;
   selectedNodeId?: string;
   selectedFlag?: FlagFinding;
   liveStates: ReadonlyMap<string, boolean>;
@@ -13,16 +17,6 @@ export interface DiffViewProps {
   onReady: () => void;
 }
 
-export function Overlay({ layout, selectedNodeId, selectedFlag, liveStates, onNodeClick, onExpandModule, onReady }: DiffViewProps) {
-  return (
-    <FlowCanvas
-      layout={layout}
-      selectedNodeId={selectedNodeId}
-      selectedFlag={selectedFlag}
-      liveStates={liveStates}
-      onNodeClick={onNodeClick}
-      onExpandModule={onExpandModule}
-      onReady={onReady}
-    />
-  );
+export function Overlay({ diff: _diff, ...canvas }: DiffViewProps) {
+  return <FlowCanvas {...canvas} />;
 }

@@ -14,7 +14,7 @@ export default function App() {
   }, [redirect, hash]);
 
   return (
-    <div className={route.page === "viewer" ? "app app--viewer" : "app"}>
+    <div className="app">
       <header className="topbar">
         <AppLink href="/" className="topbar__brand">
           <span className="topbar__brand-mark" aria-hidden="true">↳</span>

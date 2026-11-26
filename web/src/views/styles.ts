@@ -16,15 +16,25 @@ export function symbolHint({ kind, status }: OverlayNode): string {
 export function symbolNameLines(name: string): string[] {
   const lineLength = 28;
   const lines: string[] = [];
-  while (name.length > lineLength) {
+  if (name.length > lineLength) {
     const breaks = [...name.slice(0, lineLength + 1).matchAll(/[_.]|[a-z][A-Z]/g)];
     const separator = breaks.at(-1)?.index ?? 0;
     const end = separator >= lineLength / 2 ? Math.min(separator + 1, lineLength) : lineLength;
     lines.push(name.slice(0, end));
     name = name.slice(end);
   }
-  lines.push(name);
+  lines.push(name.length > lineLength ? `${name.slice(0, lineLength - 1)}…` : name);
   return lines;
+}
+
+export function symbolSize(name: string) {
+  const lines = symbolNameLines(name);
+  const longestLine = Math.max(...lines.map((line) => line.length));
+  // Match the 16.8px monospace name, with 26px for padding and border.
+  return {
+    width: Math.max(140, Math.ceil(longestLine * 10.2) + 26),
+    height: 36 + (lines.length - 1) * 20,
+  };
 }
 
 const statusColors: Record<NodeStatus, string> = {
