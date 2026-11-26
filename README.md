@@ -98,20 +98,53 @@ Flagsmith withheld lift and win probability at 100 reviewers. Its minimums
 were 50 reviewers and five conversions per variant.
 [Experiment results and interpretation](docs/experiment-results.md)
 
-**These reviewers were simulated.** The model uses sizes from real Flagsmith
-diffs and assumes different understanding rates and decision times by variant.
-The simulator sends role, experience, codebase familiarity, and reading style
-as identity traits. Those assumptions encode the hypothesis. The run
-demonstrates the experiment pipeline and Flagsmith's analysis. Testing the
-hypothesis with real reviewers requires real review data.
-[Simulator assumptions](simulator/behaviour.yaml)
-
 The experiment is still running. Use this command to roll out
 `overlay_summary` if it wins.
 
 ```sh
 python3 scripts/flagsmith_experiment.py rollout --variant overlay_summary
 ```
+
+### Reuse the reviewer panel
+
+The `default` panel contains the same 1,300 simulated reviewers already registered
+in Flagsmith, with fixed identities and traits for role, experience, codebase
+familiarity, and reading style. Run `make panel-profiles` to see the breakdown,
+or open **code-flow → Production → Identities** in Flagsmith and select an
+identity to see its traits. [Sample reviewer profiles](docs/simulated-reviewers-sample.csv) ·
+[Full panel](simulator/panels/default.csv)
+
+The personas and their effects are assumptions, and simulated results cannot
+tell you which feature real users prefer. Use the simulator to rehearse the
+setup, check event wiring, and estimate how many reviewers a real test needs.
+[Shared persona assumptions](simulator/personas.yaml) · [Flow view assumptions](simulator/experiments/flow_view.yaml)
+
+Run `make simulate-dry-run` to rehearse `flow_view` offline. For another feature,
+copy `_template.yaml` to a new file in `simulator/experiments/`, such as
+`example_feature.yaml`. Set the feature flag,
+its exact variant values and control, the success and failure event names, and
+the assumptions for each variant and the variant-neutral `null` model. Set up
+the matching experiment and metrics in Flagsmith before running live.
+[Experiment template](simulator/experiments/_template.yaml)
+
+```sh
+cd simulator
+uv run python simulate.py --experiment example_feature --panel default --dry-run
+uv run python simulate.py --experiment example_feature --panel default
+```
+
+Use `--limit N` and `--offset K` to run a slice of the panel in CSV order.
+Use `--model null` to rehearse with the same behaviour assumptions for every
+variant. `--seed` controls decision sampling, and `--rate` sets the live pace.
+Use `--panel generated --n N --prefix <fresh-prefix>` to create new identities.
+
+Flagsmith already counted the `default` panel on `flow_view`. Sending events
+again for the same reviewers on the same flag double-counts them, so a live
+repeat requires `--allow-repeat`. A new experiment on a different flag can
+reuse the panel because Flagsmith assigns each identity independently per flag.
+The simulator records live selections in `data/simulator-runs.sqlite3` before
+sending events, so an interrupted run can trigger the warning on retry. Check
+Flagsmith first if another checkout has sent traffic.
 
 ### Flagsmith mode
 
@@ -221,17 +254,18 @@ directly. [Flagsmith commit a9b66f5](http://localhost:5173/repo/Flagsmith__flags
 
 ### 5. Send simulated traffic and read results
 
-Keep both servers running. In a second terminal at the repo root, send 1,000
-simulated reviewers.
+From the repo root, rehearse the experiment offline with the default panel
+and the diffs analyzed in step 2.
 
 ```sh
-make simulate
+make simulate-dry-run
 ```
 
-For a repeat run, use a new prefix so each reviewer has a fresh identity.
+With Flagsmith running, use a fresh prefix to send new identities to the
+existing `flow_view` experiment.
 
 ```sh
-(cd simulator && uv run python simulate.py --n 1000 --prefix "sim-judge-$(date +%s)")
+(cd simulator && uv run python simulate.py --experiment flow_view --panel generated --n 1000 --prefix "sim-judge-$(date +%s)")
 ```
 
 Ask Flagsmith to refresh results and read the result table.

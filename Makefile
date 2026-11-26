@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run simulate-dry-run simulate
+.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run simulate-dry-run simulate panel-profiles
 
 help:
 	@echo "install  Install Python and web dependencies"
@@ -11,8 +11,9 @@ help:
 	@echo "analyze-flagsmith       Analyze recent commits in the Flagsmith API"
 	@echo "flagsmith-setup          Set up demo flags in the existing code-flow project"
 	@echo "flagsmith-setup-dry-run  Preview Flagsmith setup using read-only API requests"
-	@echo "simulate-dry-run        Simulate 1,000 reviewers offline"
-	@echo "simulate                Send 1,000 simulated reviewers to Flagsmith"
+	@echo "simulate-dry-run        Run flow_view offline with the default reviewer panel"
+	@echo "simulate                Request a live flow_view run with the repeat guard enabled"
+	@echo "panel-profiles          Show the default reviewer panel's traits offline"
 
 analyze-flagsmith:
 	bash examples/analyze_flagsmith.sh
@@ -24,10 +25,13 @@ flagsmith-setup-dry-run:
 	python3 scripts/flagsmith_setup.py --dry-run
 
 simulate-dry-run:
-	cd simulator && uv run python simulate.py --dry-run --n 1000
+	cd simulator && uv run python simulate.py --experiment flow_view --panel default --dry-run
 
 simulate:
-	cd simulator && uv run python simulate.py
+	cd simulator && uv run python simulate.py --experiment flow_view --panel default
+
+panel-profiles:
+	cd simulator && uv run python simulate.py --panel default --profiles
 
 install:
 	cd analyzer && uv sync

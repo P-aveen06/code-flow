@@ -1,6 +1,7 @@
 """Configure the Flagsmith SDK or record equivalent events in memory."""
 
 import hashlib
+from collections.abc import Mapping
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -9,7 +10,6 @@ from flagsmith.analytics import EventProcessorConfig
 from flagsmith.models import DefaultFlag, ExperimentMetadata, Flag
 from flagsmith.types import TraitMapping
 
-FLOW_FLAG = "flow_view"
 DEFAULT_API_URL = "http://localhost:8000/api/v1/"
 
 
@@ -28,7 +28,8 @@ class ExperimentClient(Protocol):
 class DryRunClient:
     """Assign each reviewer to a fixed bucket and keep a log of all events."""
 
-    def __init__(self) -> None:
+    def __init__(self, allocations: Mapping[str, int]) -> None:
+        self.allocations = allocations
         self.events: list[tuple[str, str, str | int]] = []
         self.identity_traits: dict[str, TraitMapping] = {}
         self.closed = False
@@ -36,14 +37,14 @@ class DryRunClient:
     def get_experiment_flag(
         self, feature_name: str, *, identifier: str, traits: TraitMapping
     ) -> Flag | DefaultFlag:
-        digest = hashlib.sha256(identifier.encode("utf-8")).digest()
+        digest = hashlib.sha256(identifier.encode()).digest()
         bucket = int.from_bytes(digest, "big") % 100
-        if bucket < 34:
-            variant = "side_by_side"
-        elif bucket < 67:
-            variant = "overlay"
+        for variant, allocation in self.allocations.items():
+            if bucket < allocation:
+                break
+            bucket -= allocation
         else:
-            variant = "overlay_summary"
+            raise ValueError("Dry-run variant allocations must add up to 100.")
 
         self.identity_traits[identifier] = dict(traits)
         self.events.append(("$flag_exposure", identifier, variant))
@@ -53,7 +54,7 @@ class DryRunClient:
             feature_id=1,
             feature_name=feature_name,
             variant=variant,
-            experiment=ExperimentMetadata(id=1, name=FLOW_FLAG, in_experiment=True),
+            experiment=ExperimentMetadata(id=1, name=feature_name, in_experiment=True),
         )
 
     def track_event(self, event: str, *, identifier: str, value: int, traits: TraitMapping) -> None:
