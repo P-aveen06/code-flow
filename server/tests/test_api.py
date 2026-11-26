@@ -57,6 +57,7 @@ def test_ready_status_for_local_repo(client: TestClient) -> None:
         "total": 8,
         "warning": None,
         "error": None,
+        "new_commits": None,
         "seconds": 0,
     }
     assert client.get("/api/repos/missing/status").status_code == 404

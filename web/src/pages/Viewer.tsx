@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCommits, fetchRepos, fetchSnapshot } from "../api";
+import { fetchCommits, fetchRepos, fetchSnapshot, refreshRepo } from "../api";
 import { AppLink } from "../AppLink";
 import { recordReviewEvent } from "../events";
 import { directionExposureKey, readFlowDirection, useCodeFlowFlags, useDirectionExposure } from "../flags";
 import type { FlowLayout } from "../layout/elk";
+import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
 import type { FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
 import { useDiff, useDiffLayout } from "../useDiff";
@@ -29,7 +30,7 @@ import { layoutPositionKey, useLayoutPositions } from "../views/layoutPositions"
 import {
   formatCommitDate, formatFunctionCounts, hasFlowChange, nearestFlowChange, resolveCommit,
 } from "../views/timelineHelpers";
-import { displaySubdir } from "./importHelpers";
+import { displaySubdir, importProgress } from "./importHelpers";
 
 const guidePreference = "code-flow:diagram-guide";
 const sourcePreference = "code-flow:source-code";
@@ -59,6 +60,16 @@ async function hasNonemptySnapshot(id: string, commits: TimelineCommit[], signal
   if (!first) return false;
   const snapshot = await fetchSnapshot(id, first.sha, signal);
   return snapshot.nodes.length > 0;
+}
+
+async function loadReview(id: string, signal: AbortSignal) {
+  const [history, repos] = await Promise.all([fetchCommits(id, signal), fetchRepos(signal)]);
+  const repo = repos.find((entry) => entry.id === id);
+  const hasNodes = await hasNonemptySnapshot(id, history.commits, signal);
+  return {
+    commits: history.commits, name: repo?.name ?? history.repo, subdir: repo?.subdir ?? null,
+    url: repo?.url ?? null, hasNodes,
+  };
 }
 
 function DiagramGuide({ onClose }: { onClose: () => void }) {
@@ -101,22 +112,35 @@ function NoFlowChange({ next, onReady }: {
   );
 }
 
-interface RepoReviewProps {
-  id: string;
-  name: string;
-  subdir: string | null;
-  hasNodes: boolean;
-  commits: TimelineCommit[];
-  search: string;
+type ReviewData = Awaited<ReturnType<typeof loadReview>>;
+type RefreshState =
+  | { status: "running"; text: string }
+  | { status: "ready" | "error"; text: string; head: string | undefined };
+const checkingCommits = "Checking for new commits…";
+
+function pinCurrentCommit(commits: TimelineCommit[]) {
+  const location = new URL(window.location.href);
+  if (location.searchParams.has("commit")) return location.searchParams.get("commit");
+  const current = resolveCommit(commits, null);
+  if (!current) return null;
+  location.searchParams.set("commit", current.sha);
+  navigate(location.href, { replace: true });
+  return current.sha;
 }
 
-function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
+function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; search: string }) {
+  const [review, setReview] = useState(initial);
+  const { name, subdir, url, hasNodes, commits } = review;
   const {
     flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
     ready: flagsReady, assignedView, reviewEventClient, directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
+  const [refresh, setRefresh] = useState<RefreshState | null>(null);
+  const refreshRequest = useRef<AbortController | null>(null);
+  if (refresh && refresh.status !== "running" && refresh.head !== head) setRefresh(null);
+  useEffect(() => () => refreshRequest.current?.abort(), []);
   const findings = useRepoFlags(id, flagsmithMode ? head : undefined);
   const flags = findings.status === "ready" ? findings.data : undefined;
   const liveStates = useMemo(() => liveFlagStates(flags), [flags]);
@@ -201,6 +225,44 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     }
   }, [commitHref, head]);
 
+  async function checkForNewCommits() {
+    if (refreshRequest.current) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    refreshRequest.current = controller;
+    setRefresh({ status: "running", text: checkingCommits });
+    try {
+      const job = await refreshRepo(id, signal);
+      const status = await pollRepoStatus(job.id, signal, (update) => {
+        const progress = importProgress(job.status, update);
+        if (update.status === "analyzing" && progress.progress) {
+          setRefresh({ status: "running", text: progress.text });
+        }
+      });
+      if (status.status === "error") throw new Error(importProgress(job.status, status).text);
+
+      pinCurrentCommit(commits);
+      const updated = await loadReview(id, signal);
+      if (signal.aborted) return;
+      // The reviewer can navigate while the new history loads.
+      const next = resolveCommit(updated.commits, pinCurrentCommit(commits));
+      // A refresh can join a regular import, which has no refresh count.
+      const oldShas = new Set(commits.map(({ sha }) => sha));
+      const count = status.new_commits ?? updated.commits.filter(({ sha }) => !oldShas.has(sha)).length;
+      const text = count === 0 ? "Up to date" : `${count} new commit${count === 1 ? "" : "s"}`;
+      setReview(updated);
+      setRefresh({ status: "ready", head: next?.sha, text });
+    } catch (error) {
+      if (!signal.aborted) {
+        const current = resolveCommit(commits, new URLSearchParams(window.location.search).get("commit"));
+        const detail = error instanceof Error ? error.message : "Something went wrong.";
+        setRefresh({ status: "error", head: current?.sha, text: `Couldn't check for new commits: ${detail}` });
+      }
+    } finally {
+      refreshRequest.current = null;
+    }
+  }
+
   function setGuide(open: boolean) {
     setGuideOpen(open);
     savePanelPreference(guidePreference, open);
@@ -244,6 +306,15 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           )}
         </div>
         <div className="viewer-header__controls">
+          {url?.startsWith("https://github.com/") && (
+            <div className="commit-refresh">
+              <button type="button" className="btn btn--sm" disabled={refresh?.status === "running"}
+                onClick={checkForNewCommits}>Check for new commits</button>
+              {refresh && (
+                <span role={refresh.status === "error" ? "alert" : "status"}>{refresh.text}</span>
+              )}
+            </div>
+          )}
           {variantPreview && (
             <VariantPreview view={view} viewOverride={viewOverride} assignedView={assignedView}
               ready={flagsReady} onChange={replaceViewOverride} />
@@ -386,15 +457,10 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
 }
 
 export function Viewer({ id, search }: { id: string; search: string }) {
-  const loadReview = useCallback(async (signal: AbortSignal) => {
-    const [history, repos] = await Promise.all([fetchCommits(id, signal), fetchRepos(signal)]);
-    const repo = repos.find((entry) => entry.id === id);
-    const hasNodes = repo?.warning ? false : await hasNonemptySnapshot(id, history.commits, signal);
-    return { commits: history.commits, name: repo?.name ?? history.repo, subdir: repo?.subdir ?? null, hasNodes };
-  }, [id]);
-  const review = useRequest(loadReview);
+  const request = useCallback((signal: AbortSignal) => loadReview(id, signal), [id]);
+  const review = useRequest(request);
 
-  if (review.status === "ready") return <RepoReview id={id} search={search} {...review.data} />;
+  if (review.status === "ready") return <RepoReview id={id} search={search} initial={review.data} />;
   return (
     <main className="app-message">
       {review.status === "loading" ? <p role="status">Loading commit history…</p> : <p role="alert">{review.message}</p>}

@@ -21,7 +21,7 @@ async function requestJson<T>(path: string, signal?: AbortSignal, options?: Requ
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    if (response.status === 400 && options?.method === "POST" && typeof body?.detail === "string") {
+    if ([400, 409].includes(response.status) && options?.method === "POST" && typeof body?.detail === "string") {
       throw new Error(body.detail);
     }
     const detail = typeof body?.detail === "string" ? `: ${body.detail}` : "";
@@ -58,7 +58,11 @@ export function importRepo(body: ImportRequest, signal?: AbortSignal) {
 }
 
 export function fetchRepoStatus(id: string, signal?: AbortSignal) {
-  return requestJson<ImportStatus>(`${repoPath(id)}/status`, signal);
+  return requestJson<ImportStatus>(`${repoPath(id)}/status`, signal, { cache: "no-store" });
+}
+
+export function refreshRepo(id: string, signal?: AbortSignal) {
+  return requestJson<ImportResponse>(`${repoPath(id)}/refresh`, signal, { method: "POST" });
 }
 
 export function fetchCommits(repo: string, signal?: AbortSignal) {

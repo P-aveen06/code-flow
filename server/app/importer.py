@@ -23,6 +23,7 @@ from app.store import BadRequest, Store, python_warning
 GITHUB_URL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?")
 ACTIVE_STATUSES = ("queued", "cloning", "analyzing")
 UNAVAILABLE = "Repository not found or not public"
+MAX_COMMITS = 200
 
 
 @dataclass(frozen=True)
@@ -62,8 +63,8 @@ def validate_import(payload: object) -> ImportSource:
     ):
         raise BadRequest("Subfolder must be a relative path without '..'")
     max_commits = payload.get("max_commits", 30)
-    if type(max_commits) is not int or not 1 <= max_commits <= 200:
-        raise BadRequest("max_commits must be an integer from 1 to 200")
+    if type(max_commits) is not int or not 1 <= max_commits <= MAX_COMMITS:
+        raise BadRequest(f"max_commits must be an integer from 1 to {MAX_COMMITS}")
 
     display_name = f"{owner}/{name}"
     return ImportSource(
@@ -88,6 +89,7 @@ class ImportJob:
     total: int = 0
     warning: str | None = None
     error: str | None = None
+    new_commits: int | None = None
     finished: float | None = None
 
     def status_response(self) -> dict:
@@ -101,6 +103,7 @@ class ImportJob:
             "total": self.total,
             "warning": self.warning,
             "error": self.error,
+            "new_commits": self.new_commits,
             "seconds": round(end - self.started, 1),
         }
 
@@ -120,6 +123,10 @@ class ImportJob:
 
 class ImportFailure(RuntimeError):
     """An import error safe to show in the API."""
+
+
+class RefreshUnavailable(ValueError):
+    """The published repository was not imported from GitHub."""
 
 
 def _git(*args: str, error: str) -> str:
@@ -142,7 +149,41 @@ def _git(*args: str, error: str) -> str:
     return result.stdout.strip()
 
 
-def _prepare_clone(clone: Path, url: str, source: ImportSource) -> str:
+def _refresh_limit(
+    clone: Path, branch: str, refspec: str, source: ImportSource, previous_head: str
+) -> int:
+    if source.max_commits == MAX_COMMITS:
+        return MAX_COMMITS
+    git = ("-C", str(clone))
+    history = _git(*git, "rev-list", "--first-parent", branch, error=UNAVAILABLE).splitlines()
+    if previous_head not in history:
+        if _git(*git, "rev-parse", "--is-shallow-repository", error=UNAVAILABLE) == "false":
+            return source.max_commits
+        # A shallow boundary can hide the old head even when the branch still contains it.
+        _git(*git, "fetch", "--unshallow", "origin", refspec, error=UNAVAILABLE)
+        history = _git(*git, "rev-list", "--first-parent", branch, error=UNAVAILABLE).splitlines()
+        if previous_head not in history:
+            return source.max_commits
+
+    if not source.subdir:
+        return min(MAX_COMMITS, source.max_commits + history.index(previous_head))
+    count = _git(
+        *git,
+        "--literal-pathspecs",
+        "rev-list",
+        "--first-parent",
+        "--count",
+        f"{previous_head}..{branch}",
+        "--",
+        source.subdir,
+        error=UNAVAILABLE,
+    )
+    return min(MAX_COMMITS, source.max_commits + int(count))
+
+
+def _prepare_clone(
+    clone: Path, url: str, source: ImportSource, previous_head: str | None
+) -> tuple[str, int]:
     depth = max(4 * source.max_commits, 100)
     git = ("-C", str(clone))
     if clone.exists():
@@ -155,7 +196,9 @@ def _prepare_clone(clone: Path, url: str, source: ImportSource) -> str:
         if _git(*git, "remote", "get-url", "origin", error=UNAVAILABLE) != url:
             _git(*git, "remote", "set-url", "origin", url, error=UNAVAILABLE)
         refspec = f"+{head}:{branch}"
-        _git(*git, "fetch", "--depth", str(depth), "origin", refspec, error=UNAVAILABLE)
+        # Keep the existing shallow boundary when fetching new commits for a refresh.
+        depth_args = () if previous_head else ("--depth", str(depth))
+        _git(*git, "fetch", *depth_args, "origin", refspec, error=UNAVAILABLE)
     else:
         with TemporaryDirectory(dir=clone.parent) as tmp:
             staged = Path(tmp) / clone.name
@@ -187,14 +230,19 @@ def _prepare_clone(clone: Path, url: str, source: ImportSource) -> str:
         if kind != "tree":
             raise ImportFailure(missing)
 
-    needed = source.max_commits + 1
+    limit = (
+        _refresh_limit(clone, branch, refspec, source, previous_head)
+        if previous_head
+        else source.max_commits
+    )
+    needed = limit + 1
     for _ in range(5):
         if len(list_commits(clone, branch, needed, paths=paths)) == needed:
             break
         if _git(*git, "rev-parse", "--is-shallow-repository", error=UNAVAILABLE) == "false":
             break
         _git(*git, "fetch", f"--deepen={depth}", "origin", refspec, error=UNAVAILABLE)
-    return branch
+    return branch, limit
 
 
 class RepoImporter:
@@ -227,17 +275,34 @@ class RepoImporter:
             return self._jobs.get(repo_id)
 
     def start(self, source: ImportSource) -> dict[str, str]:
-        with self._lock:
-            job = self._jobs.get(source.id)
+        return self._start(source.id, source)
+
+    def refresh(self, repo_id: str) -> dict[str, str]:
+        return self._start(repo_id, None)
+
+    def _start(self, repo_id: str, source: ImportSource | None) -> dict[str, str]:
+        refresh = source is None
+        with self.store.lock, self._lock:
+            job = self._jobs.get(repo_id)
             if job is not None and job.status in ACTIVE_STATUSES:
-                return {"id": source.id, "status": job.status}
-            self._jobs[source.id] = ImportJob(source, monotonic())
+                return {"id": repo_id, "status": job.status}
+            if source is None:
+                metadata = self.store.repo_source(repo_id)
+                url = metadata.get("url")
+                if not isinstance(url, str) or GITHUB_URL.fullmatch(url) is None:
+                    raise RefreshUnavailable(
+                        "Only repositories imported from GitHub can check for new commits"
+                    )
+                source = validate_import(metadata)
+                if source.id != repo_id:
+                    raise BadRequest("The stored GitHub URL does not match the repository ID")
+            self._jobs[repo_id] = ImportJob(source, monotonic())
 
         try:
-            self.executor.submit(self._run, source)
+            self.executor.submit(self._run, source, refresh)
         except RuntimeError:
-            self._fail(source.id, "Could not queue repository import")
-        return {"id": source.id, "status": "queued"}
+            self._fail(repo_id, "Could not queue repository import")
+        return {"id": repo_id, "status": "queued"}
 
     def _update(self, repo_id: str, **changes: object) -> None:
         with self._lock:
@@ -246,7 +311,7 @@ class RepoImporter:
     def _fail(self, repo_id: str, message: str) -> None:
         self._update(repo_id, status="error", message=message, error=message, finished=monotonic())
 
-    def _run(self, source: ImportSource) -> None:
+    def _run(self, source: ImportSource, refresh: bool) -> None:
         try:
             self._update(source.id, status="cloning", message="Cloning repository")
             clones = self.store.data_dir / "repos"
@@ -255,7 +320,15 @@ class RepoImporter:
             if any(path.is_symlink() for path in (clones, clone, output)):
                 raise ImportFailure("Import paths must be directories inside the data directory")
             clones.mkdir(parents=True, exist_ok=True)
-            branch = _prepare_clone(clone, self.git_url_builder(source.url), source)
+            try:
+                index = load_index(output)
+            except FileNotFoundError:
+                index = {}
+            previous_commits = [entry["sha"] for entry in index["commits"]] if refresh else []
+            previous_head = previous_commits[-1] if previous_commits else None
+            branch, limit = _prepare_clone(
+                clone, self.git_url_builder(source.url), source, previous_head
+            )
             self._update(
                 source.id,
                 status="analyzing",
@@ -273,12 +346,12 @@ class RepoImporter:
 
             with TemporaryDirectory(dir=clones) as tmp:
                 staged = Path(tmp) / source.id
-                self._reuse_snapshots(output, staged, source.subdir)
+                self._reuse_snapshots(output, staged, source.subdir, index)
                 results = analyze_repo(
                     clone,
                     staged,
                     branch=branch,
-                    max_commits=source.max_commits,
+                    max_commits=limit,
                     source_root=source.subdir,
                     touching=source.subdir or None,
                     on_progress=progress,
@@ -288,18 +361,28 @@ class RepoImporter:
                     "url": source.url,
                     "name": source.name,
                     "subdir": source.subdir,
-                    "max_commits": source.max_commits,
+                    "max_commits": limit,
                     "imported_at": datetime.now(UTC).isoformat(),
                 }
                 (staged / "source.json").write_text(
                     json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
                 )
                 self.store.publish_import(source.id, staged)
+            new_commits = (
+                len({result.commit.sha for result in results}.difference(previous_commits))
+                if refresh
+                else None
+            )
             warning = (
                 python_warning(source.subdir) if not results or not results[-1].node_count else None
             )
             self._update(
-                source.id, status="ready", message="Ready", warning=warning, finished=monotonic()
+                source.id,
+                status="ready",
+                message="Ready",
+                warning=warning,
+                new_commits=new_commits,
+                finished=monotonic(),
             )
         except ImportFailure as exc:
             self._fail(source.id, str(exc))
@@ -308,12 +391,8 @@ class RepoImporter:
             self._fail(source.id, "Could not analyze repository")
 
     @staticmethod
-    def _reuse_snapshots(output: Path, staged: Path, source_root: str) -> None:
-        try:
-            index = load_index(output)
-        except FileNotFoundError:
-            return
+    def _reuse_snapshots(output: Path, staged: Path, source_root: str, index: dict) -> None:
         snapshots = output / "snapshots"
-        if index.get("source_root", "") == source_root and snapshots.is_dir():
+        if index and index.get("source_root", "") == source_root and snapshots.is_dir():
             # The analyzer replaces updated files atomically, so the old output stays readable.
             shutil.copytree(snapshots, staged / "snapshots", copy_function=os.link)

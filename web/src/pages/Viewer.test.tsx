@@ -28,6 +28,7 @@ describe("viewer previews", () => {
       status: "ready",
       data: {
         name: "shop-demo",
+        url: null,
         subdir: null,
         hasNodes: true,
         commits: [{

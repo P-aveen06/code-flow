@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchRepos, fetchRepoStatus, importRepo } from "../api";
+import { fetchRepos, importRepo } from "../api";
 import { AppLink } from "../AppLink";
+import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
 import type { ImportRequest, ImportResponse, ImportStatus, RepoStatus } from "../types";
 import { useRequest } from "../useRequest";
@@ -35,31 +36,26 @@ export function Landing() {
     if (!job) return;
     const { id } = job;
     const controller = new AbortController();
-    let timer = window.setTimeout(poll, 1000);
+    let navigationTimer: number | undefined;
 
-    async function poll() {
-      try {
-        const status = await fetchRepoStatus(id, controller.signal);
+    void pollRepoStatus(id, controller.signal, setUpdate).then(
+      (status) => {
         if (controller.signal.aborted) return;
-        setUpdate(status);
-        if (status.status === "ready" || status.status === "error") {
-          setRepoRevision((revision) => revision + 1);
-          if (status.status === "ready") {
-            timer = window.setTimeout(() => navigate(repoPath(id)), 2000);
-          }
-        } else {
-          timer = window.setTimeout(poll, 1000);
+        setRepoRevision((revision) => revision + 1);
+        if (status.status === "ready") {
+          navigationTimer = window.setTimeout(() => navigate(repoPath(id)), 2000);
         }
-      } catch (error) {
+      },
+      (error: unknown) => {
         if (!controller.signal.aborted) {
           setPollError(error instanceof Error ? error.message : "Could not check the import status.");
         }
-      }
-    }
+      },
+    );
 
     return () => {
       controller.abort();
-      window.clearTimeout(timer);
+      window.clearTimeout(navigationTimer);
     };
   }, [job]);
 
@@ -211,7 +207,7 @@ export function Landing() {
                   {repo.warning && <p className="state-warning">{repo.warning}</p>}
                 </div>
                 <span className="status-chip repo-status" data-status={repo.status}>{repoStatusLabels[repo.status]}</span>
-                {repo.status === "ready" && (
+                {(repo.status === "ready" || repo.commit_count > 0) && (
                   <AppLink href={repoPath(repo.id)} className="btn btn--sm" label={`Open ${repo.name}`}>Open</AppLink>
                 )}
               </li>

@@ -30,6 +30,7 @@ export interface ImportStatus extends ImportResponse {
   total: number | null;
   warning: string | null;
   error: string | null;
+  new_commits: number | null;
   seconds: number;
 }
 

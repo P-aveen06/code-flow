@@ -121,13 +121,23 @@ class Store:
                 key: checks for key, checks in self._flag_checks.items() if key[0] != directory
             }
 
+    @staticmethod
+    def _read_source(directory: Path) -> dict:
+        try:
+            return json.loads((directory / "source.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+
+    def repo_source(self, repo: str) -> dict:
+        """Read the source settings of a published repository."""
+        directory = self._repo_dir(repo)
+        self._index(directory)
+        return self._read_source(directory)
+
     def repo_info(self, repo: str) -> dict:
         directory = self._repo_dir(repo)
         index = self._index(directory)
-        try:
-            source = json.loads((directory / "source.json").read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            source = {}
+        source = self._read_source(directory)
         commits = index["commits"]
         subdir = source.get("subdir", "")
         warning = None

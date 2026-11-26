@@ -230,6 +230,16 @@ button { font: inherit; }
   gap: var(--space-2) var(--space-5);
   min-width: 0;
 }
+.commit-refresh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.commit-refresh .btn { white-space: nowrap; }
+.commit-refresh span { max-width: var(--review-header-width); overflow-wrap: anywhere; }
 .viewer-header__notice {
   background: var(--color-sunken);
   color: var(--color-text-muted);
@@ -776,6 +786,8 @@ body:has(.graph-panel--maximized) { overflow: hidden; }
   .commit-meta { flex-wrap: nowrap; gap: var(--space-1); white-space: nowrap; }
   .commit-meta > :not(:first-child)::before { content: "·" / ""; margin-inline-end: var(--space-1); }
   .viewer-header__controls { justify-content: end; gap: var(--space-1) var(--space-3); margin-inline-start: auto; }
+  .viewer-header:has(.commit-refresh) { flex-wrap: nowrap; }
+  .viewer-header:has(.commit-refresh) .viewer-header__details { flex-basis: var(--review-header-width); }
   .viewer-header .segmented__btn { padding-inline: var(--space-2); }
   .variant-preview, .variant-preview__status { gap: var(--space-1); }
 

@@ -42,7 +42,7 @@ describe("validateImport", () => {
 
 const queued: ImportStatus = {
   id: "Flagsmith__flagsmith", name: "Flagsmith/flagsmith", status: "queued", message: "Queued",
-  current: null, total: null, warning: null, error: null, seconds: 0,
+  current: null, total: null, warning: null, error: null, new_commits: null, seconds: 0,
 };
 
 describe("importProgress", () => {

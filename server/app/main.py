@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import codeflow
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from app.config import Settings
 from app.flag_findings import find_flags
 from app.flagsmith_client import FlagsmithClient
-from app.importer import RepoImporter, validate_import
+from app.importer import RefreshUnavailable, RepoImporter, validate_import
 from app.store import BadRequest, NotFound, Store
 
 
@@ -81,6 +81,13 @@ def create_app(
     def import_repo(payload: Annotated[Any, Body()] = None) -> dict[str, str]:
         return importer.start(validate_import(payload))
 
+    @app.post("/api/repos/{repo}/refresh", status_code=202)
+    def refresh_repo(repo: str) -> dict[str, str]:
+        try:
+            return importer.refresh(repo)
+        except RefreshUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/repos/{repo}/status")
     def status(repo: str) -> dict:
         job = importer.job(repo)
@@ -97,6 +104,7 @@ def create_app(
             "total": info["commit_count"],
             "warning": info["warning"],
             "error": None,
+            "new_commits": None,
             "seconds": 0,
         }
 

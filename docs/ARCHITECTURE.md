@@ -183,9 +183,24 @@ and responses use full SHAs.
   active ID returns 202 with its current status. Re-importing after completion
   fetches the default branch into the existing clone, reuses cached parses and
   snapshots for the same source root, and replaces the output on success.
+- `POST /api/repos/{id}/refresh` returns 202 with the same `{id, status}`
+  response as an import. It reuses a queued or running job for the same ID.
+  For a new job, it validates the published GitHub URL, subfolder, and commit
+  limit from `source.json` and fetches the default branch into the existing
+  clone. A repository without a GitHub source returns 409. An unknown ID
+  returns 404. The saved limit grows by the number of new first-parent commits
+  that touch the subfolder, up to 200. If the previous newest commit is absent
+  from the default branch's first-parent history, the saved limit applies.
+  Refresh reuses cached parses and snapshots and publishes the refreshed
+  output and limit together. The previous output remains readable during a
+  refresh and after a failure.
 - `GET /api/repos/{id}/status` returns `id`, `name`, `status`, `message`,
   `current` and `total` commit counts, `seconds` elapsed, and nullable `warning`
-  and `error` fields. Status is `queued`, `cloning`, `analyzing`, `ready`, or
+  and `error` fields. The nullable integer `new_commits` counts SHAs in a
+  successful refresh's new index that were absent from the old index.
+  Zero means up to date. It is null for active or failed jobs, regular
+  imports, and repositories without an in-memory job.
+  Status is `queued`, `cloning`, `analyzing`, `ready`, or
   `error`. An empty latest graph or no selected commits gives a `ready` status
   with a warning that code-flow analyzes Python only for now. Failures give a
   readable `error`, such as `Repository not found or not public` or a missing

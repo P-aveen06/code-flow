@@ -45,6 +45,13 @@ Built for the WeMakeDevs × Flagsmith **Toggle Wars** hackathon, Track 01
 - Click a function to read its source at the selected revision.
 - Find feature flag checks and highlight the guarded calls that are live.
 
+For GitHub imports, click **Check for new commits** in the viewer to fetch
+updates to the default branch for your imported folder (screenshot:
+[docs/screenshots/check-for-new-commits.png](docs/screenshots/check-for-new-commits.png)). New commits appear
+in **Commits** alongside existing history, up to 200 commits, and the viewer
+stays on your selected commit while it remains in that history. Checks only
+run when you click the button.
+
 ## How we use Flagsmith
 
 ### Branches and environments

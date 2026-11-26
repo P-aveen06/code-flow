@@ -195,6 +195,9 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
             duplicate = client.post(REPOS, json=request)
             assert duplicate.status_code == 202
             assert duplicate.json() == {"id": REPO_ID, "status": "queued"}
+            refresh = client.post(f"{REPO}/refresh")
+            assert refresh.status_code == 202
+            assert refresh.json() == duplicate.json()
 
         def observe_git(*args, **kwargs):
             if args[0] == "clone":
@@ -288,7 +291,155 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
 
     with TestClient(create_app(settings)) as restarted:
         assert restarted.get(REPOS).json() == [{**listing[0], "branch": "trunk"}]
-        assert restarted.get(f"{REPO}/status").json()["status"] == "ready"
+        status = restarted.get(f"{REPO}/status").json()
+        assert status["status"] == "ready"
+        assert status["new_commits"] is None
+
+
+@pytest.fixture
+def github_import(tmp_path: Path, local_repo: Path):
+    settings = Settings(tmp_path / "data", ORIGIN)
+    executor = InlineExecutor()
+    app = create_app(settings, git_url_builder=lambda _: local_repo.as_uri(), executor=executor)
+    with TestClient(app) as client:
+        assert (
+            client.post(REPOS, json={"url": URL, "subdir": "shop", "max_commits": 2}).status_code
+            == 202
+        )
+        status = client.get(f"{REPO}/status").json()
+        assert status["status"] == "ready"
+        assert status["new_commits"] is None
+        yield client, settings.data_dir / REPO_ID, executor
+
+
+def test_refresh_keeps_indexed_commits_and_grows_limit(
+    github_import, local_repo: Path, monkeypatch
+):
+    client, output, _ = github_import
+    old_commits = client.get(f"{REPO}/commits").json()["commits"]
+    first = commit(local_repo, "shop/price.py", "def price(): return 4\n", "Raise price")
+    commit(local_repo, "docs/readme.md", "More docs\n", "Document prices")
+    second = commit(local_repo, "shop/cart.py", "def cart(): return []\n", "Return cart")
+    parse = Mock(wraps=analyze.parse_file)
+    monkeypatch.setattr(analyze, "parse_file", parse)
+
+    response = client.post(f"{REPO}/refresh")
+    assert response.status_code == 202
+    assert response.json() == {"id": REPO_ID, "status": "queued"}
+    status = client.get(f"{REPO}/status").json()
+    assert status["status"] == "ready"
+    assert status["new_commits"] == 2
+    refreshed = client.get(f"{REPO}/commits").json()["commits"]
+    assert refreshed[:2] == old_commits
+    assert [entry["sha"] for entry in refreshed[2:]] == [first, second]
+    assert json.loads((output / "source.json").read_text())["max_commits"] == 4
+    assert [call.args[0] for call in parse.call_args_list] == ["shop/price.py", "shop/cart.py"]
+
+    third = commit(local_repo, "shop/price.py", "def price(): return 5\n", "Raise price again")
+    assert client.post(f"{REPO}/refresh").status_code == 202
+    assert client.get(f"{REPO}/status").json()["new_commits"] == 1
+    assert [entry["sha"] for entry in analyze.load_index(output)["commits"]] == [
+        *[entry["sha"] for entry in refreshed],
+        third,
+    ]
+    assert json.loads((output / "source.json").read_text())["max_commits"] == 5
+
+
+def test_refresh_up_to_date_reuses_snapshots(github_import, local_repo: Path, monkeypatch):
+    client, output, _ = github_import
+    previous = client.get(f"{REPO}/commits").json()
+    snapshots = {file.name: file.stat().st_ino for file in (output / "snapshots").iterdir()}
+    build_graph = Mock(wraps=analyze.build_graph)
+    monkeypatch.setattr(analyze, "build_graph", build_graph)
+    commit(local_repo, "docs/readme.md", "More docs\n", "Document prices")
+
+    assert client.post(f"{REPO}/refresh").status_code == 202
+    status = client.get(f"{REPO}/status").json()
+    assert status["status"] == "ready"
+    assert status["new_commits"] == 0
+    assert client.get(f"{REPO}/commits").json() == previous
+    assert {file.name: file.stat().st_ino for file in (output / "snapshots").iterdir()} == snapshots
+    assert json.loads((output / "source.json").read_text())["max_commits"] == 2
+    build_graph.assert_not_called()
+
+
+def test_refresh_uses_stored_limit_after_rewrite(github_import, local_repo: Path):
+    client, output, _ = github_import
+    retained = git(local_repo, "rev-parse", "HEAD~3")
+    git(local_repo, "switch", "-c", "rewrite", retained)
+    replacement = commit(local_repo, "shop/price.py", "def price(): return 5\n", "Replace price")
+    git(local_repo, "branch", "-M", "main")
+
+    assert client.post(f"{REPO}/refresh").status_code == 202
+    status = client.get(f"{REPO}/status").json()
+    assert status["status"] == "ready"
+    assert status["new_commits"] == 1
+    assert [entry["sha"] for entry in analyze.load_index(output)["commits"]] == [
+        retained,
+        replacement,
+    ]
+    assert json.loads((output / "source.json").read_text())["max_commits"] == 2
+
+
+def test_refresh_reuses_running_job(github_import, monkeypatch):
+    client, _, executor = github_import
+    submit = Mock(wraps=executor.submit)
+    monkeypatch.setattr(executor, "submit", submit)
+    git_command = importer._git
+
+    def observe_fetch(*args, **kwargs):
+        if args[0] == "ls-remote":
+            active = client.get(f"{REPO}/status").json()
+            assert active["status"] == "cloning"
+            assert active["new_commits"] is None
+            duplicate = client.post(f"{REPO}/refresh")
+            assert duplicate.status_code == 202
+            assert duplicate.json() == {"id": REPO_ID, "status": "cloning"}
+        return git_command(*args, **kwargs)
+
+    monkeypatch.setattr(importer, "_git", observe_fetch)
+    assert client.post(f"{REPO}/refresh").status_code == 202
+    assert client.get(f"{REPO}/status").json()["status"] == "ready"
+    submit.assert_called_once()
+
+
+@pytest.mark.parametrize("source", [None, {"url": None}, {"url": "https://example.test/shop"}])
+def test_refresh_rejects_non_github_and_unknown_repos(tmp_path: Path, local_repo: Path, source):
+    output = tmp_path / "shop-demo"
+    analyze.analyze_repo(local_repo, output, max_commits=1)
+    if source is not None:
+        (output / "source.json").write_text(json.dumps(source))
+    with TestClient(create_app(Settings(tmp_path, ORIGIN))) as client:
+        response = client.post(f"{REPOS}/shop-demo/refresh")
+        assert response.status_code == 409
+        assert "imported from GitHub" in response.json()["detail"]
+        assert client.post(f"{REPOS}/missing/refresh").status_code == 404
+
+
+def test_failed_refresh_preserves_published_output(github_import, monkeypatch):
+    client, output, _ = github_import
+    previous = client.get(f"{REPO}/commits").json()
+    source = (output / "source.json").read_bytes()
+    head = previous["commits"][-1]["sha"]
+    snapshot_url = f"{REPO}/snapshots/{head}"
+    snapshot = client.get(snapshot_url).json()
+    git_command = importer._git
+
+    def fail_fetch(*args, **kwargs):
+        if "fetch" in args:
+            assert client.get(f"{REPO}/commits").json() == previous
+            raise importer.ImportFailure(importer.UNAVAILABLE)
+        return git_command(*args, **kwargs)
+
+    monkeypatch.setattr(importer, "_git", fail_fetch)
+    assert client.post(f"{REPO}/refresh").status_code == 202
+    status = client.get(f"{REPO}/status").json()
+    assert status["status"] == "error"
+    assert status["error"] == "Repository not found or not public"
+    assert status["new_commits"] is None
+    assert client.get(f"{REPO}/commits").json() == previous
+    assert client.get(snapshot_url).json() == snapshot
+    assert (output / "source.json").read_bytes() == source
 
 
 def test_missing_subdir_and_no_python_warning(tmp_path: Path, local_repo: Path):
