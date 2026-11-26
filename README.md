@@ -252,6 +252,32 @@ Open <http://localhost:5173/> and click **Open** on **Flagsmith/flagsmith**.
 Select a commit in the timeline. This link opens the usage-task change
 directly. [Flagsmith commit a9b66f5](http://localhost:5173/repo/Flagsmith__flagsmith?commit=a9b66f5)
 
+#### Run the backend and frontend separately
+
+Before you start, make sure self-hosted Flagsmith is running in Docker at
+<http://localhost:8000>. Check that the `.env` at the repo root contains the
+keys written by `make flagsmith-setup`. The server uses
+`CODEFLOW_FLAGSMITH_SERVER_KEY` and the web app uses
+`VITE_CODEFLOW_FLAGSMITH_ENV_KEY`.
+
+Open two terminals at the repo root.
+
+**Terminal 1 (API on port 8787)**
+
+```sh
+cd server && uv run uvicorn app.main:app --reload --port 8787
+```
+
+**Terminal 2 (web app on port 5173)**
+
+```sh
+cd web && npm run dev
+```
+
+Open <http://localhost:5173>. Stop each process with Ctrl-C. Restart both
+after changing `.env`. The server reads `.env` at startup, and Vite reads
+`VITE_*` values at startup.
+
 ### 5. Send simulated traffic and read results
 
 From the repo root, rehearse the experiment offline with the default panel
