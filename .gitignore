@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# code-flow output and demo repos
+data/
+examples/shop-demo/
+examples/flagsmith/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
