@@ -108,7 +108,7 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 - [x] Web: `getExperimentFlag('flow_view')` for exposure, `trackEvent('diff_understood', { value: ms })` / `trackEvent('diff_confusing')` on the buttons, `enableEvents: true`
 - [x] `simulator/simulate.py` + `behaviour.yaml`: N identities, `get_experiment_flag` per identity, sample outcome and time from the behaviour model, `track_event`, `close()`; `--n`, `--rate`, `--seed`
 - [ ] Optional: server SQLite mirror + small results table in the web app as a backup
-- [x] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README
+- [ ] Read results in Flagsmith (lift, credible intervals, win probability); roll out the winner; screenshots for README (results read Nov 26, see docs/experiment-results.md; roll-out and dashboard screenshots pending)
 ### M5 Demo + polish
 - [ ] `examples/analyze_flagsmith.sh`: scripted version of the M2.5 import (clone Flagsmith/flagsmith, analyze last ~50 commits of `api/`)
 - [ ] README: pitch, screenshots/GIF, setup steps, "How we use Flagsmith", experiment hypothesis and results, architecture, limitations (simulated users, heuristic call resolution)
