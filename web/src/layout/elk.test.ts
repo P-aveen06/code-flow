@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+import type { OverlayEdge, OverlayNode } from "../types";
+import { layoutFlow } from "./elk";
+
+function symbol(module: string, name: string): OverlayNode {
+  return {
+    id: `${module}:${name}`,
+    name,
+    qualname: name,
+    kind: "function",
+    module,
+    file: `${module}.py`,
+    line: 1,
+    end_line: 5,
+    status: "context",
+    in_base: true,
+    in_head: true,
+  };
+}
+
+const checkout = symbol("checkout", "checkout");
+const validate = symbol("checkout", "validate");
+const charge = symbol("payment", "charge_payment_after_validation");
+const nodes = [checkout, validate, charge];
+const edges: OverlayEdge[] = [
+  { source: checkout.id, target: validate.id, status: "context", guard: null, in_base: true, in_head: true },
+  {
+    source: validate.id,
+    target: charge.id,
+    status: "added",
+    guard: { flag: "new_checkout", when: "on" },
+    in_base: false,
+    in_head: true,
+  },
+];
+
+describe("layoutFlow", () => {
+  it("groups every symbol inside its module and lays out calls left to right", async () => {
+    const layout = await layoutFlow(nodes, edges);
+    const groups = layout.nodes.filter((node) => node.type === "module");
+    const symbols = layout.nodes.filter((node) => node.type === "symbol");
+    expect(groups.map(({ data }) => data.label)).toEqual(["checkout", "payment"]);
+    expect(symbols.map(({ id }) => id).sort()).toEqual(nodes.map(({ id }) => id).sort());
+
+    for (const node of symbols) {
+      const parent = groups.find(({ id }) => id === node.parentId)!;
+      expect(parent.data.label).toBe(node.data.symbol.module);
+      expect(layout.nodes.indexOf(parent)).toBeLessThan(layout.nodes.indexOf(node));
+      expect(node.position.x).toBeGreaterThanOrEqual(0);
+      expect(node.position.y).toBeGreaterThanOrEqual(0);
+      expect(node.position.x + node.width!).toBeLessThanOrEqual(parent.width!);
+      expect(node.position.y + node.height!).toBeLessThanOrEqual(parent.height!);
+    }
+
+    const first = symbols.find(({ id }) => id === checkout.id)!;
+    const last = symbols.find(({ id }) => id === charge.id)!;
+    expect(last.width!).toBeGreaterThan(first.width!);
+    expect(groups[1].position.x + last.position.x).toBeGreaterThan(groups[0].position.x + first.position.x);
+  });
+
+  it("keeps internal and cross-module edges, including guard information", async () => {
+    const layout = await layoutFlow(nodes, edges);
+    expect(layout.edges).toHaveLength(edges.length);
+    expect(layout.edges.map(({ source, target, data }) => ({ source, target, ...data }))).toEqual(
+      edges.map(({ source, target, status, guard }) => ({ source, target, status, guard })),
+    );
+  });
+
+  it("is deterministic and accepts an empty graph", async () => {
+    expect(await layoutFlow(nodes, edges)).toEqual(await layoutFlow(nodes, edges));
+    expect(await layoutFlow([], [])).toEqual({ nodes: [], edges: [] });
+  });
+});

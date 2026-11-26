@@ -1,0 +1,37 @@
+import type { CSSProperties } from "react";
+import type { EdgeStatus, Guard, NodeStatus } from "../types";
+
+export const statusLabels: Record<NodeStatus, string> = {
+  added: "Added",
+  removed: "Removed",
+  changed: "Changed",
+  context: "Context",
+};
+
+const statusColors: Record<NodeStatus, string> = {
+  added: "var(--color-success)",
+  removed: "var(--color-danger)",
+  changed: "var(--color-warning)",
+  context: "var(--color-text-subtle)",
+};
+
+export function nodeStyle(status: NodeStatus): CSSProperties {
+  const color = statusColors[status];
+  return {
+    backgroundColor: `color-mix(in srgb, ${color} 9%, var(--color-surface))`,
+    borderColor: color,
+    borderStyle: status === "removed" ? "dashed" : "solid",
+  };
+}
+
+export function edgeStyle(status: EdgeStatus): CSSProperties {
+  return {
+    stroke: statusColors[status],
+    strokeWidth: status === "context" ? 1.5 : 2,
+    strokeDasharray: status === "removed" ? "6 4" : undefined,
+  };
+}
+
+export function guardLabel(guard: Guard | null): string | undefined {
+  return guard ? `${guard.flag}: ${guard.when}` : undefined;
+}
