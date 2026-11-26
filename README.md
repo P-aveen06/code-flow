@@ -25,8 +25,8 @@ Built for the WeMakeDevs x Flagsmith **Toggle Wars** hackathon, Track 01
 
 ## Setup
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) with Python 3.11+ and Node.js
-22.12+. Docker will be needed for self-hosted Flagsmith in a later milestone.
+Prerequisites include [uv](https://docs.astral.sh/uv/) with Python 3.11+ and
+Node.js 22.12+. Docker runs the self-hosted Flagsmith instance.
 
 ```sh
 make install  # Install dependencies
@@ -48,6 +48,33 @@ uv run code-flow diff ../data/shop-demo --head <sha> --format mermaid
 ```
 
 Replace `<sha>` with one of the commit IDs printed by `analyze`.
+
+### Flagsmith setup
+
+1. Start your Docker Flagsmith instance with Experimentation enabled
+   (`EXPERIMENTATION_ENABLED=true`). If needed, copy `.env.example` to `.env`
+   and set `FLAGSMITH_API_URL` to the instance's API base URL.
+2. In the Flagsmith dashboard, open **Organisation settings > API Keys**,
+   create an organisation API key with admin access, and set
+   `FLAGSMITH_ADMIN_API_KEY` in `.env`.
+3. Have a local Flagsmith checkout at `data/repos/Flagsmith__flagsmith`.
+   Run `make flagsmith-setup-dry-run` to preview the setup, then run
+   `make flagsmith-setup`. Pass `--environment-json PATH` to the Python
+   script to use another local checkout or a local export file.
+
+The script provisions the `Development` environment in `code-flow`,
+`shop-demo`, and `flagsmith-api`. It sets the `flow_view` experiment split to
+34% side by side, 33% overlay, and 33% overlay with a summary, turns on
+`flagsmith_mode`, and turns off `ai_summary`. It turns on `new_checkout` and
+`holiday_discount` in the shop demo and loads the Flagsmith API project's
+flag defaults from the local export. It writes the SDK keys into `.env`.
+The generated shop demo still reads `DEMO_APP_FLAGSMITH_SERVER_KEY` when run
+as a standalone app. Supply `SHOP_DEMO_FLAGSMITH_SERVER_KEY` under that
+legacy name in the demo's process environment.
+
+If the script cannot enable the built-in warehouse, open `code-flow` →
+`Development` and select **Environment Settings > Warehouse > Flagsmith
+database > Enable**.
 
 ## License
 

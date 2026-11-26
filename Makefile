@@ -1,13 +1,21 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev
+.PHONY: help install test lint dev flagsmith-setup flagsmith-setup-dry-run
 
 help:
 	@echo "install  Install Python and web dependencies"
 	@echo "test     Run Python tests, web build, and web tests"
 	@echo "lint     Check Python lint and formatting"
 	@echo "dev      Run the API and web dev servers (Ctrl-C stops both)"
+	@echo "flagsmith-setup          Provision the Flagsmith demo projects and write SDK keys to .env"
+	@echo "flagsmith-setup-dry-run  Preview Flagsmith setup using read-only API requests"
+
+flagsmith-setup:
+	python3 scripts/flagsmith_setup.py
+
+flagsmith-setup-dry-run:
+	python3 scripts/flagsmith_setup.py --dry-run
 
 install:
 	cd analyzer && uv sync
