@@ -49,7 +49,7 @@ push. Times are IST.
 | M1 | Nov 26, 11 PM | Analyzer: Python parser, call resolution, graph JSON, git history walker (incremental by blob sha), diff, flag detection, Mermaid export, CLI. Demo repo script. | `code-flow analyze examples/shop-demo --out data/shop-demo` writes one snapshot per commit; `code-flow diff --base A --head B --format mermaid` prints a diagram that renders on GitHub |
 | M2 | Nov 26, 2 PM (done) | Server (snapshots, diffs, code snippets) + web app: commit timeline, overlay view, side-by-side view, click a node to see code, ELK layout of the changed neighbourhood | Open the web app, click through the shop-demo commits, watch the flow change |
 | M2.5 | Nov 26, 11 PM (done 3 PM) | Landing page, "Analyze a GitHub repo" import with background analysis and progress, a self-explanatory viewer, OpenFeature flag detection, Flagsmith/flagsmith (`api/`, last ~50 commits) as the main demo | Paste `https://github.com/Flagsmith/flagsmith` + `api/` on the landing page, watch progress, open the repo and understand a real commit without being told what the screen means |
-| M3 | Nov 27, 6 PM | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings; seed a `flagsmith-api` project from `api/integrations/flagsmith/data/environment.json` | Flip a flag in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
+| M3 | Nov 27, 6 PM (done Nov 26, 3:30 PM) | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings; seed a `flagsmith-api` project from `api/integrations/flagsmith/data/environment.json` | Flip a flag in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
 | M4 | Nov 28, 2 PM | Experiment: Flagsmith Experimentation enabled on the Docker instance, exposure + success events from web app and simulator, results, roll-out of the winner | Run 1,000+ simulated reviewers; Flagsmith's results page shows lift and win probability per variant; winner rolled out |
 | M5 | Nov 29, 2 PM | README polish, architecture diagram, demo video script and recording (on the Flagsmith repo) | Video recorded; README has setup steps and "How we use Flagsmith" |
 | — | Nov 29, 5 PM | Submit | |
@@ -97,10 +97,10 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 
 ### M3 Flagsmith
 - [x] Flagsmith flags in the existing project `code-flow` (free org = one project), grouped by tags `code-flow`, `repo:flagsmith-api`, `repo:shop-demo`; scripted as `make flagsmith-setup` (`scripts/flagsmith_setup.py`), run on Nov 26
-- [ ] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
-- [ ] Server `flagsmith_client.py`: live flags for the analyzed app via server-side env key; cache 10 s
-- [ ] `GET /api/repos/{repo}/flags?sha` returns detected flags + live state + findings (live/off/stale/orphan/unused)
-- [ ] `FlagsmithPanel.tsx` + edge styling for guarded edges
+- [x] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
+- [x] Server `flagsmith_client.py`: live flags for the analyzed app via server-side env key; cache 10 s
+- [x] `GET /api/repos/{repo}/flags?sha` returns detected flags + live state + findings (live/off/stale/orphan/unused)
+- [x] `FlagsmithPanel.tsx` + edge styling for guarded edges
 
 ### M4 Experiment
 - [x] Turn on Experimentation in Paveen's Docker Flagsmith (`EXPERIMENTATION_ENABLED=true`, experimentation services + ClickHouse from Flagsmith's `docker-compose.yml`); connect the warehouse for the `code-flow` environment (done Nov 26: `EXPERIMENTATION_ENABLED` only, events in Postgres; warehouse "Flagsmith database" enabled for code-flow/Production by the setup script)
