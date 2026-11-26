@@ -1,34 +1,19 @@
 """Verify the demo repo is repeatable and the analyzer sees its key edges."""
 
-import subprocess
-from pathlib import Path
-
 from codeflow.analyze import analyze_repo, load_snapshot
 from codeflow.git_history import list_commits
 from codeflow.graph import Guard
 
 
-def test_shop_demo(git_available, tmp_path):
-    script = Path(__file__).resolve().parents[2] / "examples" / "make_shop_demo.sh"
-    repo = tmp_path / "shop demo"
-
-    def generate():
-        return subprocess.run(
-            ["bash", str(script), repo.name],
-            cwd=tmp_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-
-    log = generate()
+def test_shop_demo(make_shop_demo, tmp_path):
+    repo, log = make_shop_demo()
     commits = list_commits(repo, "main")
     assert len(commits) == len(log.splitlines()) == 8
     assert [commit.date for commit in commits] == [
         f"2026-11-20T{hour:02}:00:00Z" for hour in range(9, 17)
     ]
     assert {commit.author for commit in commits} == {"code-flow demo"}
-    assert generate() == log
+    assert make_shop_demo() == (repo, log)
     assert list_commits(repo)[-1].sha == commits[-1].sha
 
     out = tmp_path / "output"

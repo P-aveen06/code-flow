@@ -39,6 +39,16 @@ scaffold; see `.env.example` for the environment variables used in later milesto
 Set `CODEFLOW_WEB_ORIGIN` in the server environment to allow a web origin other
 than the default `http://localhost:5173`.
 
+### Try the analyzer
+
+```sh
+bash examples/make_shop_demo.sh
+cd analyzer && uv run code-flow analyze ../examples/shop-demo --out ../data/shop-demo
+uv run code-flow diff ../data/shop-demo --head <sha> --format mermaid
+```
+
+Replace `<sha>` with one of the commit IDs printed by `analyze`.
+
 ## License
 
 _To be decided (open-source core)._

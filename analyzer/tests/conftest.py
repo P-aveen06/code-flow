@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from codeflow.analyze import analyze_repo, load_snapshot
+from codeflow.graph import Graph
+
 Changes = dict[str, str | bytes | None]
 
 
@@ -74,3 +77,33 @@ def make_repo(git_available: None, tmp_path: Path) -> Callable[[list[Changes]], 
         return repo
 
     return make
+
+
+@pytest.fixture
+def make_shop_demo(git_available: None, tmp_path: Path) -> Callable[[], tuple[Path, str]]:
+    def generate() -> tuple[Path, str]:
+        script = Path(__file__).resolve().parents[2] / "examples" / "make_shop_demo.sh"
+        repo = tmp_path / "shop demo"
+        result = subprocess.run(
+            ["bash", str(script), repo.name],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return repo, result.stdout
+
+    return generate
+
+
+@pytest.fixture
+def compare_sources(
+    make_repo: Callable[[list[Changes]], FixtureRepo], tmp_path: Path
+) -> Callable[[Changes, Changes], tuple[Graph, Graph]]:
+    def compare(base: Changes, head: Changes) -> tuple[Graph, Graph]:
+        repo = make_repo([base, head])
+        out = tmp_path / "output"
+        first, second = analyze_repo(repo.path, out)
+        return load_snapshot(out, first.commit.sha), load_snapshot(out, second.commit.sha)
+
+    return compare
