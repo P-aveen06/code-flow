@@ -74,3 +74,42 @@ Run on 26 Nov 2026 in the same Flagsmith project and environment, after `flow_vi
 - Vertical beats horizontal on understanding for long flows (+10.2 %, interval above zero, 98.7 % win probability). The time difference is not conclusive.
 - The effect is what the simulator's assumptions put in; a real decision needs real reviewers.
 - **Rolled out:** on 26 Nov 2026 (16:41 UTC) the experiment was completed with `vertical` as the winner (`python3 scripts/flagsmith_experiment.py --experiment flow_direction rollout --variant vertical`); Flagsmith now serves `vertical` to 100 % of identified reviewers. The viewer applies it to long flows only; short flows stay horizontal by design.
+
+# Replay in the Development environment (26 Nov 2026)
+
+After this point simulated runs belong in the **Development** environment; Production is for real reviewers. Both experiments above were replayed in Development of the same `code-flow` project with the same setup: original splits (`flow_view` 34/33/33, `flow_direction` 50/50), the same metrics, the same 1,300-reviewer panel (`simulator/panels/default.csv`, seed 7) and the same behaviour assumptions. `flow_view` was sent in the same steps (100 → 300 → 1,300). Both Development experiments are still running; nothing was rolled out there. Production was not touched.
+
+Flagsmith assigns variants by hashing per environment, so the same reviewer can land in a different variant in Development; the splits and numbers are therefore close to Production but not identical.
+
+## flow_view: Diff understood (primary)
+
+| Reviewers | Environment | side_by_side (control) | overlay | overlay_summary | overlay lift (95 % CI), win prob. | overlay_summary lift (95 % CI), win prob. |
+|---:|---|---:|---:|---:|---|---|
+| 100 | Production | 24, 45.8 % | 41, 65.9 % | 35, 65.7 % | withheld (< 50 per variant) | withheld |
+| 100 | Development | 39, 48.7 % | 28, 60.7 % | 33, 72.7 % | withheld (< 50 per variant) | withheld |
+| 300 | Production | 94, 48.9 % | 111, 60.4 % | 95, 67.4 % | +23.3 % (−8.4 % to +55.0 %), 92.6 % | +37.7 % (+3.1 % to +72.2 %), 98.4 % |
+| 300 | Development | 101, 52.5 % | 110, 62.7 % | 89, 68.5 % | +19.5 % (−8.7 % to +47.8 %), 91.3 % | +30.6 % (+0.0 % to +61.2 %), 97.5 % |
+| 1,300 | Production | 432, 50.9 % | 447, 61.1 % | 421, 66.5 % | +19.9 % (+5.7 % to +34.2 %), 99.7 % | +30.6 % (+15.6 % to +45.6 %), 100.0 % |
+| 1,300 | Development | 432, 48.4 % | 464, 62.1 % | 404, 69.8 % | +28.3 % (+12.8 % to +43.8 %), 100.0 % | +44.3 % (+27.4 % to +61.1 %), 100.0 % |
+
+## flow_view: Diff time to understand (secondary, 1,300 reviewers)
+
+| Environment | overlay | overlay_summary |
+|---|---|---|
+| Production | −7.7 % (−26.6 % to +11.2 %), 78.8 % | −20.7 % (−36.3 % to −5.1 %), 99.5 % |
+| Development | −6.3 % (−26.0 % to +13.3 %), 73.6 % | −2.2 % (−22.4 % to +18.0 %), 58.4 % |
+
+The time metric is the mean `diff_understood` value per exposure, with reviewers who never answered "understood" counted as 0. A variant with more "understood" answers therefore gets a higher mean even if each answer is faster, which is why this metric swings between runs. Treat it as indicative only.
+
+## flow_direction (long flows, 1,300 reviewers)
+
+| Environment | horizontal (control) | vertical | Layout understood: lift (95 % CI), win prob. | Layout time: lift (95 % CI), win prob. |
+|---|---:|---:|---|---|
+| Production | 648, 60.8 % | 652, 67.0 % | +10.2 % (+1.2 % to +19.3 %), 98.7 % | −5.4 % (−15.6 % to +4.8 %), 85.0 % |
+| Development | 637, 60.1 % | 663, 68.6 % | +14.1 % (+4.8 % to +23.5 %), 99.9 % | −4.2 % (−14.5 % to +6.1 %), 78.8 % |
+
+## Reading it
+
+- Both replays reach the same conclusions as Production on the primary metrics: `overlay_summary` beats `side_by_side` on understanding, and `vertical` beats `horizontal` on long flows, with credible intervals above zero and win probabilities of 99.9–100 %.
+- The exact percentages differ because Flagsmith's per-environment hashing put some reviewers in different variants, which changes their sampled outcomes. The secondary time metrics are inconclusive in Development.
+- These are simulated reviewers whose behaviour encodes the hypotheses; agreement between the two runs shows that the pipeline and Flagsmith's analysis are consistent, not that real users behave this way.
