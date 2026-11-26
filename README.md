@@ -1,134 +1,315 @@
 # code-flow
 
-**Git for code flow.** code-flow turns every commit into a function-level flow
-diagram and shows how that flow changes commit by commit, so reviewers read a
-picture instead of a 1,000-line diff. That matters more now that so much code
-is AI-generated and still has to be reviewed.
+**See how your code's flow changes, commit by commit, as a diagram instead of a 1,000-line diff.**
 
-Built for the WeMakeDevs x Flagsmith **Toggle Wars** hackathon, Track 01
-("Test Something Real").
+AI-generated code still needs review. A diagram of the calls that changed
+helps reviewers see what moved and decide where to read the source.
 
-> Status: under construction. See [docs/PLAN.md](docs/PLAN.md) for milestones
-> and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+Built for the WeMakeDevs × Flagsmith **Toggle Wars** hackathon, Track 01
+(**Test Something Real**).
+
+## Screenshots
+
+![Landing page with the GitHub import form and analyzed repositories](docs/screenshots/landing.png)
+
+*Import a Python repository or open one that's already analyzed.*
+
+![Overlay of a usage-task change in Flagsmith commit a9b66f5](docs/screenshots/flagsmith-a9b66f5-overlay.png)
+
+*Flagsmith commit `a9b66f5` shows changes to the API usage tasks and their guarded calls.*
+
+![Flagsmith findings panel showing experimentation_warehouses as orphaned and several flags as stale](docs/screenshots/m3-flagsmith-orphan-and-stale.png)
+
+*The Flagsmith panel shows an orphan flag, stale flags, and links to the checks in source.*
+
+### Three experiment views
+
+| Side by side | Overlay | Overlay + summary |
+| --- | --- | --- |
+| ![Before and after diagrams for Flagsmith commit 7052cea](docs/screenshots/flagsmith-7052cea-side_by_side.png) | ![One combined diagram for Flagsmith commit a9b66f5](docs/screenshots/flagsmith-a9b66f5-overlay.png) | ![One combined diagram with a summary for shop-demo commit f376f9c](docs/screenshots/shop-demo-f376f9c-overlay_summary.png) |
+| Compare two synchronized canvases. | See changes on one canvas. | Read a one-line summary above the overlay. |
+
+### One flag, two live paths
+
+| `new_checkout` on | `new_checkout` off |
+| --- | --- |
+| ![Green live edge to new_checkout](docs/screenshots/m3-shop-demo-new_checkout-on.png) | ![Green live edge to legacy_checkout](docs/screenshots/m3-shop-demo-new_checkout-off.png) |
+| The live path goes to `new_checkout`. | The live path goes to `legacy_checkout`. |
 
 ## What it does
 
-- **Flow timeline**: a static analyzer (tree-sitter) builds a call/flow graph for each commit of a Python repo.
-- **Flow diff**: see what each commit added (green), removed (red) and changed (amber) in the flow.
-- **Flagsmith mode**: finds Flagsmith flag checks in the analyzed code and colours which branch is live right now, using live flag state. It also flags stale, orphan and unused flags.
+- Import a public GitHub repository, optionally limited to one subfolder.
+- Walk recent commits and build a graph of Python functions and calls for each one.
+- Show added, removed, and changed functions and calls in a commit timeline.
+- Compare two synchronized diagrams, a single overlay, or an overlay with a summary.
+- Click a function to read its source at the selected revision.
+- Find feature flag checks and highlight the guarded calls that are live.
 
 ## How we use Flagsmith
 
-- **The A/B test (Track 01)**: multivariate flag `flow_view` serves three diff styles (side by side, overlay, overlay + one-line summary) to reviewers. The success event is a reviewer clicking "Understood / Approve", measured with Flagsmith Experimentation.
-- **Flagsmith mode switch**: boolean flag `flagsmith_mode` turns Flagsmith mode on or off.
-- **Inside the analyzed code**: code-flow reads the analyzed app's own flags to show which flow is live.
+### The A/B test
 
-## Setup
+**Hypothesis.** Reviewers understand a change more often and faster with an
+overlay and a one-line summary than with before and after diagrams side by side.
 
-Prerequisites include [uv](https://docs.astral.sh/uv/) with Python 3.11+ and
-Node.js 22.12+. Docker runs the self-hosted Flagsmith instance.
+The multivariate flag `flow_view` assigns one view per reviewer.
+
+| Variant | Allocation | View |
+| --- | ---: | --- |
+| `side_by_side` (control) | 34% | Before and after |
+| `overlay` | 33% | One diagram |
+| `overlay_summary` | 33% | One diagram and a one-line summary |
+
+- **Exposure.** The web app identifies the reviewer, then calls
+  `getExperimentFlag('flow_view')` in the Flagsmith JS SDK. The simulator
+  calls `get_experiment_flag` in the Python SDK with each reviewer's identity.
+- **Outcome.** **Yes, I understand it** sends
+  `trackEvent('diff_understood', {value: ms})`. **No, it’s confusing** sends
+  `diff_confusing`. The value is the time from diagram render to answer, in
+  milliseconds. The simulator sends the same events through the Python SDK.
+- **Metrics.** **Diff understood** is the primary metric, the share of exposed
+  reviewers who send `diff_understood`. **Diff time to understand (ms)** is the
+  mean value of that event per exposure. Reviewers who never send it count as
+  zero for the time metric, so treat it as indicative.
+- **Analysis.** We ran Flagsmith Experimentation on a self-hosted Docker
+  instance with the **Flagsmith database** warehouse. Flagsmith computed
+  lift, 95% credible intervals, and win probabilities.
+  [Flagsmith Experimentation docs](https://docs.flagsmith.com/experimentation)
+
+### Results from 1,300 simulated reviewers
+
+| Metric | Variant | Rate or mean | Lift vs control | 95% credible interval | Win probability |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Diff understood | `side_by_side` | 50.9% | — | — | — |
+| Diff understood | `overlay` | 61.1% | +19.9% | +5.7% to +34.2% | 99.7% |
+| Diff understood | `overlay_summary` | 66.5% | +30.6% | +15.6% to +45.6% | 100.0% |
+| Diff time to understand | `side_by_side` | 52,466 ms | — | — | — |
+| Diff time to understand | `overlay` | 48,418 ms | −7.7% | −26.6% to +11.2% | 78.8% |
+| Diff time to understand | `overlay_summary` | 41,596 ms | −20.7% | −36.3% to −5.1% | 99.5% |
+
+| Reviewers | Control / overlay / overlay + summary | `overlay_summary` lift on Diff understood | Win probability |
+| ---: | --- | ---: | ---: |
+| 100 | 24 / 41 / 35 | Withheld | — |
+| 300 | 94 / 111 / 95 | +37.7% (+3.1% to +72.2%) | 98.4% |
+| 1,300 | 432 / 447 / 421 | +30.6% (+15.6% to +45.6%) | 100.0% |
+
+Flagsmith withheld lift and win probability at 100 reviewers. Its minimums
+were 50 reviewers and five conversions per variant.
+[Experiment results and interpretation](docs/experiment-results.md)
+
+**These reviewers were simulated.** The model uses sizes from real Flagsmith
+diffs and assumes different understanding rates and decision times by variant.
+The simulator sends role, experience, codebase familiarity, and reading style
+as identity traits. Those assumptions encode the hypothesis. The run
+demonstrates the experiment pipeline and Flagsmith's analysis. Testing the
+hypothesis with real reviewers requires real review data.
+[Simulator assumptions](simulator/behaviour.yaml)
+
+The demo video rolls out the simulated winner, `overlay_summary`, to 100% of
+Production. [Demo script](docs/demo-script.md)
 
 ```sh
-make install  # Install dependencies
-make test     # Run tests and build the web app
-make dev      # Start the API on port 8787 and the web app on port 5173
+python3 scripts/flagsmith_experiment.py rollout --variant overlay_summary
 ```
 
-Press Ctrl-C to stop both dev servers. Configuration defaults work for the
-scaffold; see `.env.example` for the environment variables used in later milestones.
-Set `CODEFLOW_WEB_ORIGIN` in the server environment to allow a web origin other
-than the default `http://localhost:5173`.
+### Flagsmith mode
 
-### Try the analyzer
+The boolean flag `flagsmith_mode` turns the panel and live path styling on or
+off. The app polls every 10 seconds, so the change takes effect while the
+viewer is open.
+
+The analyzer finds Flagsmith and OpenFeature calls such as
+`get_openfeature_client().get_boolean_value(...)`. It resolves supported string
+constants and marks calls guarded by each branch. The server uses the
+Flagsmith Python SDK and a server-side key to read the live environment state.
+Flipping a flag moves the green live path in the diagram.
+
+The panel shows live and off flags, orphan checks, unused flags, and stale
+findings. The demo analysis of Flagsmith's own `api/` found 13 checks across 10
+flags. That includes stale flags and the orphan `experimentation_warehouses`.
+The code checks that key, and Flagsmith's own `environment.json` had no entry for it.
+
+We use one project, `code-flow`, in a free Flagsmith organisation.
+The idempotent `make flagsmith-setup` command creates missing flags and tags.
+
+| Tag | Flags |
+| --- | --- |
+| `code-flow` | `flow_view`, `flagsmith_mode`, and `ai_summary` |
+| `repo:flagsmith-api` | Seed flags from Flagsmith's `api/integrations/flagsmith/data/environment.json` |
+| `repo:shop-demo` | `new_checkout` and `holiday_discount` |
+
+## Quick start
+
+You need Git, [uv](https://docs.astral.sh/uv/), Python 3.11 or later, Node.js
+22.12 or later, and Docker with Compose. Run the shell commands from the
+code-flow repo root once you've cloned it.
+
+```sh
+git clone https://github.com/P-aveen06/code-flow.git
+cd code-flow
+cp .env.example .env
+make install
+```
+
+### 1. Start self-hosted Flagsmith
+
+Download the official Compose file. Set `EXPERIMENTATION_ENABLED: 'true'` on
+the Flagsmith API and task processor. The downloaded file includes this in
+the shared environment block.
+[Official Flagsmith Docker Compose file](https://github.com/Flagsmith/flagsmith/blob/main/docker-compose.yml)
+
+```sh
+mkdir -p data/flagsmith-docker
+curl -fsSL https://raw.githubusercontent.com/Flagsmith/flagsmith/main/docker-compose.yml \
+  -o data/flagsmith-docker/docker-compose.yml
+docker compose -f data/flagsmith-docker/docker-compose.yml up -d
+```
+
+Open <http://localhost:8000>. Create an account and an organisation, then
+create a project named `code-flow` with a `Production` environment. Open
+**Organisation settings → API Keys** and create an admin API key. A personal
+API token with admin access also works. Set `FLAGSMITH_ADMIN_API_KEY` in
+the local `.env`. Keep that file out of Git. The default Flagsmith API URL is
+already set. [Environment template](.env.example)
+
+### 2. Analyze Flagsmith's API
+
+```sh
+make analyze-flagsmith
+```
+
+This clones or fetches Flagsmith/flagsmith, analyzes the latest 50 first-parent
+commits that touch `api/`, and prints the elapsed time. The app lists the
+output as **Flagsmith/flagsmith**. [Analysis script](examples/analyze_flagsmith.sh)
+
+To import in the browser instead, run `make dev` and open
+<http://localhost:5173/>. Click **Flagsmith/flagsmith (api/)** under **Try an
+example**. Wait for **Import progress** to reach **Ready** and open the viewer.
+Stop the dev servers with Ctrl-C before continuing to setup so the next start
+reads the new keys.
+
+### 3. Seed flags and start the experiment
+
+```sh
+make flagsmith-setup-dry-run
+make flagsmith-setup
+```
+
+The dry run previews changes. Setup writes the client-side and server-side
+environment keys to `.env` and the tag scopes to `data/flagsmith_scopes.json`.
+If setup asks you to enable the warehouse manually, use **Production →
+Environment Settings → Warehouse → Flagsmith database → Enable**.
+
+```sh
+python3 scripts/flagsmith_experiment.py create
+```
+
+This creates both metrics from `diff_understood` and starts
+**flow_view: overlay vs side by side** in Production with the 34/33/33 split.
+The recorded run used Flagsmith 2.295.2.
+
+### 4. Open the viewer
+
+```sh
+make dev
+```
+
+Open <http://localhost:5173/> and click **Open** on **Flagsmith/flagsmith**.
+Select a commit in the timeline. This link opens the usage-task change
+directly. [Flagsmith commit a9b66f5](http://localhost:5173/repo/Flagsmith__flagsmith?commit=a9b66f5)
+
+### 5. Send simulated traffic and read results
+
+Keep both servers running. In a second terminal at the repo root, send 1,000
+simulated reviewers.
+
+```sh
+make simulate
+```
+
+For a repeat run, use a new prefix so each reviewer has a fresh identity.
+
+```sh
+(cd simulator && uv run python simulate.py --n 1000 --prefix "sim-judge-$(date +%s)")
+```
+
+Ask Flagsmith to refresh results and read the result table.
+
+```sh
+python3 scripts/flagsmith_experiment.py refresh --wait 120
+python3 scripts/flagsmith_experiment.py status
+```
+
+You can also read the results in **code-flow → Production → Experiments →
+flow_view: overlay vs side by side** on the Flagsmith dashboard.
+
+### 6. Try the shop-demo tutorial
+
+Build and analyze the small sample repo, then click **shop-demo (tutorial)**
+on the landing page.
 
 ```sh
 bash examples/make_shop_demo.sh
-cd analyzer && uv run code-flow analyze ../examples/shop-demo --out ../data/shop-demo
-uv run code-flow diff ../data/shop-demo --head <sha> --format mermaid
+uv run --project analyzer code-flow analyze examples/shop-demo --branch main --out data/shop-demo
 ```
 
-Replace `<sha>` with one of the commit IDs printed by `analyze`.
-
-### Flagsmith setup
-
-1. Start your Docker Flagsmith instance with Experimentation enabled
-   (`EXPERIMENTATION_ENABLED=true`). If needed, copy `.env.example` to `.env`
-   and set `FLAGSMITH_API_URL` to the instance's API base URL.
-2. In the Flagsmith dashboard, open **Organisation settings > API Keys**,
-   create an organisation API key with admin access, and set
-   `FLAGSMITH_ADMIN_API_KEY` in `.env`. Create a project named `code-flow`
-   in that organisation if you haven't already.
-   A personal API token with admin access also works.
-3. Have a local Flagsmith checkout at `data/repos/Flagsmith__flagsmith`.
-   Run `make flagsmith-setup-dry-run` to preview the setup, then run
-   `make flagsmith-setup`. Pass `--environment-json PATH` to the Python
-   script to use another local checkout or a local export file.
-
-The script uses one existing environment in `code-flow`. It selects
-`Production` if available, then `Development`, then the sole environment if
-there is only one. To select an environment explicitly, run
-`python3 scripts/flagsmith_setup.py --dry-run --environment NAME` and use the
-same `--environment NAME` for the setup.
-
-The project uses three tags. These defaults apply to newly created flags.
-
-- `code-flow` groups `flow_view` (34% `side_by_side`, 33% `overlay`, 33%
-  `overlay_summary`), `flagsmith_mode` (on), and `ai_summary` (off).
-- `repo:flagsmith-api` groups the 13 flags from the local checkout's
-  `api/integrations/flagsmith/data/environment.json`, using the export's
-  enabled states and values.
-- `repo:shop-demo` groups `new_checkout` and `holiday_discount`, both on.
-
-The script adds missing tags to existing flags and reports differences from
-the defaults. It writes the selected environment's client-side key to
-`CODEFLOW_FLAGSMITH_ENV_KEY` and `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` for the web
-app, experiment, and simulator, and the server-side key to
-`CODEFLOW_FLAGSMITH_SERVER_KEY` for the server's Flagsmith mode. Flagsmith
-mode uses `data/flagsmith_scopes.json` to look up each repo's flags by its
-tag membership. Use `--scope-file PATH` to change the output location.
-
-If the script cannot enable the built-in warehouse, open the selected
-environment in `code-flow` and choose **Environment Settings > Warehouse >
-Flagsmith database > Enable**.
-
-## Experiment
-
-We hypothesize that reviewers understand a flow diff more often and decide
-faster with a single overlay and a one-line summary than with side-by-side
-diagrams. The Flagsmith flag `flow_view` allocates 34% to `side_by_side`
-(control), 33% to `overlay`, and 33% to `overlay_summary`. The primary metric
-is the share of exposed reviewers who record `diff_understood`. The simulator
-attaches the decision time in milliseconds to both `diff_understood` and
-`diff_confusing`.
-
-The reviewers are **simulated** using the assumptions in
-[behaviour.yaml](simulator/behaviour.yaml). Diff sizes come from flow-changing
-commits in the local Flagsmith analysis, with the analyzed shop demo as a
-fallback. The hypothesis model encodes the expected differences to
-demonstrate the event pipeline and Flagsmith's analysis. Testing the
-hypothesis with real reviewers requires real review data. The null model
-gives every variant the same behaviour to check for spurious differences.
-
-Each simulated reviewer gets a seeded persona with a role, years of
-experience, codebase familiarity, and reading style. The persona mix and
-their modest effects on understanding and decision time are assumptions in
-`behaviour.yaml`. Flagsmith receives these attributes as identity traits,
-and `--persona-summary` shows their distribution by variant. A run of 100
-reviewers is a small sample, so Flagsmith's win probability may be inconclusive.
+Open the commit that introduces `new_checkout`. In the Flagsmith dashboard,
+toggle `new_checkout` under **code-flow → Production → Features** and watch
+the green path move. [Shop demo commit f376f9c](http://localhost:5173/repo/shop-demo?commit=f376f9c&view=overlay)
 
 ```sh
-make simulate-dry-run
-uv run --project simulator python simulator/simulate.py --dry-run --model null --n 3000 --rate 1000
-make simulate  # Sends events to the running Flagsmith experiment
+make test
+make lint
 ```
 
-Import Flagsmith/flagsmith in the app or follow **Try the analyzer** to
-prepare local commit data. The live run requires a running experiment with
-keyed variants and reads `FLAGSMITH_API_URL` and `CODEFLOW_FLAGSMITH_ENV_KEY`
-from the root `.env`. Shell environment variables take precedence. The Make
-targets use 1,000 reviewers at up to 20 per second with seed 7. Use
-`--prefix` in the CLI to give a separate run fresh reviewer identities.
+## Architecture
+
+```mermaid
+flowchart LR
+    Git["Git history"] --> Analyzer["Python analyzer"]
+    Analyzer --> Snapshots["Per-commit graph snapshots"]
+    Snapshots --> Server["FastAPI server"]
+    Server --> Web["React viewer"]
+
+    subgraph Flagsmith["Self-hosted Flagsmith"]
+        Flags["Feature flags"]
+        Events["Exposure and review events"]
+        Warehouse["Flagsmith database warehouse"]
+        Experiment["Experiment results"]
+        Events --> Warehouse --> Experiment
+    end
+
+    Flags -->|Python SDK| Server
+    Flags -->|JS SDK| Web
+    Web -->|JS SDK| Events
+    Flags -->|Python SDK| Simulator["Reviewer simulator"]
+    Simulator -->|Python SDK| Events
+```
+
+- The analyzer walks first-parent history and parses Python with tree-sitter.
+- Each commit gets a JSON graph snapshot. The analyzer can also export a diff as Mermaid.
+- FastAPI serves snapshots, diffs, source snippets, and live flag findings.
+- The React viewer lays out the changed functions and nearby calls with ELK.
+- The browser and simulator send reviewer exposures and outcomes to Flagsmith.
+- Flagsmith computes results from events in its Postgres-backed warehouse.
+
+[Architecture and JSON schemas](docs/ARCHITECTURE.md)
+
+## Limitations
+
+- Reviewers were simulated. The experiment needs real reviewers to test the hypothesis.
+- Call resolution is static and heuristic. It can miss dynamic dispatch,
+  decorators, and framework-generated calls. Graph edges come only from parsing.
+- The analyzer supports Python only.
+- Large commits can need zooming and panning.
+- Flagsmith mode needs the analyzed repo's flags grouped under its repo tag.
+- Self-hosted Flagsmith Experimentation is in beta.
+  [Flagsmith self-hosting notes](https://docs.flagsmith.com/experimentation/self-hosting)
+
+## How it was built
+
+Claude (Claude Code) planned the milestones, wrote the task prompts, and reviewed every change. OpenAI Codex CLI implemented it: GPT 6.1 sol for the first milestones, then GPT 6.2 sol. Each change was tested before it was committed, and UI changes were checked in a real browser.
 
 ## License
 
-_To be decided (open-source core)._
+License: to be decided (open-source core).
