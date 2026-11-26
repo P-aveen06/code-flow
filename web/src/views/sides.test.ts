@@ -38,7 +38,6 @@ function edge(source: string, target: string, in_base: boolean, in_head: boolean
       status: in_base && in_head ? "context" : in_base ? "removed" : "added",
       guard: null,
       sections: [],
-      labelWidth: 0,
     },
   };
 }

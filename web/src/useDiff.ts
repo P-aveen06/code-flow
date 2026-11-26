@@ -9,6 +9,7 @@ export type Hops = 1 | 2;
 
 export function useDiff(
   repo: string, head: string | undefined, hops: Hops, expanded: ExpandedContext, comparison: boolean,
+  keepVisible?: readonly string[],
 ) {
   const loadDiff = useCallback(
     (signal: AbortSignal) => head ? fetchDiff(repo, head, { hops }, signal) : Promise.resolve(null),
@@ -17,8 +18,8 @@ export function useDiff(
   const request = useRequest(loadDiff);
   const diff = request.status === "ready" ? request.data : null;
   const graph = useMemo(
-    () => diff ? collapseContext(diff.nodes, diff.edges, expanded) : null,
-    [diff, expanded],
+    () => diff ? collapseContext(diff.nodes, diff.edges, expanded, keepVisible) : null,
+    [diff, expanded, keepVisible],
   );
   const loadLayout = useCallback(
     () => graph ? layoutFlow(graph.nodes, graph.edges, graph.chips, comparison) : Promise.resolve(null),

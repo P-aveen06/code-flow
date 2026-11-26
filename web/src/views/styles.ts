@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { EdgeStatus, Guard, NodeStatus, OverlayNode } from "../types";
+import type { GuardActivity } from "./flagFindings";
 
 export const statusLabels: Record<NodeStatus, string> = {
   added: "Added",
@@ -42,7 +43,9 @@ export function nodeStyle(status: NodeStatus): CSSProperties {
   };
 }
 
-export function edgeStyle(status: EdgeStatus): CSSProperties {
+export function edgeStyle(status: EdgeStatus, activity?: GuardActivity): CSSProperties {
+  if (activity === "live") return { stroke: statusColors.added, strokeWidth: 3.5 };
+  if (activity === "off") return { stroke: statusColors.context, strokeWidth: 2, strokeDasharray: "6 4" };
   return {
     stroke: statusColors[status],
     strokeWidth: status === "context" ? 1.5 : 2,
@@ -50,6 +53,8 @@ export function edgeStyle(status: EdgeStatus): CSSProperties {
   };
 }
 
-export function guardLabel(guard: Guard | null): string | undefined {
-  return guard ? `${guard.flag}: ${guard.when}` : undefined;
+export function guardLabel(guard: Guard | null, activity?: GuardActivity): string | undefined {
+  if (!guard) return undefined;
+  const label = `${guard.flag}: ${guard.when}`;
+  return activity ? `${label} · ${activity.toUpperCase()}` : label;
 }

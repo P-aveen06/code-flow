@@ -14,6 +14,7 @@ function comparisonPane(union: FlowLayout, side: Revision) {
   return {
     layout: {
       // Keep the union's bounds for fitView, including when one side is empty.
+      labelBounds: union.labelBounds,
       nodes: union.nodes.map((node) => visibleIds.has(node.id) ? node : { ...node, hidden: true }),
       edges: visible.edges,
     },
@@ -21,7 +22,9 @@ function comparisonPane(union: FlowLayout, side: Revision) {
   };
 }
 
-export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onExpandModule, onReady }: DiffViewProps) {
+export function SideBySide({
+  diff, layout, selectedNodeId, selectedFlag, liveStates, onNodeClick, onExpandModule, onReady,
+}: DiffViewProps) {
   const instances = useRef<Partial<Record<Revision, FlowInstance>>>({});
   const before = useMemo(() => comparisonPane(layout, "base"), [layout]);
   const after = useMemo(() => comparisonPane(layout, "head"), [layout]);
@@ -48,6 +51,8 @@ export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onExpand
         <FlowCanvas
           layout={before.layout}
           selectedNodeId={selectedNodeId}
+          selectedFlag={selectedFlag}
+          liveStates={liveStates}
           onNodeClick={onNodeClick}
           onExpandModule={onExpandModule}
           onReady={onReady}
@@ -62,6 +67,8 @@ export function SideBySide({ diff, layout, selectedNodeId, onNodeClick, onExpand
         <FlowCanvas
           layout={after.layout}
           selectedNodeId={selectedNodeId}
+          selectedFlag={selectedFlag}
+          liveStates={liveStates}
           onNodeClick={onNodeClick}
           onExpandModule={onExpandModule}
           autoFit={false}

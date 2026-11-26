@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchCode, fetchCommits, fetchDiff, fetchRepoStatus, fetchRepos, fetchSnapshot, importRepo } from "./api";
+import { fetchCode, fetchCommits, fetchDiff, fetchRepoFlags, fetchRepoStatus, fetchRepos, fetchSnapshot, importRepo } from "./api";
 import type { Repo } from "./types";
 
 vi.mock("./config", () => ({ apiUrl: "https://flow.test/gateway/" }));
@@ -79,6 +79,17 @@ describe("API client", () => {
       "https://flow.test/gateway/api/repos/shop/code?sha=abc&file=shop%2Fcheckout+%26+cart.py&start=1&end=19",
       "https://flow.test/gateway/api/repos/shop/code?sha=abc&file=shop%2Fcart.py",
     ]);
+  });
+
+  it("loads repo findings for a commit and gives a readable message if the endpoint is missing", async () => {
+    const data = { repo: "shop", sha: "abcdef", flags: [] };
+    mockFetch.mockResolvedValueOnce(Response.json(data))
+      .mockResolvedValueOnce(Response.json({ detail: "Not Found" }, { status: 404 }));
+
+    await expect(fetchRepoFlags("shop", "abc")).resolves.toEqual(data);
+    expect(mockFetch).toHaveBeenCalledWith("https://flow.test/gateway/api/repos/shop/flags?sha=abc",
+      expect.objectContaining({ cache: "no-store" }));
+    await expect(fetchRepoFlags("shop")).rejects.toThrow("Flagsmith findings are unavailable for this commit");
   });
 
   it("reports HTTP errors with the API detail when available", async () => {

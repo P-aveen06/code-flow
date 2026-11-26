@@ -1,18 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { FLOW_VIEWS, readFlowView } from "./view";
+import { describe, expect, it, vi } from "vitest";
+import { chooseFlowView, FLOW_VIEWS, readViewOverride } from "./view";
 
-describe("readFlowView", () => {
-  it("defaults to the overlay", () => {
-    expect(readFlowView("")).toBe("overlay");
-    expect(readFlowView("?repo=shop-demo")).toBe("overlay");
+describe("chooseFlowView", () => {
+  it.each(FLOW_VIEWS)("uses the experiment value %s", (view) => {
+    expect(chooseFlowView(null, () => view)).toBe(view);
   });
 
-  it.each(FLOW_VIEWS)("reads %s", (view) => {
-    expect(readFlowView(`?repo=shop-demo&view=${view}`)).toBe(view);
+  it.each([null, undefined, "other", false])("defaults to control for %s", (value) => {
+    expect(chooseFlowView(null, () => value)).toBe("side_by_side");
   });
 
-  it("falls back for an unknown or empty view", () => {
-    expect(readFlowView("?view=other")).toBe("overlay");
-    expect(readFlowView("?view=")).toBe("overlay");
+  it.each([
+    ["?view=overlay_summary&reviewer=demo-1", "overlay_summary"],
+    ["?view=other", "side_by_side"],
+    ["?view=", "side_by_side"],
+  ])("skips experiment exposure for %s", (search, expected) => {
+    const readExperimentValue = vi.fn(() => "overlay");
+    expect(chooseFlowView(readViewOverride(search), readExperimentValue)).toBe(expected);
+    expect(readExperimentValue).not.toHaveBeenCalled();
   });
 });

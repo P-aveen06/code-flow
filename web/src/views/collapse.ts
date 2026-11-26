@@ -20,11 +20,12 @@ export function callKey({ source, target, status, guard }: OverlayEdge) {
 
 export function collapseContext(
   nodes: OverlayNode[], edges: OverlayEdge[], expanded: ExpandedContext,
+  keepVisible: readonly string[] = [],
 ) {
   if (expanded === "all") return { nodes, edges, chips: [] };
 
   const changed = new Set(nodes.filter(({ status }) => status !== "context").map(({ id }) => id));
-  const keep = new Set(changed);
+  const keep = new Set([...changed, ...keepVisible]);
   for (const { source, target, guard, status } of edges) {
     if (guard || (status !== "context" && changed.has(target))) keep.add(source);
     if (guard || (status !== "context" && changed.has(source))) keep.add(target);

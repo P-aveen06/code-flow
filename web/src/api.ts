@@ -1,8 +1,14 @@
 import { apiUrl } from "./config";
 import type {
   CodeSnippet, CommitList, DiffViewModel, GraphSnapshot, ImportRequest, ImportResponse,
-  ImportStatus, Repo,
+  ImportStatus, Repo, RepoFlags,
 } from "./types";
+
+class HttpError extends Error {
+  constructor(readonly status: number, detail: string) {
+    super(`Server returned HTTP ${status}${detail}`);
+  }
+}
 
 async function requestJson<T>(path: string, signal?: AbortSignal, options?: RequestInit): Promise<T> {
   let response: Response;
@@ -19,7 +25,7 @@ async function requestJson<T>(path: string, signal?: AbortSignal, options?: Requ
       throw new Error(body.detail);
     }
     const detail = typeof body?.detail === "string" ? `: ${body.detail}` : "";
-    throw new Error(`Server returned HTTP ${response.status}${detail}`);
+    throw new HttpError(response.status, detail);
   }
 
   try {
@@ -61,6 +67,18 @@ export function fetchCommits(repo: string, signal?: AbortSignal) {
 
 export function fetchSnapshot(repo: string, sha: string, signal?: AbortSignal) {
   return requestJson<GraphSnapshot>(`${repoPath(repo)}/snapshots/${encodeURIComponent(sha)}`, signal);
+}
+
+export async function fetchRepoFlags(repo: string, sha?: string, signal?: AbortSignal) {
+  const query = sha ? `?${new URLSearchParams({ sha })}` : "";
+  try {
+    return await requestJson<RepoFlags>(`${repoPath(repo)}/flags${query}`, signal, { cache: "no-store" });
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      throw new Error("Flagsmith findings are unavailable for this commit (HTTP 404).");
+    }
+    throw error;
+  }
 }
 
 export function fetchDiff(

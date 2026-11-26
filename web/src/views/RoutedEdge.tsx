@@ -1,14 +1,8 @@
 import { BaseEdge, BezierEdge, EdgeLabelRenderer } from "@xyflow/react";
 import type { EdgeProps } from "@xyflow/react";
-import type { ElkEdgeSection, ElkPoint } from "elkjs/lib/elk.bundled.js";
+import type { ElkPoint } from "elkjs/lib/elk.bundled.js";
+import { routePoints } from "../layout/edgeLabels";
 import type { FlowEdge } from "../layout/elk";
-
-function routePoints({ startPoint, bendPoints = [], endPoint }: ElkEdgeSection) {
-  return [startPoint, ...bendPoints, endPoint].filter((point, index, points) => {
-    const previous = points[index - 1];
-    return !previous || point.x !== previous.x || point.y !== previous.y;
-  });
-}
 
 function distance(a: ElkPoint, b: ElkPoint) {
   return Math.hypot(b.x - a.x, b.y - a.y);
@@ -33,57 +27,37 @@ function roundedPath(points: ElkPoint[]) {
   return `${path} L ${end.x} ${end.y}`;
 }
 
-function midpoint(start: ElkPoint, end: ElkPoint) {
-  return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-}
-
-function labelPosition(routes: ElkPoint[][], labelWidth: number) {
-  const [first, next = first] = routes[0];
-  let best = midpoint(first, next);
-  let longest = 0;
-
-  for (const points of routes) {
-    for (let index = 1; index < points.length; index++) {
-      const start = points[index - 1];
-      const end = points[index];
-      if (Math.abs(start.y - end.y) > 0.001) continue;
-
-      // Skip short connector stubs where the label would cover the source or its other calls.
-      const length = Math.abs(end.x - start.x);
-      if (length >= labelWidth) return midpoint(start, end);
-      if (length > longest) {
-        longest = length;
-        best = midpoint(start, end);
-      }
-    }
-  }
-
-  return best;
-}
-
 export function RoutedEdge(props: EdgeProps<FlowEdge>) {
   const { data, label, markerEnd, style, interactionWidth } = props;
   const sections = data?.sections;
-  if (!sections?.length) return <BezierEdge {...props} />;
-
-  const routes = sections.map(routePoints);
-  const labelPoint = label ? labelPosition(routes, data.labelWidth) : null;
+  const placement = data?.labelPlacement;
+  const center = placement?.center;
   return (
     <>
-      {sections.map((section, index) => (
+      {sections?.length ? sections.map((section) => (
         <BaseEdge
           key={section.id}
-          path={roundedPath(routes[index])}
+          path={roundedPath(routePoints(section))}
           markerEnd={section.outgoingSections?.length ? undefined : markerEnd}
           interactionWidth={interactionWidth}
           style={style}
         />
-      ))}
-      {labelPoint && (
+      )) : <BezierEdge {...props} label={undefined} />}
+      {placement && center && (placement.anchor.x !== center.x || placement.anchor.y !== center.y) && (
+        <line
+          className="flow-edge-label-leader"
+          x1={placement.anchor.x} y1={placement.anchor.y} x2={center.x} y2={center.y}
+          style={{ opacity: style?.opacity, stroke: style?.stroke }}
+        />
+      )}
+      {center && (
         <EdgeLabelRenderer>
           <span
             className="flow-edge-label"
-            style={{ transform: `translate(-50%, -50%) translate(${labelPoint.x}px, ${labelPoint.y}px)` }}
+            style={{
+              transform: `translate(-50%, -50%) translate(${center.x}px, ${center.y}px)`,
+              opacity: style?.opacity,
+            }}
           >
             {label}
           </span>

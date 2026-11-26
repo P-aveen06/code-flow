@@ -9,6 +9,8 @@ const context: ReviewContext = {
   head: "abc123",
   base: "",
   view: "overlay_summary",
+  reviewerId: "demo-1",
+  devOverride: true,
 };
 
 describe("review timing", () => {
@@ -23,6 +25,8 @@ describe("review timing", () => {
       event: "diff_understood",
       ms: 12300,
       view: "overlay_summary",
+      reviewerId: "demo-1",
+      devOverride: true,
       repo: "shop-demo",
       head: "abc123",
       base: "",

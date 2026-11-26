@@ -1,10 +1,12 @@
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node, Rect } from "@xyflow/react";
 import type { ElkEdgeSection, ElkNode } from "elkjs/lib/elk.bundled.js";
 import type { OverlayEdge, OverlayNode } from "../types";
 import { callKey, contextLabel } from "../views/collapse";
 import type { ContextChip } from "../views/collapse";
 import { guardLabel, symbolNameLines } from "../views/styles";
+import { edgeLabelBounds, placeEdgeLabels } from "./edgeLabels";
 import { packedRoutes } from "./packedRoutes";
+import type { LabelPlacement } from "./edgeLabels";
 
 const ELK_OPTIONS = {
   graph: {
@@ -46,13 +48,14 @@ export type ModuleNode = Node<{ label: string }, "module">;
 export type FlowNode = SymbolNode | ChipNode | ModuleNode;
 type CallData = Omit<OverlayEdge, "source" | "target"> & {
   sections: ElkEdgeSection[];
-  labelWidth: number;
+  labelPlacement?: LabelPlacement;
 };
 export type FlowEdge = Edge<CallData> & { data: CallData; label?: string };
 
 export interface FlowLayout {
   nodes: FlowNode[];
   edges: FlowEdge[];
+  labelBounds?: Rect;
 }
 
 function position(node: ElkNode) {
@@ -110,8 +113,7 @@ export async function layoutFlow(
       source,
       target,
       label,
-      // Allow for the monospace text, background padding and border.
-      data: { ...data, sections: [], labelWidth: label ? label.length * 9 + 18 : 0 },
+      data: { ...data, sections: [] },
     };
   });
 
@@ -121,16 +123,10 @@ export async function layoutFlow(
     id: "graph",
     layoutOptions: ELK_OPTIONS.graph,
     children: [...modules.values(), ...standalone],
-    edges: flowEdges.map(({ id, source, target, label, data }) => ({
+    edges: flowEdges.map(({ id, source, target }) => ({
       id,
       sources: [source],
       targets: [target],
-      labels: label ? [{
-        text: label,
-        width: data.labelWidth,
-        height: 28,
-        layoutOptions: { "elk.edgeLabels.inline": "true" },
-      }] : undefined,
     })),
   };
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
@@ -141,11 +137,12 @@ export async function layoutFlow(
     .filter((node) => changed.has(node.id))
     .map((node) => ({ left: (group.x ?? 0) + (node.x ?? 0), width: node.width ?? 0 })));
   const focusWidth = Math.max(...focus.map(({ left, width }) => left + width)) - Math.min(...focus.map(({ left }) => left));
-  // Stack symbols inside their modules and pack the modules into rows when the
-  // layered layout spreads changed symbols too far apart.
-  const packed = focusWidth > (comparison ? 850 : 1600);
+  const guardedCalls = new Set(flowEdges.filter(({ label }) => label).map(({ id }) => id));
+  // Guard labels sit outside module boxes. Pack the full diagram when it is
+  // too wide to show those labels without shrinking the comparison panes.
+  const packed = focusWidth > (comparison ? 850 : 1600)
+    || (guardedCalls.size > 0 && (result.width ?? 0) > (comparison ? 680 : 1450));
   if (packed) {
-    const guards = new Set(flowEdges.filter(({ label }) => label).map(({ id }) => id));
     result = await elk.layout({
       ...graph,
       layoutOptions: comparison ? { ...ELK_OPTIONS.packed, ...ELK_OPTIONS.packedComparison } : ELK_OPTIONS.packed,
@@ -155,7 +152,7 @@ export async function layoutFlow(
       edges: graph.edges?.filter(({ id, sources: [source], targets: [target] }) => {
         const parent = leaves.get(source)?.parentId;
         // Keep incidental context calls from spreading apart the comparison's changed symbols.
-        const laysOut = !comparison || source === target || guards.has(id) || (changed.has(source) && changed.has(target));
+        const laysOut = !comparison || source === target || guardedCalls.has(id) || (changed.has(source) && changed.has(target));
         return laysOut && parent && parent === leaves.get(target)?.parentId;
       }),
     });
@@ -189,11 +186,14 @@ export async function layoutFlow(
   const extraRoutes = packed
     ? packedRoutes(flowNodes, flowEdges.filter(({ id }) => !sectionsById.get(id)?.length))
     : null;
+  for (const { id, data } of flowEdges) {
+    data.sections = extraRoutes?.get(id) ?? sectionsById.get(id) ?? [];
+  }
+  const placements = placeEdgeLabels(flowNodes, flowEdges);
+  for (const { id, data } of flowEdges) data.labelPlacement = placements.get(id);
   return {
     nodes: flowNodes,
-    edges: flowEdges.map((edge) => ({
-      ...edge,
-      data: { ...edge.data, sections: extraRoutes?.get(edge.id) ?? sectionsById.get(edge.id) ?? [] },
-    })),
+    edges: flowEdges,
+    labelBounds: edgeLabelBounds(placements),
   };
 }

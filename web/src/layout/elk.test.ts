@@ -131,6 +131,33 @@ describe("layoutFlow", () => {
     }
   });
 
+  it("keeps long guard labels outside module boxes and within the fit bounds", async () => {
+    const guard = { flag: "get_current_api_usage_deprecated", when: "on" } as const;
+    const calls = [
+      { ...edges[0], guard },
+      { ...edges[1], guard },
+    ];
+    const layout = await layoutFlow(nodes, calls, [], true);
+    const modules = layout.nodes.filter(({ type }) => type === "module");
+    const labels = layout.edges.map(({ data }) => data.labelPlacement!.bounds);
+    const container = layout.labelBounds!;
+
+    for (const label of labels) {
+      expect(label.left).toBeGreaterThanOrEqual(container.x);
+      expect(label.top).toBeGreaterThanOrEqual(container.y);
+      expect(label.right).toBeLessThanOrEqual(container.x + container.width);
+      expect(label.bottom).toBeLessThanOrEqual(container.y + container.height);
+      for (const { position, width = 0, height = 0 } of modules) {
+        const outside = label.right <= position.x || label.left >= position.x + width
+          || label.bottom <= position.y || label.top >= position.y + height;
+        expect(outside).toBe(true);
+      }
+    }
+
+    const [a, b] = labels;
+    expect(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom).toBe(true);
+  });
+
   it("is deterministic and accepts an empty graph", async () => {
     expect(await layoutFlow(nodes, edges)).toEqual(await layoutFlow(nodes, edges));
     expect(await layoutFlow([], [])).toEqual({ nodes: [], edges: [] });

@@ -67,6 +67,40 @@ export interface Guard {
   when: "on" | "off";
 }
 
+export type FlagStatus = "orphan" | "live" | "off" | "unused" | "unknown";
+
+export interface FlagCheck {
+  file: string;
+  line: number;
+  function: string;
+  call: string;
+}
+
+export interface FlagFinding {
+  name: string;
+  status: FlagStatus;
+  enabled: boolean | null;
+  value: string | number | boolean | null;
+  in_flagsmith: boolean;
+  checks: FlagCheck[];
+  guarded_edges: (EdgeEndpoints & { when: Guard["when"]; live: boolean | null })[];
+  stale: boolean;
+  stale_reason: string | null;
+  dead_calls: EdgeEndpoints[];
+}
+
+export interface RepoFlags {
+  repo: string;
+  sha: string;
+  flagsmith: {
+    connected: boolean;
+    environment: string | null;
+    fetched_at: string | null;
+    error: string | null;
+  };
+  flags: FlagFinding[];
+}
+
 interface EdgeEndpoints {
   source: string;
   target: string;
@@ -88,7 +122,7 @@ export interface GraphSnapshot {
   commit: Commit;
   nodes: (NodeLocation & { body_hash: string })[];
   edges: (EdgeEndpoints & { kind: "call"; line: number; guard: Guard | null })[];
-  flags: { name: string; file: string; line: number; function: string; call: string }[];
+  flags: (FlagCheck & { name: string })[];
 }
 
 interface AddedRemoved<T> {

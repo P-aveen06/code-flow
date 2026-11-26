@@ -4,6 +4,8 @@ import type { FlowView } from "./view";
 // the rendered diff to the decision. An empty base denotes the root commit.
 export interface ReviewContext {
   view: FlowView;
+  reviewerId: string;
+  devOverride: boolean;
   repo: string;
   head: string;
   base: string;

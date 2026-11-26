@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCommits, fetchRepos, fetchSnapshot } from "../api";
 import { AppLink } from "../AppLink";
 import { recordReviewEvent } from "../events";
+import { useCodeFlowFlags } from "../flags";
 import { navigate, repoPath } from "../router";
-import type { DiffViewModel, OverlayNode, TimelineCommit } from "../types";
+import type { DiffViewModel, FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
 import { useDiff } from "../useDiff";
 import type { Hops } from "../useDiff";
+import { useRepoFlags } from "../useRepoFlags";
 import { useRequest } from "../useRequest";
-import { readFlowView } from "../view";
 import type { FlowView } from "../view";
 import { CodePane } from "../views/CodePane";
+import type { CodeSource } from "../views/CodePane";
+import { FlagsmithPanel } from "../views/FlagsmithPanel";
 import { FlowLegend } from "../views/FlowCanvas";
 import { Overlay } from "../views/Overlay";
 import { OverlaySummary } from "../views/OverlaySummary";
@@ -17,6 +20,7 @@ import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
 import type { ExpandedContext } from "../views/collapse";
+import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
 import {
   formatCommitDate, formatFunctionCounts, hasFlowChange, nearestFlowChange, resolveCommit,
 } from "../views/timelineHelpers";
@@ -92,9 +96,18 @@ interface RepoReviewProps {
 }
 
 function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
-  const view = readFlowView(search);
+  const { flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, notice } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
+  const findings = useRepoFlags(id, flagsmithMode ? head : undefined);
+  const flags = findings.status === "ready" ? findings.data : undefined;
+  const liveStates = useMemo(() => liveFlagStates(flags), [flags]);
+  const [flagSelection, setFlagSelection] = useState<{
+    head: string | undefined; finding: FlagFinding;
+  }>();
+  const selectedFlag = flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
+    && flagSelection?.head === head ? flagSelection?.finding : undefined;
+  const checkIds = useMemo(() => selectedFlag?.checks.map((check) => check.function), [selectedFlag]);
   const [hops, setHops] = useState<Hops>(1);
   const [guideOpen, setGuideOpen] = useState(readGuidePreference);
   const guideButton = useRef<HTMLButtonElement>(null);
@@ -102,22 +115,44 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
     () => ({ head, expanded: new Set() }),
   );
   if (context.head !== head) setContext({ head, expanded: new Set() });
-  const [selection, setSelection] = useState<{ diff: DiffViewModel; node: OverlayNode } | null>(null);
+  const [selection, setSelection] = useState<
+    { diff: DiffViewModel; node: OverlayNode } | { head: string; check: FlagCheck } | null
+  >(null);
   const [rendered, setRendered] = useState<{ diff: DiffViewModel; view: FlowView } | null>(null);
   const { request, diff, layout, hasCollapsedContext } = useDiff(
-    id, hasNodes ? head : undefined, hops, context.expanded, view === "side_by_side",
+    id, hasNodes && flagsReady ? head : undefined, hops, context.expanded, view === "side_by_side", checkIds,
   );
   const contextExpanded = context.expanded === "all" || context.expanded.size > 0;
-  const selectedNode = selection?.diff === diff ? selection.node : null;
+  const selectedNode = selection && "node" in selection && selection.diff === diff ? selection.node : null;
+  let source: CodeSource | undefined;
+  if (selectedNode && diff) {
+    const { in_head, file, line, end_line, qualname, status } = selectedNode;
+    source = {
+      sha: in_head ? diff.head : diff.base, revision: in_head ? "Head" : "Base",
+      file, line, endLine: end_line, name: qualname, status,
+    };
+  } else if (selection && "check" in selection && selection.head === head) {
+    const { file, line } = selection.check;
+    source = { sha: head, revision: "Head", file, line, endLine: line, name: `${file}:${line}` };
+  }
   const markRendered = useCallback(() => {
     if (diff) setRendered({ diff, view });
   }, [diff, view]);
   const reviewContext = diff && rendered?.diff === diff && rendered.view === view
-    ? { repo: id, view, head: diff.head, base: diff.base }
+    ? { repo: id, view, reviewerId, head: diff.head, base: diff.base, devOverride: viewOverride !== null }
     : null;
   const View = view === "side_by_side" ? SideBySide : Overlay;
   const flowChanged = selected && hasFlowChange(selected.stats);
   const nextChange = selected && !flowChanged ? nearestFlowChange(commits, selected.sha) : null;
+
+  useEffect(() => {
+    if (!selectedFlag) return;
+    function clearHighlight(event: KeyboardEvent) {
+      if (event.key === "Escape") setFlagSelection(undefined);
+    }
+    window.addEventListener("keydown", clearHighlight);
+    return () => window.removeEventListener("keydown", clearHighlight);
+  }, [selectedFlag]);
 
   const commitHref = useCallback((sha: string) => {
     const params = new URLSearchParams(search);
@@ -126,7 +161,10 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
   }, [id, search]);
 
   const selectCommit = useCallback((sha: string) => {
-    if (sha !== head) navigate(commitHref(sha));
+    if (sha !== head) {
+      setFlagSelection(undefined);
+      navigate(commitHref(sha));
+    }
   }, [commitHref, head]);
 
   function setGuide(open: boolean) {
@@ -162,26 +200,34 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
             </div>
           )}
         </div>
-        {hasNodes && (
-          <div className="neighbours" title={neighboursHint}>
-            <span id="neighbours-label">Show neighbours:</span>
-            <div className="segmented" role="group" aria-labelledby="neighbours-label" aria-description={neighboursHint}>
-              {([1, 2] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={hops === option ? "segmented__btn is-active" : "segmented__btn"}
-                  aria-pressed={hops === option}
-                  onClick={() => setHops(option)}
-                >
-                  {option} {option === 1 ? "step" : "steps"}
-                </button>
-              ))}
+        <div className="viewer-header__controls">
+          {hasNodes && (
+            <div className="neighbours" title={neighboursHint}>
+              <span id="neighbours-label">Show neighbours:</span>
+              <div className="segmented" role="group" aria-labelledby="neighbours-label" aria-description={neighboursHint}>
+                {([1, 2] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={hops === option ? "segmented__btn is-active" : "segmented__btn"}
+                    aria-pressed={hops === option}
+                    onClick={() => setHops(option)}
+                  >
+                    {option} {option === 1 ? "step" : "steps"}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {viewOverride !== null && (
+            <span className="status-chip viewer-header__notice">
+              Dev override: <code>view={viewOverride}</code> (not counted in the experiment)
+            </span>
+          )}
+          {notice && <p className="muted" role="status">{notice}</p>}
+        </div>
       </header>
-      <div className={selectedNode ? "workspace workspace--with-code" : "workspace"}>
+      <div className={source || flagsmithMode ? "workspace workspace--with-drawer" : "workspace"}>
         <Timeline commits={commits} selectedSha={head} onSelect={selectCommit} />
         <section className="graph-panel" aria-labelledby="flow-title">
           <div className="panel-heading">
@@ -214,7 +260,9 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
               <p>No Python code found in {subdir ? displaySubdir(subdir) : "this repository"}. code-flow analyzes Python only for now.</p>
             </div>
           )}
-          {hasNodes && request.status === "loading" && <p className="panel-message" role="status">Loading flow diff…</p>}
+          {hasNodes && (!flagsReady || request.status === "loading") && (
+            <p className="panel-message" role="status">Loading flow diff…</p>
+          )}
           {request.status === "error" && <p className="panel-message" role="alert">{request.message}</p>}
           {diff && layout.status === "loading" && <p className="panel-message" role="status">Laying out the flow…</p>}
           {diff && layout.status === "error" && (
@@ -230,11 +278,13 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
                     diff={diff}
                     layout={layout.data}
                     selectedNodeId={selectedNode?.id}
+                    selectedFlag={selectedFlag}
+                    liveStates={liveStates}
                     onNodeClick={(node) => setSelection({ diff, node })}
                     onExpandModule={expandModule}
                     onReady={markRendered}
                   />
-                  <FlowLegend />
+                  <FlowLegend flagsmithMode={flagsmithMode} />
                 </>
               ) : (
                 <NoFlowChange
@@ -245,11 +295,29 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
             </div>
           )}
           {hasNodes && head && (
-            <ReviewBar key={JSON.stringify([id, head, view])} context={reviewContext} onReview={recordReviewEvent} />
+            <ReviewBar
+              key={JSON.stringify([id, head, view, reviewerId, viewOverride])}
+              context={reviewContext} onReview={recordReviewEvent}
+            />
           )}
         </section>
-        {selectedNode && diff && (
-          <CodePane repo={id} head={diff.head} base={diff.base} node={selectedNode} onClose={() => setSelection(null)} />
+        {(source || flagsmithMode) && (
+          <div className="drawer workspace__drawer">
+            {flagsmithMode && (
+              <FlagsmithPanel
+                data={flags}
+                error={findings.status === "error" ? findings.message : undefined}
+                loading={Boolean(head) && findings.status === "loading"}
+                selected={selectedFlag?.name}
+                onSelect={(finding) => {
+                  const name = toggleFlagSelection(selectedFlag?.name, finding.name);
+                  setFlagSelection(name ? { head, finding } : undefined);
+                }}
+                onOpenCheck={(check) => { if (head) setSelection({ head, check }); }}
+              />
+            )}
+            {source && <CodePane repo={id} source={source} onClose={() => setSelection(null)} />}
+          </div>
         )}
       </div>
     </main>

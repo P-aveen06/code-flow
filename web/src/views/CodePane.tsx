@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { fetchCode } from "../api";
-import type { OverlayNode } from "../types";
+import type { NodeStatus } from "../types";
 import { useRequest } from "../useRequest";
 import { nodeStyle, statusLabels } from "./styles";
 
@@ -8,15 +8,22 @@ const CONTEXT_LINES = 3;
 
 interface CodePaneProps {
   repo: string;
-  head: string;
-  base: string;
-  node: OverlayNode;
+  source: CodeSource;
   onClose: () => void;
 }
 
-export function CodePane({ repo, head, base, node, onClose }: CodePaneProps) {
-  const sha = node.in_head ? head : base;
-  const { file, line, end_line: endLine, status } = node;
+export interface CodeSource {
+  sha: string;
+  revision: "Head" | "Base";
+  file: string;
+  line: number;
+  endLine: number;
+  name: string;
+  status?: NodeStatus;
+}
+
+export function CodePane({ repo, source, onClose }: CodePaneProps) {
+  const { sha, revision, file, line, endLine, name, status } = source;
   const loadCode = useCallback(
     (signal: AbortSignal) => file
       ? fetchCode(repo, sha, file, Math.max(1, line - CONTEXT_LINES), endLine + CONTEXT_LINES, signal)
@@ -34,17 +41,17 @@ export function CodePane({ repo, head, base, node, onClose }: CodePaneProps) {
         </button>
       </div>
       <div className="code-pane__location">
-        <code title={file}>{file ? `${file}:${line}` : node.qualname}</code>
+        <code title={file}>{file ? `${file}:${line}` : name}</code>
         <div className="code-pane__meta">
-          <span className="status-chip" style={nodeStyle(status)}>{statusLabels[status]}</span>
-          <code title={sha}>{node.in_head ? "Head" : "Base"} {sha.slice(0, 7)}</code>
+          {status && <span className="status-chip" style={nodeStyle(status)}>{statusLabels[status]}</span>}
+          <code title={sha}>{revision} {sha.slice(0, 7)}</code>
         </div>
       </div>
       {!file && <p className="panel-message">Source is unavailable for this node.</p>}
       {file && code.status === "loading" && <p className="panel-message" role="status">Loading source…</p>}
       {code.status === "error" && <p className="panel-message" role="alert">{code.message}</p>}
       {code.status === "ready" && code.data && (
-        <pre className="code-pane__snippet" tabIndex={0} aria-label={`Source for ${node.qualname}`}>
+        <pre className="code-pane__snippet" tabIndex={0} aria-label={`Source for ${name}`}>
           <code>
             {code.data.lines.map(({ number, text }) => (
               <span
