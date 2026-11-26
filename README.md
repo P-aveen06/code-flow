@@ -91,6 +91,37 @@ If the script cannot enable the built-in warehouse, open the selected
 environment in `code-flow` and choose **Environment Settings > Warehouse >
 Flagsmith database > Enable**.
 
+## Experiment
+
+We hypothesize that reviewers understand a flow diff more often and decide
+faster with a single overlay and a one-line summary than with side-by-side
+diagrams. The Flagsmith flag `flow_view` allocates 34% to `side_by_side`
+(control), 33% to `overlay`, and 33% to `overlay_summary`. The primary metric
+is the share of exposed reviewers who record `diff_understood`. The simulator
+attaches the decision time in milliseconds to both `diff_understood` and
+`diff_confusing`.
+
+The reviewers are **simulated** using the assumptions in
+[behaviour.yaml](simulator/behaviour.yaml). Diff sizes come from flow-changing
+commits in the local Flagsmith analysis, with the analyzed shop demo as a
+fallback. The hypothesis model encodes the expected differences to
+demonstrate the event pipeline and Flagsmith's analysis. Testing the
+hypothesis with real reviewers requires real review data. The null model
+gives every variant the same behaviour to check for spurious differences.
+
+```sh
+make simulate-dry-run
+uv run --project simulator python simulator/simulate.py --dry-run --model null --n 3000 --rate 1000
+make simulate  # Sends events to the running Flagsmith experiment
+```
+
+Import Flagsmith/flagsmith in the app or follow **Try the analyzer** to
+prepare local commit data. The live run requires a running experiment with
+keyed variants and reads `FLAGSMITH_API_URL` and `CODEFLOW_FLAGSMITH_ENV_KEY`
+from the root `.env`. Shell environment variables take precedence. The Make
+targets use 1,000 reviewers at up to 20 per second with seed 7. Use
+`--prefix` in the CLI to give a separate run fresh reviewer identities.
+
 ## License
 
 _To be decided (open-source core)._
