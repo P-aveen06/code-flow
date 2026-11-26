@@ -202,6 +202,7 @@ code-flow/
   analyzer/
     pyproject.toml
     codeflow/{__init__,cli,graph,parse_python,resolve,git_history,diff,flags,summary,export_mermaid}.py
+    codeflow/build.py  assembles one commit's parsed files into a graph
     tests/
   server/
     pyproject.toml

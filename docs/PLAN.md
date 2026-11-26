@@ -67,10 +67,10 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] Root `Makefile` (or `justfile`): `make dev` runs server + web, `make test` runs all tests
 
 ### M1 Analyzer
-- [ ] `parse_python.py`: tree-sitter-python; collect modules, classes, functions, methods (qualified names), call sites with line numbers, import table, `if` conditions
-- [ ] `resolve.py`: call resolution rules from ARCHITECTURE.md; unit tests per rule
-- [ ] `graph.py`: dataclasses for Node/Edge/Flag/Graph, `to_json` / `from_json`, schema `code-flow/graph@1`, `body_hash` on normalized function text
-- [ ] `flags.py`: detect Flagsmith checks and set `guard` on edges (if/elif/else, `not`, local variable)
+- [x] `parse_python.py`: tree-sitter-python; collect modules, classes, functions, methods (qualified names), call sites with line numbers, import table, `if` conditions
+- [x] `resolve.py`: call resolution rules from ARCHITECTURE.md; unit tests per rule
+- [x] `graph.py`: dataclasses for Node/Edge/Flag/Graph, `to_json` / `from_json`, schema `code-flow/graph@1`, `body_hash` on normalized function text
+- [x] `flags.py`: detect Flagsmith checks and set `guard` on edges (if/elif/else, `not`, local variable)
 - [ ] `git_history.py`: list first-parent commits on a branch (`--max-count N`), read files at a commit with `git ls-tree` / `git cat-file`, cache per-file parse results by blob sha, path include/exclude globs (skip tests and migrations by default)
 - [ ] `diff.py`: added/removed/changed nodes, added/removed edges, flag changes, stats, `neighbourhood(diff, hops=1)`
 - [ ] `summary.py`: rule-based one-line summary of a diff
