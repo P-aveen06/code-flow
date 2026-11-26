@@ -1,7 +1,8 @@
+import type { IFlagsmith } from "@flagsmith/flagsmith";
 import type { FlowView } from "./view";
 
-// M4 can send these flat payloads to Flagsmith. Review ms is measured from
-// the rendered diff to the decision. An empty base denotes the root commit.
+// Review ms is measured from the rendered diff to the decision.
+// An empty base denotes the root commit.
 export interface ReviewContext {
   view: FlowView;
   reviewerId: string;
@@ -36,11 +37,20 @@ function record(payload: DiffEvent) {
   console.info(payload.event, payload);
 }
 
-export function recordReviewEvent(payload: ReviewEvent) {
+export function recordReviewEvent(payload: ReviewEvent, client: Pick<IFlagsmith, "trackEvent"> | null) {
   record(payload);
+  // Keep dev overrides and reviews without a working Flagsmith client local.
+  if (payload.devOverride || !client) return;
+
+  client.trackEvent(payload.event, {
+    identifier: payload.reviewerId,
+    value: payload.ms,
+    metadata: { variant: payload.view },
+  });
 }
 
 export function recordDiffViewed(context: ReviewContext) {
+  // getExperimentFlag already records the Flagsmith exposure.
   record({ ...context, event: "diff_viewed" });
 }
 

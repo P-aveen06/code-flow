@@ -34,7 +34,7 @@ describe("review timing", () => {
   });
 });
 
-it("records the exposure and review in memory and logs both", () => {
+it("records the view and review in memory and logs both", () => {
   const log = vi.spyOn(console, "info").mockImplementation(() => {});
   const review = buildReviewEvent(context, "diff_confusing", 100, 450);
   const viewed = { ...context, event: "diff_viewed" };
@@ -42,11 +42,46 @@ it("records the exposure and review in memory and logs both", () => {
 
   try {
     recordDiffViewed(context);
-    recordReviewEvent(review);
+    recordReviewEvent(review, null);
     expect(getReviewEvents().slice(start)).toEqual([viewed, review]);
     expect(log).toHaveBeenCalledWith("diff_viewed", viewed);
     expect(log).toHaveBeenCalledWith("diff_confusing", review);
   } finally {
     log.mockRestore();
   }
+});
+
+describe("Flagsmith review events", () => {
+  const assignedContext = { ...context, devOverride: false };
+
+  it.each(["diff_understood", "diff_confusing"] as const)("sends %s with the review time and variant", (outcome) => {
+    const client = { trackEvent: vi.fn() };
+    const review = buildReviewEvent(assignedContext, outcome, 100, 450);
+
+    recordReviewEvent(review, client);
+
+    expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith(outcome, {
+      identifier: assignedContext.reviewerId,
+      value: 350,
+      metadata: { variant: "overlay_summary" },
+    });
+  });
+
+  it("keeps a dev override local even with a working client", () => {
+    const client = { trackEvent: vi.fn() };
+    const review = buildReviewEvent(context, "diff_understood", 100, 450);
+
+    recordReviewEvent(review, client);
+
+    expect(client.trackEvent).not.toHaveBeenCalled();
+    expect(getReviewEvents().at(-1)).toEqual(review);
+  });
+
+  it("keeps a review local when Flagsmith is unavailable", () => {
+    const review = buildReviewEvent(assignedContext, "diff_confusing", 100, 450);
+
+    recordReviewEvent(review, null);
+
+    expect(getReviewEvents().at(-1)).toEqual(review);
+  });
 });

@@ -46,15 +46,29 @@ function initFlagsmith(environmentID: string) {
     // The first request should use the reviewer identity.
     preventFetch: true,
     defaultFlags: {},
-    fetch: (url: string, options: RequestInit) => fetch(url, {
-      ...options, signal: options.signal ?? AbortSignal.timeout(5_000),
-    }),
+    fetch: (url: string, options: RequestInit) => {
+      // The SDK appends v1/events. Match the API's trailing slash and let
+      // event batches within the browser's keepalive limit finish on unload.
+      if (url.endsWith("/v1/events")) {
+        const keepalive = typeof options.body === "string" && new Blob([options.body]).size <= 64 * 1024;
+        return fetch(`${url}/`, { ...options, keepalive });
+      }
+      return fetch(url, { ...options, signal: options.signal ?? AbortSignal.timeout(5_000) });
+    },
+  }).then(() => {
+    // The SDK outlives the viewer, so keep flushing across route changes.
+    const flush = () => { void flagsmith.flushEvents(); };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flush();
+    });
+    window.addEventListener("pagehide", flush);
   }));
 }
 
 interface FlagValues {
   flowView: FlowView;
   flagsmithMode: boolean;
+  reviewEventClient: typeof flagsmith | null;
   notice?: string;
 }
 
@@ -72,7 +86,7 @@ export function useCodeFlowFlags(search: string) {
     let lastAssignment: { key: string; view: FlowView } | undefined;
     const publish = (values: FlagValues) => setResult({ reviewerId, viewOverride, values });
     const fallback = (notice: string) => publish({
-      flowView: chooseFlowView(viewOverride, () => null), flagsmithMode: false, notice,
+      flowView: chooseFlowView(viewOverride, () => null), flagsmithMode: false, reviewEventClient: null, notice,
     });
 
     if (!key) {
@@ -95,7 +109,11 @@ export function useCodeFlowFlags(search: string) {
           const view = chooseFlowView(viewOverride, () => flagsmith.getExperimentFlag("flow_view")?.value);
           lastAssignment = { key: assignmentKey, view };
         }
-        publish({ flowView: lastAssignment.view, flagsmithMode: flagsmith.hasFeature("flagsmith_mode") });
+        publish({
+          flowView: lastAssignment.view,
+          flagsmithMode: flagsmith.hasFeature("flagsmith_mode"),
+          reviewEventClient: flagsmith,
+        });
       } catch {
         if (active) fallback("Flagsmith is unavailable. Using default flags.");
       } finally {
@@ -112,6 +130,7 @@ export function useCodeFlowFlags(search: string) {
     reviewerId, viewOverride, ready: values !== null,
     flowView: values?.flowView ?? chooseFlowView(viewOverride, () => null),
     flagsmithMode: values?.flagsmithMode ?? false,
+    reviewEventClient: values?.reviewEventClient ?? null,
     notice: values?.notice,
   };
 }

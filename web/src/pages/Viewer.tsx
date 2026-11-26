@@ -96,7 +96,9 @@ interface RepoReviewProps {
 }
 
 function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewProps) {
-  const { flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, notice } = useCodeFlowFlags(search);
+  const {
+    flowView: view, reviewerId, viewOverride, flagsmithMode, ready: flagsReady, notice, reviewEventClient,
+  } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
   const findings = useRepoFlags(id, flagsmithMode ? head : undefined);
@@ -297,7 +299,8 @@ function RepoReview({ id, name, subdir, hasNodes, commits, search }: RepoReviewP
           {hasNodes && head && (
             <ReviewBar
               key={JSON.stringify([id, head, view, reviewerId, viewOverride])}
-              context={reviewContext} onReview={recordReviewEvent}
+              context={reviewContext}
+              onReview={(payload) => recordReviewEvent(payload, reviewEventClient)}
             />
           )}
         </section>
