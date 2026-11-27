@@ -1,5 +1,17 @@
 # Deploy the public demo
 
+## Live now
+
+| Part | Where |
+| --- | --- |
+| Web (Cloudflare Pages, project `code-flow`) | https://code-flow.pages.dev |
+| API (Render free web service `code-flow-api`, Docker, Oregon) | https://code-flow-api-y9k1.onrender.com |
+| Deployed from | branch `claude/project-thread-f2sqbg`, auto-deploy off |
+| Flagsmith | not reachable from the internet yet: the site uses the rolled-out views (overlay + summary, vertical for long flows), flag checks and experiments are off |
+
+Redeploy the API with a manual deploy in Render (or `POST /v1/services/<id>/deploys`).
+Redeploy the web with the build and `wrangler pages deploy` steps in section 3.
+
 Cloudflare Pages serves the Vite build. One free Render Docker web service serves
 the FastAPI API and runs Git imports. Render supplies 512 MB of RAM and an
 ephemeral filesystem. After 15 minutes without inbound traffic, the service can
@@ -109,7 +121,7 @@ local Direct Upload build so Vite won't read your Mac's Flagsmith settings
 from the repo-root environment files.
 
 ```sh
-export VITE_API_URL=https://code-flow-api.onrender.com
+export VITE_API_URL=https://code-flow-api-y9k1.onrender.com
 curl -fsS "$VITE_API_URL/api/health"
 curl -fsS -H "Origin: $CODEFLOW_WEB_ORIGIN" "$VITE_API_URL/api/repos"
 (

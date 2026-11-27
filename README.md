@@ -2,7 +2,7 @@
 
 **See how your code's flow changes, commit by commit, as a diagram instead of a 1,000-line diff.**
 
-**Live demo** <LIVE_URL> · [Deploy guide](docs/DEPLOY.md)
+**Live demo** [code-flow.pages.dev](https://code-flow.pages.dev) (API on Render's free plan: the first visit after a quiet spell can take up to a minute) · [Deploy guide](docs/DEPLOY.md)
 
 AI-generated code still needs review. A diagram of the calls that changed
 helps reviewers see what moved and decide where to read the source.
