@@ -34,7 +34,7 @@ JSON, so renderers can be swapped without touching the analyzer.
 | Path | What it is | Tech |
 |---|---|---|
 | `analyzer/` | Python package `codeflow` + CLI `code-flow`. Parses code, builds graphs, walks git history, diffs snapshots, detects Flagsmith flag checks, exports Mermaid. Open-source core. | Python 3.11+, `tree-sitter`, `tree-sitter-python`, plain `git` via subprocess |
-| `server/` | FastAPI app. Serves snapshots, diffs, code snippets; reads live flag state of the analyzed app from Flagsmith; builds the one-line diff summary; optional local mirror of experiment events. | FastAPI, uvicorn, `flagsmith` Python SDK, SQLite (optional) |
+| `server/` | FastAPI app. Serves snapshots, diffs, code snippets, and live flag state. One spawned worker process handles Git imports and refresh analysis in the same container. | FastAPI, uvicorn, Python `multiprocessing`, `flagsmith` Python SDK |
 | `web/` | Reviewer UI: commit timeline, flow diff in three styles, Flagsmith mode panel. Sends experiment exposure and success events to Flagsmith. | Vite, React, TypeScript, `@xyflow/react`, `elkjs`, `@flagsmith/flagsmith` JS SDK |
 | `simulator/` | Generates simulated reviewers, each a Flagsmith identity, who receive a variant and send review events to Flagsmith Experimentation. | Python, `flagsmith` SDK |
 | `examples/` | Scripts that build a small demo repo with a scripted git history (flag-gated checkout flow), and a script to analyze Flagsmith/flagsmith. | bash / Python |
@@ -224,6 +224,15 @@ and responses use full SHAs.
 - Clones live in `data/repos/<owner>__<repo>`. Analysis outputs live in
   `data/<id>/`, with source URL, name, subfolder, commit limit, and import time
   in `data/<id>/source.json`.
+- The app starts one long-lived analysis worker using Python's spawn context.
+  A queue in the API process serializes imports and refreshes and deduplicates
+  active repository IDs. The worker runs Git, keeps the blob parse cache, and
+  writes a staged copy of the analysis while the API serves the last published
+  snapshots. A pipe carries progress, refresh counts, and the result back to
+  the API, which swaps in completed output under the store lock and invalidates
+  its caches. If the worker exits during a job, that job goes to `error` and
+  the next job starts a replacement worker. On shutdown, the scheduler stops
+  queuing refreshes, the import queue drains, and the app joins the worker.
 - `GET /api/repos/{repo}/commits` returns `{"repo": "shop-demo", "branch": "main", "commits": […]}`.
   Entries are oldest first and include the commit index fields plus `stats`
   (the five diff counts) and `summary`. Legacy indexes without `base` use the
@@ -419,11 +428,17 @@ variants show each GitHub import's sync status on the landing page. The
 [benchmark harness](../scripts/sync_benchmark.py) compares three history sizes
 at one and five repositories with isolated local upstreams and a real
 server and Chrome. Its dated reports in `docs/benchmarks/` include the raw
-samples, observed rates, and formulas for the 300-second projections.
+samples, observed rates, and formulas for the 300-second projections. CPU
+covers the API and its descendants. The report lists separate API and worker
+tree RSS peaks and the peak of their simultaneous sum. Use
+`--report-name sync_mode-worker` to choose a filename for a rerun. The default
+is `sync_mode-<UTC date>` and existing reports are protected.
 Each case records `suspended: false` and `max_sample_gap_s`. A clock
 divergence over 3 seconds or a sampling gap over 10 seconds triggers one
 retry. The benchmark resumes from completed cases and imported templates
-in its workdir. Use `--fresh` to remeasure cases with the cached templates.
+in its workdir. Case and template keys include the code-flow commit and
+process sampling version. Use `--fresh` to remeasure cases with the cached
+templates.
 The report's `settings.elapsed_s` totals the active time saved with the
 completed cases.
 The [measured simulator config](../simulator/experiments/sync_mode.yaml)
@@ -507,6 +522,7 @@ code-flow/
     pyproject.toml
     app/{config,main,store,flagsmith_client}.py
     app/importer.py    queues GitHub imports and reports progress
+    app/import_worker.py  runs Git and stages analysis in a child process
     tests/
   web/
     package.json, vite.config.ts

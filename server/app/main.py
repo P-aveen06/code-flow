@@ -46,12 +46,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        auto_sync.start()
+        importer.start_worker()
         try:
+            auto_sync.start()
             yield
         finally:
-            auto_sync.stop()
-            importer.shutdown()
+            try:
+                auto_sync.stop()
+            finally:
+                importer.shutdown()
 
     app = FastAPI(title="code-flow", lifespan=lifespan)
     app.add_middleware(

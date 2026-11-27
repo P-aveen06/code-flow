@@ -13,6 +13,8 @@ from tempfile import NamedTemporaryFile
 from sync_bench.suspension import SAMPLE_GAP_LIMIT_S
 
 Case = tuple[str, str, int]
+# Old checkpoints have API-only samples, even when an uncommitted run shares their SHA.
+PROCESS_SAMPLE_VERSION = 2
 
 
 def _digest(value: dict) -> str:
@@ -33,6 +35,7 @@ def run_key(
     return _digest(
         {
             "code_flow_sha": code_flow_sha,
+            "process_sample_version": PROCESS_SAMPLE_VERSION,
             "interval": float(interval),
             "intervals": intervals,
             "visits_per_hour": float(visits_per_hour),
@@ -52,6 +55,7 @@ def template_key(
             "start_sha": start_sha,
             "max_commits": max_commits,
             "code_flow_sha": code_flow_sha,
+            "process_sample_version": PROCESS_SAMPLE_VERSION,
         }
     )
     return f"{size}-{key[:20]}"

@@ -183,7 +183,6 @@ class RunningApi:
     def __init__(self, directory: Path, port: int) -> None:
         self.api = Api(port)
         self.trace = directory / "git-trace.jsonl"
-        self.resources = directory / "process.jsonl"
         self.pid_file = directory / "server.pid"
         self.python_file = directory / "python-version"
 
@@ -214,7 +213,6 @@ def api_server(
                 "fd": fd,
                 "pid": str(running.pid_file),
                 "python": str(running.python_file),
-                "resources": str(running.resources),
             }
         ),
         encoding="utf-8",

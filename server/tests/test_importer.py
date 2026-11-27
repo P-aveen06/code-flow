@@ -2,11 +2,14 @@
 
 import json
 import os
+import signal
 import subprocess
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
+from multiprocessing import active_children
+from multiprocessing.connection import Connection
 from pathlib import Path
-from threading import Event, current_thread
+from threading import Event, Timer, current_thread
 from time import monotonic, sleep
 from unittest.mock import Mock
 
@@ -14,7 +17,7 @@ import pytest
 from codeflow import analyze
 from fastapi.testclient import TestClient
 
-from app import importer
+from app import import_worker, importer
 from app.auto_sync import AutoSync
 from app.config import Settings
 from app.main import create_app
@@ -214,8 +217,8 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
     executor = InlineExecutor()
     app = create_app(settings, git_url_builder=lambda _: local_repo.as_uri(), executor=executor)
     statuses = []
-    git_command = importer._git
-    analyze_repo = importer.analyze_repo
+    git_command = import_worker._git
+    analyze_repo = import_worker.analyze_repo
     parse = Mock(wraps=analyze.parse_file)
     monkeypatch.setattr(analyze, "parse_file", parse)
 
@@ -263,8 +266,8 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
             return analyze_repo(*args, **{**kwargs, "on_progress": observe_progress})
 
         executor.before_run = before_run
-        monkeypatch.setattr(importer, "_git", observe_git)
-        monkeypatch.setattr(importer, "analyze_repo", observe_analysis)
+        monkeypatch.setattr(import_worker, "_git", observe_git)
+        monkeypatch.setattr(import_worker, "analyze_repo", observe_analysis)
         response = client.post(REPOS, json=request)
         assert response.status_code == 202
         assert response.json() == {"id": REPO_ID, "status": "queued"}
@@ -431,7 +434,7 @@ def test_refresh_reuses_running_job(github_import, monkeypatch):
     client, _, executor = github_import
     submit = Mock(wraps=executor.submit)
     monkeypatch.setattr(executor, "submit", submit)
-    git_command = importer._git
+    git_command = import_worker._git
 
     def observe_fetch(*args, **kwargs):
         if args[0] == "ls-remote":
@@ -443,7 +446,7 @@ def test_refresh_reuses_running_job(github_import, monkeypatch):
             assert duplicate.json() == {"id": REPO_ID, "status": "cloning"}
         return git_command(*args, **kwargs)
 
-    monkeypatch.setattr(importer, "_git", observe_fetch)
+    monkeypatch.setattr(import_worker, "_git", observe_fetch)
     assert client.post(f"{REPO}/refresh").status_code == 202
     assert client.get(f"{REPO}/status").json()["status"] == "ready"
     submit.assert_called_once()
@@ -469,15 +472,15 @@ def test_failed_refresh_preserves_published_output(github_import, monkeypatch):
     head = previous["commits"][-1]["sha"]
     snapshot_url = f"{REPO}/snapshots/{head}"
     snapshot = client.get(snapshot_url).json()
-    git_command = importer._git
+    git_command = import_worker._git
 
     def fail_fetch(*args, **kwargs):
         if "fetch" in args:
             assert client.get(f"{REPO}/commits").json() == previous
-            raise importer.ImportFailure(importer.UNAVAILABLE)
+            raise import_worker.ImportFailure(import_worker.UNAVAILABLE)
         return git_command(*args, **kwargs)
 
-    monkeypatch.setattr(importer, "_git", fail_fetch)
+    monkeypatch.setattr(import_worker, "_git", fail_fetch)
     assert client.post(f"{REPO}/refresh").status_code == 202
     status = client.get(f"{REPO}/status").json()
     assert status["status"] == "error"
@@ -686,7 +689,7 @@ def test_auto_sync_schedule_reuses_worker_and_counts_work(tmp_path, local_repo):
     failure = sync.response()["status"][REPO_ID]
     assert failure["runs"] == 3
     assert failure["last_result"] == "error"
-    assert failure["error"] == importer.UNAVAILABLE
+    assert failure["error"] == import_worker.UNAVAILABLE
     assert failure["new_commits"] is None
     assert failure["next_run"]
 
@@ -732,3 +735,161 @@ def test_import_public_repo(tmp_path: Path):
             sleep(0.1)
         assert status["status"] == "ready", status
         assert client.get(REPOS).json()[0]["commit_count"] == 1
+
+
+def _gated_worker(connection: Connection) -> None:
+    """Pause the real worker after reporting its first commit when the test requests it."""
+    analyze_repo = import_worker.analyze_repo
+
+    def gated_analysis(clone, staged, *, on_progress, **kwargs):
+        gate = clone.parent.parent / ".hold-worker"
+
+        def gated_progress(current, total, entry):
+            on_progress(current, total, entry)
+            if current == 1:
+                deadline = monotonic() + 15
+                while gate.exists():
+                    if monotonic() >= deadline:
+                        raise RuntimeError("Test did not release the worker")
+                    sleep(0.01)
+
+        return analyze_repo(clone, staged, on_progress=gated_progress, **kwargs)
+
+    import_worker.analyze_repo = gated_analysis
+    import_worker._worker_main(connection)
+
+
+@pytest.fixture
+def spawned_worker(monkeypatch):
+    monkeypatch.setattr(import_worker, "_worker_main", _gated_worker)
+
+    def pids():
+        return {child.pid for child in active_children() if child.name == "code-flow-import-worker"}
+
+    before = pids()
+    yield lambda: pids() - before
+    assert pids() == before
+
+
+def _wait_for_status(
+    client: TestClient, repo: str, *, state: str, current: int | None = None
+) -> dict:
+    deadline = monotonic() + 10
+    while monotonic() < deadline:
+        status = client.get(f"{repo}/status").json()
+        if status["status"] == state and (current is None or status["current"] == current):
+            return status
+        assert status["status"] not in {"ready", "error"}, status
+        sleep(0.02)
+    pytest.fail(f"{repo} never reached {state}: {status}")
+
+
+def test_worker_imports_reports_progress_and_refreshes(tmp_path, local_repo, spawned_worker):
+    settings = Settings(tmp_path / "published", ORIGIN)
+    gate = settings.data_dir / ".hold-worker"
+    settings.data_dir.mkdir()
+    gate.touch()
+    upstream = Mock(return_value=local_repo.as_uri())
+    app = create_app(settings, git_url_builder=upstream, auto_sync_interval=300)
+    payload = {"url": URL, "subdir": "shop", "max_commits": 2}
+    other = f"{REPOS}/Demo__other"
+
+    with TestClient(app) as client:
+        (pid,) = spawned_worker()
+        try:
+            assert client.post(REPOS, json=payload).json()["status"] == "queued"
+            progress = _wait_for_status(client, REPO, state="analyzing", current=1)
+            assert (progress["total"], progress["message"]) == (2, "Analyzing commit 1 of 2")
+            assert client.get("/api/health").status_code == 200
+            assert client.post(REPOS, json=payload).json()["status"] == "analyzing"
+            assert client.post(f"{REPO}/refresh").json()["status"] == "analyzing"
+            assert (
+                client.post(
+                    REPOS, json={**payload, "url": "https://github.com/Demo/other"}
+                ).status_code
+                == 202
+            )
+            assert client.get(f"{other}/status").json()["status"] == "queued"
+        finally:
+            gate.unlink(missing_ok=True)
+        _wait_for_status(client, REPO, state="ready", current=2)
+        _wait_for_status(client, other, state="ready", current=2)
+        assert upstream.call_count == 2
+
+        fresh = commit(local_repo, "shop/price.py", "def price(): return 7\n", "New price")
+        response = client.put(AUTO_SYNC, json={"repos": {REPO_ID: True}})
+        assert response.status_code == 200
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            stats = client.get(AUTO_SYNC).json()["status"].get(REPO_ID, {})
+            if stats.get("last_result") == "new_commits":
+                break
+            sleep(0.02)
+        else:
+            pytest.fail(f"Automatic worker refresh did not finish: {stats}")
+        assert stats["runs"] == stats["fetches"] == stats["analysed_commits"] == 1
+        assert stats["seconds"] > 0
+        assert client.get(f"{REPO}/status").json()["new_commits"] == 1
+        assert client.get(f"{REPO}/diff", params={"head": fresh}).status_code == 200
+        assert spawned_worker() == {pid}
+
+    assert not spawned_worker()
+
+
+def test_worker_crash_preserves_output_and_restarts(tmp_path, local_repo, spawned_worker):
+    settings = Settings(tmp_path / "published", ORIGIN)
+    app = create_app(settings, git_url_builder=lambda _: local_repo.as_uri())
+    with TestClient(app) as client:
+        assert client.post(REPOS, json={"url": URL, "subdir": "shop"}).status_code == 202
+        _wait_for_status(client, REPO, state="ready")
+        old_commits = client.get(f"{REPO}/commits").json()
+        fresh = commit(local_repo, "shop/price.py", "def price(): return 8\n", "New price")
+        gate = settings.data_dir / ".hold-worker"
+        gate.touch()
+        try:
+            (pid,) = spawned_worker()
+            assert client.put(AUTO_SYNC, json={"repos": {REPO_ID: True}}).status_code == 200
+            _wait_for_status(client, REPO, state="analyzing", current=1)
+            os.kill(pid, signal.SIGKILL)
+            failed = _wait_for_status(client, REPO, state="error")
+            assert failed["error"] == failed["message"] == "Could not analyze repository"
+            assert client.get(f"{REPO}/commits").json() == old_commits
+            assert client.get("/api/health").status_code == 200
+            stats = client.get(AUTO_SYNC).json()["status"][REPO_ID]
+            assert (stats["last_result"], stats["runs"], stats["fetches"]) == ("error", 1, 1)
+            assert stats["analysed_commits"] == 0
+            assert client.put(AUTO_SYNC, json={"repos": {REPO_ID: False}}).status_code == 200
+            assert not spawned_worker()
+            assert sorted(path.name for path in (settings.data_dir / "repos").iterdir()) == [
+                REPO_ID
+            ]
+        finally:
+            gate.unlink(missing_ok=True)
+
+        assert client.post(f"{REPO}/refresh").json()["status"] == "queued"
+        assert _wait_for_status(client, REPO, state="ready")["new_commits"] == 1
+        assert client.get(f"{REPO}/diff", params={"head": fresh}).status_code == 200
+        (replacement,) = spawned_worker()
+        assert replacement != pid
+
+    assert not spawned_worker()
+
+
+def test_worker_shutdown_drains_running_import(tmp_path, local_repo, spawned_worker):
+    settings = Settings(tmp_path / "published", ORIGIN)
+    settings.data_dir.mkdir()
+    gate = settings.data_dir / ".hold-worker"
+    gate.touch()
+    release = Timer(0.1, gate.unlink)
+    app = create_app(settings, git_url_builder=lambda _: local_repo.as_uri())
+    with TestClient(app) as client:
+        try:
+            assert client.post(REPOS, json={"url": URL, "subdir": "shop"}).status_code == 202
+            _wait_for_status(client, REPO, state="analyzing", current=1)
+            assert spawned_worker()
+        finally:
+            release.start()
+
+    release.join()
+    assert (settings.data_dir / REPO_ID / "commits.json").is_file()
+    assert not spawned_worker()

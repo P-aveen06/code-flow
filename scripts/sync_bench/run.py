@@ -9,6 +9,7 @@ from time import monotonic, sleep, time
 
 from sync_bench.metrics import COUNTERS, distribution, scale_hourly
 from sync_bench.observations import Probes, Publications, freshness, page_samples
+from sync_bench.process_tree import ProcessSample, peak_rss
 from sync_bench.runtime import Api, RunningApi
 from sync_bench.sampling import Chrome, process_samples, trace_git, window_samples
 from sync_bench.suspension import SuspensionCheck
@@ -21,13 +22,13 @@ ACTIVE = {"queued", "cloning", "analyzing"}
 def import_template(
     server: RunningApi, data: Path, repo: str, history: History
 ) -> dict:
-    started = monotonic()
-    server.api.request(
-        "repos",
-        "POST",
-        {"url": fake_url(repo), "subdir": history.subdir, "max_commits": history.limit},
-    )
     with process_samples(server) as measure:
+        started = monotonic()
+        server.api.request(
+            "repos",
+            "POST",
+            {"url": fake_url(repo), "subdir": history.subdir, "max_commits": history.limit},
+        )
         while monotonic() - started < 900:
             status = server.api.request(f"repos/{repo}/status")
             if status["status"] == "error":
@@ -49,15 +50,24 @@ def import_template(
         "start_sha": history.start,
         "commits": status["total"],
         "import_s": round(duration, 3),
-        "peak_rss_bytes": max(row[2] for row in samples),
+        **peak_rss(samples),
         "disk_bytes": disk_bytes(data),
         "process_sample_method": method,
         "process_samples": _round_process(samples),
     }
 
 
-def _round_process(samples: list[list[float]]) -> list[list[float]]:
-    return [[round(at, 3), round(cpu, 6), rss] for at, cpu, rss in samples]
+def _round_process(samples: list[ProcessSample]) -> list[list[float]]:
+    return [
+        [
+            round(row.at, 3),
+            round(row.cpu_seconds, 6),
+            row.combined_rss_bytes,
+            row.api_rss_bytes,
+            row.worker_rss_bytes,
+        ]
+        for row in samples
+    ]
 
 
 def _browser_samples(
@@ -258,9 +268,7 @@ def run_case(
         "elapsed_s": round(end - epoch, 3),
         "cpu_elapsed_s": round(cpu_elapsed, 3),
         "cpu_seconds": round(cpu, 6),
-        "peak_rss_bytes": max(
-            row[2] for row in raw_process if epoch - 1 <= row[0] <= end + 1
-        ),
+        **peak_rss([row for row in raw_process if epoch - 1 <= row.at <= end + 1]),
         "disk_start_bytes": before_bytes,
         "disk_growth_bytes": disk_bytes(data) - before_bytes,
         "baseline": {

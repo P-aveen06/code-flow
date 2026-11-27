@@ -4,7 +4,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import datetime
@@ -12,63 +11,39 @@ from pathlib import Path
 from threading import Event, Thread
 from time import time
 
+from sync_bench.process_tree import ProcessSample, tree_sampler
 from sync_bench.runtime import RunningApi, stop_process_group
 from sync_bench.suspension import SuspensionCheck
 from sync_bench.workspace import ROOT
 
 
-def cpu_time(value: str) -> float:
-    """Parse both macOS M:SS.hh and Linux [DD-]HH:MM:SS output."""
-    days, separator, clock = value.partition("-")
-    if not separator:
-        clock, days = days, "0"
-    seconds = float(days) * 86400
-    for place, part in enumerate(reversed(clock.split(":"))):
-        seconds += float(part) * 60**place
-    return seconds
-
-
 class ProcessSamples:
     def __init__(self, server: RunningApi) -> None:
-        self.server = server
+        self.method, self.sample = tree_sampler(server.pid)
         self.stop = Event()
-        self.raw: list[list[float]] = []
-        self.heartbeat: list[float] = [time()]
+        self.started = time()
+        self.raw: list[ProcessSample] = []
+        self.error: OSError | None = None
 
-    def _sample_ps(self) -> None:
-        use_ps = True
+    def run(self) -> None:
         while not self.stop.is_set():
-            if use_ps:
-                try:
-                    result = subprocess.run(
-                        ["ps", "-o", "time=,rss=", "-p", str(self.server.pid)],
-                        capture_output=True,
-                        text=True,
-                        timeout=2,
-                        check=True,
-                    )
-                    cpu, rss = result.stdout.split()
-                    self.raw.append([time(), cpu_time(cpu), int(rss) * 1024])
-                except (OSError, ValueError, subprocess.SubprocessError):
-                    use_ps = False
-            self.heartbeat.append(time())
+            try:
+                self.raw.append(self.sample())
+            except OSError as exc:
+                self.error = exc
+                return
             self.stop.wait(1)
 
     def check_suspension(
-        self, check: SuspensionCheck, raw: list[list[float]] | None = None
+        self, check: SuspensionCheck, raw: list[ProcessSample] | None = None
     ) -> float:
-        heartbeat = self.heartbeat.copy()
-        heartbeat.append(time())
-        return check.check(heartbeat, [row[0] for row in raw or []])
+        samples = self.raw.copy() if raw is None else raw
+        return check.check([self.started, *(row.at for row in samples), time()])
 
-    def collect(self) -> tuple[str, list[list[float]]]:
-        fallback = read_json_lines(self.server.resources)
-        # Use rusage if the host denies ps, or if ps is too coarse to resolve short runs.
-        if len(self.raw) >= 2 and sys.platform != "linux":
-            return "ps time and RSS", self.raw.copy()
-        if len(self.raw) >= 2 and any(sample[1] % 1 for sample in self.raw):
-            return "ps time and RSS", self.raw.copy()
-        return "getrusage(RUSAGE_SELF) CPU and RSS high-water mark", fallback
+    def collect(self) -> tuple[str, list[ProcessSample]]:
+        if self.error is not None:
+            raise RuntimeError("Could not sample the benchmark API process tree.") from self.error
+        return self.method, self.raw.copy()
 
 
 @contextmanager
@@ -76,13 +51,13 @@ def process_samples(
     server: RunningApi, suspension: SuspensionCheck | None = None
 ) -> Iterator[ProcessSamples]:
     samples = ProcessSamples(server)
-    thread = Thread(target=samples._sample_ps)
+    thread = Thread(target=samples.run)
     try:
         thread.start()
         yield samples
     except Exception:
         if suspension is not None:
-            samples.check_suspension(suspension, samples.collect()[1])
+            samples.check_suspension(suspension)
         raise
     finally:
         samples.stop.set()
@@ -98,16 +73,14 @@ def read_json_lines(path: Path) -> list:
     return [json.loads(line) for line in lines if line.endswith(b"\n")]
 
 
-def window_samples(
-    samples: list[list[float]], start: float, end: float
-) -> tuple[float, float]:
-    before = [sample for sample in samples if sample[0] <= start]
-    after = [sample for sample in samples if sample[0] >= end]
+def window_samples(samples: list[ProcessSample], start: float, end: float) -> tuple[float, float]:
+    before = [sample for sample in samples if sample.at <= start]
+    after = [sample for sample in samples if sample.at >= end]
     first = before[-1] if before else samples[0]
     last = after[0] if after else samples[-1]
-    if last[0] <= first[0]:
+    if last.at <= first.at:
         raise RuntimeError("The measurement was too short to sample server CPU.")
-    return last[1] - first[1], last[0] - first[0]
+    return last.cpu_seconds - first.cpu_seconds, last.at - first.at
 
 
 class Chrome:
@@ -122,9 +95,7 @@ class Chrome:
         assert self.process.stdout is not None
         line = self.process.stdout.readline()
         if not line:
-            raise RuntimeError(
-                "The Chrome benchmark worker exited without a measurement."
-            )
+            raise RuntimeError("The Chrome benchmark worker exited without a measurement.")
         response = json.loads(line)
         if "error" in response:
             raise RuntimeError(response["error"])
@@ -133,9 +104,7 @@ class Chrome:
     def measure(self, origin: str, variant: str, repos: int) -> dict:
         assert self.process.stdin is not None
         self.process.stdin.write(
-            json.dumps(
-                {"url": f"{origin}/?sync={variant}", "variant": variant, "repos": repos}
-            )
+            json.dumps({"url": f"{origin}/?sync={variant}", "variant": variant, "repos": repos})
             + "\n"
         )
         self.process.stdin.flush()
@@ -150,9 +119,7 @@ def chrome(directory: Path) -> Iterator[Chrome]:
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     )
     if not Path(path).is_file():
-        raise ValueError(
-            "Set CODEFLOW_CHROME_PATH to the system Chrome or Chromium executable."
-        )
+        raise ValueError("Set CODEFLOW_CHROME_PATH to the system Chrome or Chromium executable.")
     with subprocess.Popen(
         [
             "node",
@@ -184,9 +151,7 @@ def chrome(directory: Path) -> Iterator[Chrome]:
                         os.killpg(browser.pid, signal.SIGKILL)
 
 
-def trace_git(
-    path: Path, upstreams: dict[str, Path]
-) -> tuple[int, dict[str, list[float]]]:
+def trace_git(path: Path, upstreams: dict[str, Path]) -> tuple[int, dict[str, list[float]]]:
     ids = {upstream.as_uri(): repo for repo, upstream in upstreams.items()}
     starts: dict[str, list[float]] = {repo: [] for repo in upstreams}
     fetches = 0

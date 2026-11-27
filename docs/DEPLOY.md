@@ -14,9 +14,9 @@ Redeploy the API with a manual deploy in Render (or `POST /v1/services/<id>/depl
 Redeploy the web with the build and `wrangler pages deploy` steps in section 3.
 
 Cloudflare Pages serves the Vite build. One free Render Docker web service serves
-the FastAPI API and runs Git imports. Render supplies 512 MB of RAM and an
-ephemeral filesystem. After 15 minutes without inbound traffic, the service can
-spin down. The next request can take 30–60 seconds. The hosted landing page
+the FastAPI API and runs Git imports in one child worker process. The free
+service has 512 MB of RAM and an ephemeral filesystem. After 15 minutes without
+inbound traffic, the service can spin down. The next request can take 30–60 seconds. The hosted landing page
 shows **Waking up the demo server…** after three seconds and retries the repo list
 up to four times within a 75-second window. [Render free service behavior](https://render.com/docs/free)
 
@@ -184,7 +184,25 @@ docker run --rm --memory=512m --memory-swap=512m -p 127.0.0.1::8787 \
   code-flow:deploy-local
 ```
 
-Measured with Docker Desktop on Apple Silicon (Linux arm64 container).
+The worker build was verified on Docker Desktop (Linux arm64) with the hosted
+8-entry snapshot cache and a 512 MiB cgroup limit. Importing 50 commits touching
+Flagsmith's `api/` at the pinned SHA took 8.9 seconds. Git cloned the baked repo
+via a local `file://` URL. While analysis ran, `/api/health`, `/api/repos`, and a
+diff from the seeded Flagsmith repo all returned 200. A diff from the new import
+also returned 200 after publish.
+
+| Memory during verification | Peak |
+| --- | ---: |
+| API RSS during import | 79 MiB |
+| Analysis worker RSS during import | 50 MiB |
+| Combined API and analysis worker RSS during import | 129 MiB |
+| Whole container, including Git subprocesses and filesystem cache | 409 MiB |
+
+Process RSS was sampled every 20 ms from Linux `/proc`. Combined RSS is the
+maximum simultaneous sum. The API's kernel-reported high-water RSS after
+opening the imported diff was 90 MiB. The container recorded zero OOM kills.
+
+The earlier measurements used the in-process importer on the same platform.
 Docker reported **133 MB compressed content** and **580 MB of local image disk
 usage**. The Uvicorn process was PID 1. Peak RSS is Linux `VmHWM` read after
 each phase of the same run, rounded to the nearest MiB.

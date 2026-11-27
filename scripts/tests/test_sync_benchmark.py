@@ -1,9 +1,12 @@
 """Check the benchmark's pure calculations, private paths and local Git fixtures."""
 
 import json
+import os
+import subprocess
 import sys
 from contextlib import nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -12,6 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import sync_benchmark
+from sync_bench import checkpoints
 from sync_bench.checkpoints import Case, CaseStore, SavedCase, run_key, template_key
 from sync_bench.metrics import (
     FORMULAS,
@@ -20,8 +24,9 @@ from sync_bench.metrics import (
     scale_hourly,
     wait_window_seconds,
 )
-from sync_bench.report import make_result, markdown, report_from_cases
-from sync_bench.sampling import cpu_time, trace_git
+from sync_bench.process_tree import ProcessUsage, peak_rss, sample_tree, tree_sampler
+from sync_bench.report import make_result, markdown, report_from_cases, report_paths, write_report
+from sync_bench.sampling import trace_git, window_samples
 from sync_bench.suspension import Suspended, SuspensionCheck
 from sync_bench.workload import _manual_request
 from sync_bench.workspace import (
@@ -69,8 +74,6 @@ def test_percentiles_and_hourly_scaling() -> None:
     }
     assert wait_window_seconds(True, 6) == 300
     assert wait_window_seconds(False, 6) == 600
-    assert cpu_time("2:03.57") == pytest.approx(123.57)
-    assert cpu_time("1-01:02:03") == 90123
 
 
 def test_private_ports_and_workdir(tmp_path: Path) -> None:
@@ -240,7 +243,9 @@ def saved_case(case: Case, *, elapsed: float = 9) -> SavedCase:
             "freshness_s": stats,
             "elapsed_s": 6,
             "cpu_seconds": 0.05,
-            "peak_rss_bytes": 1_000_000,
+            "peak_rss_bytes": 3_000_000,
+            "api_peak_rss_bytes": 1_000_000,
+            "worker_peak_rss_bytes": 2_000_000,
             "counts": {
                 "fetches": 2,
                 "auto_runs": 3,
@@ -250,7 +255,10 @@ def saved_case(case: Case, *, elapsed: float = 9) -> SavedCase:
             "disk_growth_bytes": 1000,
             "per_hour": {"default_300s": {"cpu_ms": 500}},
             "default_300s_freshness_s": stats,
-            "process_samples": [[0.0, 0.0, 1_000_000], [1.2, 0.05, 1_000_000]],
+            "process_samples": [
+                [0.0, 0.0, 3_000_000, 1_000_000, 2_000_000],
+                [1.2, 0.05, 3_000_000, 1_000_000, 2_000_000],
+            ],
         },
         {
             "os": "macOS",
@@ -264,7 +272,14 @@ def saved_case(case: Case, *, elapsed: float = 9) -> SavedCase:
             "code_flow_sha": "code",
             "dirty": True,
         },
-        {"commits": 8, "import_s": 1, "peak_rss_bytes": 1000, "disk_bytes": 1000},
+        {
+            "commits": 8,
+            "import_s": 1,
+            "disk_bytes": 1000,
+            "peak_rss_bytes": 3000,
+            "api_peak_rss_bytes": 1000,
+            "worker_peak_rss_bytes": 2000,
+        },
         elapsed,
         "2026-11-27T05:00:00+00:00",
     )
@@ -292,6 +307,23 @@ def test_checkpoint_round_trip_and_atomic_failure(
         store.save(case, replace(original, elapsed_s=99))
     assert store.load(case) == original
     assert list(store.directory.iterdir()) == [store.path(case)]
+
+
+def test_new_sampling_version_separates_runs_and_templates(monkeypatch) -> None:
+    settings = {
+        "code_flow_sha": "same-head",
+        "interval": 2,
+        "intervals": 3,
+        "visits_per_hour": 12,
+        "seed": 7,
+        "flagsmith_sha": None,
+        "quick": True,
+    }
+    run = run_key(**settings)
+    template = template_key("small", "start", 8, "same-head")
+    monkeypatch.setattr(checkpoints, "PROCESS_SAMPLE_VERSION", 1)
+    assert run_key(**settings) != run
+    assert template_key("small", "start", 8, "same-head") != template
 
 
 def test_skip_valid_checkpoints_and_remeasure_with_fresh(
@@ -342,6 +374,14 @@ def test_report_from_checkpoints_matches_in_memory_runs(tmp_path: Path) -> None:
     actual = report_from_cases(settings, loaded)
     assert actual == expected
     assert markdown(actual) == markdown(expected)
+
+    name = "sync_mode-worker"
+    raw, summary = write_report(actual, tmp_path, name)
+    assert raw == tmp_path / f"{name}.json"
+    assert summary == tmp_path / f"{name}.md"
+    assert json.loads(raw.read_text())["runs"] == actual["runs"]
+    assert "Worker tree peak RSS MiB | Combined peak RSS MiB" in summary.read_text()
+    assert summary.read_text() == markdown(actual)
 
 
 def test_suspension_detection_uses_both_clocks_and_sample_gaps() -> None:
@@ -431,3 +471,82 @@ def test_template_reuse_requires_matching_key(tmp_path: Path) -> None:
         )
         == 4
     )
+
+
+def test_sample_tree_aggregates_live_descendants_and_simultaneous_peak() -> None:
+    children = {1: [2, 4, 2], 2: [3]}
+    usage = {
+        1: ProcessUsage(0.25, 100),
+        2: ProcessUsage(1.5, 175),
+        3: ProcessUsage(0.5, 25),
+        5: ProcessUsage(7, 400),  # Unrelated to this API.
+    }
+    first = sample_tree(1, lambda pid: children.get(pid, []), usage.get)
+    assert first.cpu_seconds == 2.25
+    assert (first.api_rss_bytes, first.worker_rss_bytes, first.combined_rss_bytes) == (
+        100,
+        200,
+        300,
+    )
+
+    second = first._replace(
+        at=first.at + 1,
+        cpu_seconds=2.75,
+        api_rss_bytes=250,
+        worker_rss_bytes=40,
+    )
+    assert peak_rss([first, second]) == {
+        "api_peak_rss_bytes": 250,
+        "worker_peak_rss_bytes": 200,
+        "peak_rss_bytes": 300,
+    }
+    assert window_samples([first, second], first.at, second.at) == (0.5, 1.0)
+
+
+def test_host_sampler_reads_live_child_and_retains_reaped_cpu() -> None:
+    _, sample = tree_sampler(os.getpid())
+    before = sample()
+    program = """
+from sys import stdin
+from time import process_time
+until = process_time() + 0.08
+while process_time() < until:
+    pass
+print("ready", flush=True)
+stdin.read()
+"""
+    with subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as child:
+        assert child.stdout.readline().strip() == "ready"
+        live = sample()
+        child.stdin.close()
+        assert child.wait(timeout=5) == 0
+
+    reaped = sample()
+    assert live.worker_rss_bytes > before.worker_rss_bytes
+    assert reaped.worker_rss_bytes == before.worker_rss_bytes
+    assert live.cpu_seconds - before.cpu_seconds >= 0.07
+    assert reaped.cpu_seconds - before.cpu_seconds >= 0.07
+
+
+def test_report_name_defaults_to_utc_and_protects_existing_reports(tmp_path: Path) -> None:
+    base_args = ["--quick", "--workdir", str(tmp_path)]
+    utc_before = datetime.now(UTC).date()
+    default_name = sync_benchmark.parse_args(base_args).report_name
+    assert default_name in {f"sync_mode-{date}" for date in (utc_before, datetime.now(UTC).date())}
+    assert (
+        sync_benchmark.parse_args([*base_args, "--report-name", "worker-2"]).report_name
+        == "worker-2"
+    )
+
+    with pytest.raises(ValueError, match="filename stem"):
+        report_paths(tmp_path, "../escape")
+    raw = tmp_path / "sync_mode-2026-11-27.json"
+    raw.write_text("baseline", encoding="utf-8")
+    with pytest.raises(ValueError, match="already exists"):
+        write_report({}, tmp_path, "sync_mode-2026-11-27")
+    assert raw.read_text(encoding="utf-8") == "baseline"

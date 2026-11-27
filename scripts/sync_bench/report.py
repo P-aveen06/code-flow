@@ -1,6 +1,7 @@
 """Write the versioned sample document and a compact human-readable comparison."""
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +15,8 @@ METHOD = {
     "browser": "Puppeteer Core drives system Chrome with cold navigation storage. Full Chrome uses a fresh context. The macOS headless shell clears storage and disables HTTP caching between samples. Readiness is a complete repository list, the selected preview, and the expected count of loaded sync switches. The isolated web server returns preview flags using the configured Development client key; timings exclude external Flagsmith network latency.",
     "overlap": "A browser sample overlaps sync if its navigation-to-ready window intersects an observed Git ls-remote start to commit-index publication window for any repo.",
     "api": "Loopback wall time through response body and JSON decoding. Probe cycles target 0.5 seconds, read every repo's commits, and rotate the newest diff across repos. Slow API calls can extend a cycle.",
-    "cpu": "One-second server-process samples. Git subprocess CPU and Chrome CPU are outside this measurement. CPU includes the API, including cache rebuilds after publishing, and uses a short warmed baseline with the same probes.",
+    "cpu": "One-second samples sum CPU for the API and its descendant processes, including Git commands that have already exited. Chrome is outside this measurement. The warmed baseline uses the same probes.",
+    "rss": "Each process sample records UTC time, cumulative tree CPU seconds, combined RSS, API RSS and worker-tree RSS, in that order. Memory is in bytes. Worker-tree RSS sums all live API descendants. The combined peak is the maximum sum in one sample.",
     "counts": "Automatic refresh runs and analysis counts come from GET /api/auto-sync. Manual starts use its manual_runs counter, with POST attempts logged separately. Git Trace2 counts actual fetch calls; new snapshot files count the graphs built, including any missing base. Manual fetches and graphs are totals minus the automatic counters.",
     "sampling_limit": "Per-hour projections use the observed mixture of refresh costs and assume it carries over to 300 seconds. Benchmark intervals and reviewer visits control the workload. Treat projections as estimates, and review overlap counts and sample sizes.",
 }
@@ -60,6 +62,7 @@ def _pair(stats: dict) -> str:
 def markdown(result: dict) -> str:
     settings = result["settings"]
     environment = result["environment"]
+    mib = 1024**2
     rows = [
         f"# sync_mode benchmark · {result['finished_at_utc'][:10]}",
         "",
@@ -79,14 +82,13 @@ def markdown(result: dict) -> str:
         "",
         "## Template imports",
         "",
-        "| Size | Commits | Import s | API peak RSS MiB | Data MiB |",
-        "|---|---:|---:|---:|---:|",
+        "| Size | Commits | Import s | API peak RSS MiB | Worker tree peak RSS MiB | Combined peak RSS MiB | Data MiB |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    mib = 1024**2
     for size, template in result["templates"].items():
         rows.append(
             f"| {size} | {template['commits']} | {template['import_s']:.2f} | "
-            f"{template['peak_rss_bytes'] / mib:.1f} | {template['disk_bytes'] / mib:.2f} |"
+            f"{_rss_cells(template)} | {template['disk_bytes'] / mib:.2f} |"
         )
     rows.extend(
         [
@@ -113,8 +115,8 @@ def markdown(result: dict) -> str:
             "",
             "## Server work and 300 s projections",
             "",
-            "| Variant | Size | Repos | Wall s | API CPU s | Peak RSS MiB | Fetches | Auto / manual jobs | Graphs built | Disk growth MiB | Projected CPU s/h | Projected freshness s (p50 / p95) |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Size | Repos | Wall s | Server CPU s | API peak RSS MiB | Worker tree peak RSS MiB | Combined peak RSS MiB | Fetches | Auto / manual jobs | Graphs built | Disk growth MiB | Projected CPU s/h | Projected freshness s (p50 / p95) |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for run in result["runs"]:
@@ -122,7 +124,7 @@ def markdown(result: dict) -> str:
         default = run["per_hour"]["default_300s"]
         rows.append(
             f"| {run['variant']} | {run['size']} | {run['repo_count']} | "
-            f"{run['elapsed_s']:.2f} | {run['cpu_seconds']:.3f} | {run['peak_rss_bytes'] / mib:.1f} | "
+            f"{run['elapsed_s']:.2f} | {run['cpu_seconds']:.3f} | {_rss_cells(run)} | "
             f"{counts['fetches']} | {counts['auto_runs']} / {counts['manual_runs']} | "
             f"{counts['analysed_commits']} | {run['disk_growth_bytes'] / mib:.3f} | "
             f"{default['cpu_ms'] / 1000:.3f} | {_pair(run['default_300s_freshness_s'])} |"
@@ -136,11 +138,37 @@ def markdown(result: dict) -> str:
     return "\n".join(rows) + "\n"
 
 
-def write_report(result: dict, directory: Path) -> tuple[Path, Path]:
+def _rss_cells(row: dict) -> str:
+    return " | ".join(
+        f"{row[key] / 1024**2:.1f}"
+        for key in ("api_peak_rss_bytes", "worker_peak_rss_bytes", "peak_rss_bytes")
+    )
+
+
+def report_paths(directory: Path, name: str) -> tuple[Path, Path]:
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", name):
+        raise ValueError(
+            "--report-name must be a filename stem (letters, digits, dots, dashes or underscores)."
+        )
+    raw, summary = directory / f"{name}.json", directory / f"{name}.md"
+    if any(path.exists() or path.is_symlink() for path in (raw, summary)):
+        raise ValueError(f"Report {name!r} already exists. Choose a different --report-name.")
+    return raw, summary
+
+
+def write_report(result: dict, directory: Path, name: str) -> tuple[Path, Path]:
+    raw, summary = report_paths(directory, name)
+    body = json.dumps(result, separators=(",", ":")) + "\n"
+    table = markdown(result)
     directory.mkdir(parents=True, exist_ok=True)
-    stem = "sync_mode-" + result["finished_at_utc"][:10]
-    raw = directory / f"{stem}.json"
-    summary = directory / f"{stem}.md"
-    raw.write_text(json.dumps(result, separators=(",", ":")) + "\n", encoding="utf-8")
-    summary.write_text(markdown(result), encoding="utf-8")
+    created = []
+    try:
+        for path, content in ((raw, body), (summary, table)):
+            with path.open("x", encoding="utf-8") as output:
+                created.append(path)
+                output.write(content)
+    except OSError:
+        for path in created:
+            path.unlink()
+        raise
     return raw, summary

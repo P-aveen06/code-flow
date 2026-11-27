@@ -15,7 +15,7 @@ from time import monotonic
 
 from sync_bench.checkpoints import Case, CaseStore, SavedCase, lock_workdir, run_key
 from sync_bench.metrics import VARIANTS
-from sync_bench.report import report_from_cases, write_report
+from sync_bench.report import report_from_cases, report_paths, write_report
 from sync_bench.run import import_template, run_case
 from sync_bench.runtime import (
     api_listener,
@@ -64,6 +64,11 @@ def _selected(values: list[str] | None, choices: tuple, default: tuple) -> tuple
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workdir", required=True, type=Path)
+    parser.add_argument(
+        "--report-name",
+        default=f"sync_mode-{datetime.now(UTC):%Y-%m-%d}",
+        help="output filename stem (default sync_mode-<UTC date>)",
+    )
     parser.add_argument("--sizes", nargs="+", help="small, medium, large")
     parser.add_argument("--repos", nargs="+", help="1, 5")
     parser.add_argument("--variants", nargs="+", help="A, B, C or the flag values")
@@ -285,6 +290,8 @@ def _measure_pending(
 
 
 def run(args: argparse.Namespace) -> tuple[Path, Path]:
+    report_dir = ROOT / "docs/benchmarks"
+    report_paths(report_dir, args.report_name)
     args.workdir.mkdir(parents=True, exist_ok=True)
     with lock_workdir(args.workdir):
         code_flow_sha = git("rev-parse", "HEAD", repo=ROOT)
@@ -326,7 +333,7 @@ def run(args: argparse.Namespace) -> tuple[Path, Path]:
             "variants": args.variants,
         }
         return write_report(
-            report_from_cases(settings, saved), ROOT / "docs/benchmarks"
+            report_from_cases(settings, saved), report_dir, args.report_name
         )
 
 
