@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { AppLink } from "./AppLink";
+import { GitHubRepoPage } from "./pages/GitHubRepo";
+import { GitHubRepos } from "./pages/GitHubRepos";
 import { Landing } from "./pages/Landing";
 import { Viewer } from "./pages/Viewer";
 import { legacyRepoRedirect, navigate, parsePath, useLocation } from "./router";
@@ -23,6 +25,8 @@ export default function App() {
       </header>
       {route.page === "viewer" && <Viewer key={route.id} id={route.id} search={search} />}
       {route.page === "landing" && !redirect && <Landing />}
+      {route.page === "github-repos" && <GitHubRepos search={search} />}
+      {route.page === "github-repo" && <GitHubRepoPage key={route.repoId} repoId={route.repoId} search={search} />}
       {route.page === "not-found" && (
         <main className="app-message">
           <div className="message-stack">

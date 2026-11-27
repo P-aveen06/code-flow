@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  beginJourney, markRedirecting, readJourney, shouldReportAbandon, trackSignin,
+  beginJourney, markRedirecting, readJourney, resumeJourney, shouldReportAbandon, trackSignin,
 } from "./signinEvents";
 
 function memoryStorage() {
@@ -53,5 +53,24 @@ describe("github_signin journey events", () => {
     expect(journey?.landedAt).toBe(500);
     expect(journey?.sent).toEqual(["import_started"]);
     expect(journey?.redirecting).toBe(false);
+  });
+});
+
+describe("returning to the repos page", () => {
+  it("clears the GitHub redirect so leaving later counts as abandoning", () => {
+    const store = memoryStorage();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    beginJourney("reviewer-4", "github_signin", true, 0, store);
+    trackSignin("import_started", { trackEvent: vi.fn() }, 1, store);
+    markRedirecting(store);
+    resumeJourney(store);
+    expect(readJourney(store)).toMatchObject({ redirecting: false, sent: ["import_started"] });
+    expect(shouldReportAbandon(readJourney(store))).toBe(true);
+  });
+
+  it("does nothing without a journey", () => {
+    const store = memoryStorage();
+    resumeJourney(store);
+    expect(readJourney(store)).toBeNull();
   });
 });

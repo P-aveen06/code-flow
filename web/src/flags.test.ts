@@ -1,8 +1,8 @@
 import { FlagSource } from "@flagsmith/flagsmith";
 import { describe, expect, it, vi } from "vitest";
 import {
-  directionExposureKey, exposeDirectionAssignment, exposeFlowAssignment, readFlagSnapshot, readFlowDirection,
-  readReviewerId,
+  DEFAULT_BRANCH_COMMIT_COUNT, directionExposureKey, exposeDirectionAssignment, exposeFlowAssignment,
+  parseCommitCount, readFlagSnapshot, readFlowDirection, readReviewerId,
 } from "./flags";
 import { FLOW_DIRECTIONS, FLOW_VIEWS, readPreviewOverrides } from "./view";
 
@@ -180,5 +180,33 @@ describe("flow direction assignment", () => {
     const key = directionExposureKey("demo", true, null, flag);
     expect(exposeDirectionAssignment(key, exposures, () => null)).toBe(false);
     expect(exposeDirectionAssignment(key, exposures, () => flag)).toBe(true);
+  });
+});
+
+describe("branch_commit_count remote config", () => {
+  const flag = (enabled: boolean, value: unknown) => ({ enabled, value }) as Parameters<typeof parseCommitCount>[0];
+
+  it("reads a whole number from 1 to 200", () => {
+    expect(parseCommitCount(flag(true, 30))).toBe(30);
+    expect(parseCommitCount(flag(true, "40"))).toBe(40);
+    expect(parseCommitCount(flag(true, 200))).toBe(200);
+  });
+
+  it.each([
+    ["missing", null], ["off", flag(false, 30)], ["zero", flag(true, 0)], ["too many", flag(true, 500)],
+    ["fraction", flag(true, 2.5)], ["text", flag(true, "lots")], ["empty", flag(true, null)],
+  ])("falls back to 20 when %s", (_, value) => {
+    expect(parseCommitCount(value)).toBe(DEFAULT_BRANCH_COMMIT_COUNT);
+    expect(DEFAULT_BRANCH_COMMIT_COUNT).toBe(20);
+  });
+
+  it("comes from the branch_commit_count flag in the snapshot", () => {
+    const commitFlag = { enabled: true, value: 25 };
+    const snapshot = readFlagSnapshot({
+      loadingState: { error: null, isFetching: false, isLoading: false, source: FlagSource.SERVER },
+      getAllFlags: () => ({ branch_commit_count: commitFlag }),
+      hasFeature: () => false,
+    });
+    expect(parseCommitCount(snapshot.commitCountFlag)).toBe(25);
   });
 });

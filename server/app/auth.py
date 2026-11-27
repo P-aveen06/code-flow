@@ -1,12 +1,15 @@
 """Sign in with GitHub: the OAuth routes, the current user, and the repo picker list."""
 
 import secrets
+from collections.abc import Callable
+from typing import Annotated, TypeVar
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from app.config import Settings
 from app.github import GitHubApp, GitHubAuthError, GitHubError, GitHubRepo
+from app.importer import validate_branch
 from app.sessions import (
     SESSION_COOKIE,
     SESSION_SECONDS,
@@ -20,6 +23,11 @@ CALLBACK_PATH = "/api/auth/github/callback"
 STATE_PATH = "/api/auth"
 SESSION_PATH = "/api"
 SIGN_IN_AGAIN = "Sign in with GitHub first"
+REPO_UNAVAILABLE = "Repository not found, or code-flow has no access to it"
+REPOS_PAGE = "/github"
+# Shown in the repo details page when no commit count comes from Flagsmith.
+DEFAULT_COMMIT_COUNT = 20
+T = TypeVar("T")
 
 
 class Auth:
@@ -64,8 +72,20 @@ class Auth:
 
     def repositories(self, request: Request) -> tuple[Session, list[GitHubRepo]]:
         session, token = self.user_token(request)
+        return session, self._call(request, lambda github: github.repositories(token))
+
+    def repository(self, request: Request, repo_id: int) -> tuple[str, GitHubRepo]:
+        """Return the user's token and one of their repos, or 404 for any other repo."""
+        _, token = self.user_token(request)
+        repos = self._call(request, lambda github: github.repositories(token))
+        repo = next((repo for repo in repos if repo.id == repo_id), None)
+        if repo is None:
+            raise HTTPException(status_code=404, detail=REPO_UNAVAILABLE)
+        return token, repo
+
+    def _call(self, request: Request, call: Callable[[GitHubApp], T]) -> T:
         try:
-            return session, self._github().repositories(token)
+            return call(self._github())
         except GitHubAuthError as exc:
             self.sessions.delete(request.cookies.get(SESSION_COOKIE))
             raise HTTPException(status_code=401, detail=str(exc)) from exc
@@ -88,8 +108,8 @@ class Auth:
             samesite="lax",
         )
 
-    def _back_to_site(self, query: str) -> RedirectResponse:
-        response = RedirectResponse(f"{self.settings.web_origin}/?{query}", status_code=302)
+    def _back_to_site(self, query: str, path: str = "/") -> RedirectResponse:
+        response = RedirectResponse(f"{self.settings.web_origin}{path}?{query}", status_code=302)
         response.delete_cookie(STATE_COOKIE, path=STATE_PATH)
         return response
 
@@ -128,7 +148,8 @@ class Auth:
 
             self.sessions.delete(request.cookies.get(SESSION_COOKIE))
             session_id = self.sessions.create(user, token)
-            response = self._back_to_site("signed_in=1")
+            # Signed-in visitors land on their repositories page.
+            response = self._back_to_site("signed_in=1", REPOS_PAGE)
             self._cookie(response, SESSION_COOKIE, session_id, SESSION_SECONDS, SESSION_PATH)
             return response
 
@@ -149,6 +170,37 @@ class Auth:
         def github_repos(request: Request) -> list[dict]:
             _, repos = self.repositories(request)
             return [repo.response() for repo in repos]
+
+        @router.get("/api/github/repos/{repo_id}/branches")
+        def github_branches(repo_id: int, request: Request) -> dict:
+            token, repo = self.repository(request, repo_id)
+            names = self._call(request, lambda github: github.branches(token, repo.full_name))
+            # The default branch first, then the rest in name order.
+            names = sorted(set(names), key=lambda name: (name != repo.default_branch, name.lower()))
+            return {"repo": repo.response(), "branches": names}
+
+        @router.get("/api/github/repos/{repo_id}/commits")
+        def github_commits(
+            repo_id: int,
+            request: Request,
+            branch: str,
+            limit: Annotated[int, Query(ge=1)] = DEFAULT_COMMIT_COUNT,
+        ) -> dict:
+            branch = validate_branch(branch)
+            token, repo = self.repository(request, repo_id)
+            # The server's import cap wins over a larger count from Flagsmith.
+            limit = min(limit, self.settings.max_import_commits)
+            commits = self._call(
+                request,
+                lambda github: github.commits(
+                    token, repo.full_name, branch or repo.default_branch, limit
+                ),
+            )
+            return {
+                "branch": branch or repo.default_branch,
+                "limit": limit,
+                "commits": [commit.response() for commit in commits],
+            }
 
         @router.post("/api/auth/logout", status_code=204)
         def logout(request: Request) -> Response:

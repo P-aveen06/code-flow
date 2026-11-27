@@ -97,6 +97,12 @@ export function markRedirecting(store: Storage | null = storage()) {
   if (journey) saveJourney({ ...journey, redirecting: true }, store);
 }
 
+// Back from GitHub on a page other than the landing page, which calls beginJourney instead.
+export function resumeJourney(store: Storage | null = storage()) {
+  const journey = readJourney(store);
+  if (journey?.redirecting) saveJourney({ ...journey, redirecting: false }, store);
+}
+
 export function shouldReportAbandon(journey: Journey | null) {
   return Boolean(journey && !journey.redirecting && journey.sent.includes("import_started")
     && !journey.sent.includes("import_completed"));

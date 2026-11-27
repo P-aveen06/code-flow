@@ -37,6 +37,8 @@ class ImportSource:
     owner_uid: int | None = None
     installation_id: int | None = None
     github_repo_id: int | None = None
+    # Empty for the repository's default branch.
+    branch: str = ""
 
     def access_fields(self) -> dict:
         """Fields that decide who may read the import, as stored in source.json."""
@@ -148,12 +150,16 @@ def _prepare_clone(
     def fetch(*options: str) -> None:
         _git(*git, "fetch", *options, "origin", refspec, error=UNAVAILABLE, token=token)
 
+    missing_branch = f"Branch {source.branch} not found, or code-flow has no access to it"
     if clone.exists():
-        remote_head = _git("ls-remote", "--symref", url, "HEAD", error=UNAVAILABLE, token=token)
-        first_line = remote_head.split("\n", 1)[0]
-        if not first_line.startswith("ref: refs/heads/"):
-            raise ImportFailure("Repository has no default branch")
-        head = first_line.removeprefix("ref: ").split("\t", 1)[0]
+        if source.branch:
+            head = f"refs/heads/{source.branch}"
+        else:
+            remote_head = _git("ls-remote", "--symref", url, "HEAD", error=UNAVAILABLE, token=token)
+            first_line = remote_head.split("\n", 1)[0]
+            if not first_line.startswith("ref: refs/heads/"):
+                raise ImportFailure("Repository has no default branch")
+            head = first_line.removeprefix("ref: ").split("\t", 1)[0]
         branch = f"refs/remotes/origin/{head.removeprefix('refs/heads/')}"
         if _git(*git, "remote", "get-url", "origin", error=UNAVAILABLE) != url:
             _git(*git, "remote", "set-url", "origin", url, error=UNAVAILABLE)
@@ -168,18 +174,23 @@ def _prepare_clone(
             str(depth),
             "--single-branch",
             "--no-checkout",
+            *((f"--branch={source.branch}",) if source.branch else ()),
             "--",
             url,
             str(staged_clone),
-            error=UNAVAILABLE,
+            error=missing_branch if source.branch else UNAVAILABLE,
             token=token,
         )
-        branch = _git(
-            "-C",
-            str(staged_clone),
-            "symbolic-ref",
-            "refs/remotes/origin/HEAD",
-            error="Repository has no default branch",
+        branch = (
+            f"refs/remotes/origin/{source.branch}"
+            if source.branch
+            else _git(
+                "-C",
+                str(staged_clone),
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                error="Repository has no default branch",
+            )
         )
         staged_clone.rename(clone)
         refspec = f"+refs/heads/{branch.removeprefix('refs/remotes/origin/')}:{branch}"
@@ -279,6 +290,7 @@ class ImportAnalysis:
             "name": source.name,
             "subdir": source.subdir,
             "max_commits": limit,
+            **({"branch": source.branch} if source.branch else {}),
             "imported_at": datetime.now(UTC).isoformat(),
             **source.access_fields(),
         }

@@ -633,3 +633,21 @@ def test_shutdown_drains_running_import(tmp_path, local_repo, monkeypatch):
 
     timer.join()
     assert (settings.data_dir / REPO_ID / "commits.json").is_file()
+
+
+@pytest.mark.parametrize("branch", ["main", "feature/cart", "release-1.2", "v2_x"])
+def test_valid_branch_names_get_their_own_id(branch: str):
+    source = importer.validate_import({"url": URL, "branch": branch})
+    assert source.branch == branch
+    assert source.id == f"{REPO_ID}@{branch.replace('/', '~')}"
+    assert source.name == f"Demo/shop@{branch}"
+    assert importer.validate_import({"url": URL, "branch": ""}).id == REPO_ID
+
+
+@pytest.mark.parametrize(
+    "branch",
+    ["-x", "../a", "a..b", "a b", "a@b", "a~b", "a.lock", "/a", "a/", "a//b", ".a", "a/.b", 7],
+)
+def test_unsafe_branch_names_are_rejected(branch: object):
+    with pytest.raises(importer.BadRequest, match="Pick a branch"):
+        importer.validate_import({"url": URL, "branch": branch})

@@ -63,9 +63,10 @@ your selected commit while it remains in that history. [Refresh screenshot](docs
 ### Sign in with GitHub
 
 To analyze private repositories, create a read-only GitHub App and set its
-`GITHUB_*` values and `VITE_API_URL=/` in `.env`. code-flow can then clone only
-the repositories each person picks, and only that person sees a private
-import. Sign-in is the `github_signin` arm of a Flagsmith experiment against
+`GITHUB_*` values and `VITE_API_URL=/` in `.env`. Signed-in visitors pick a
+repository and a branch, then analyze its latest commits (20 by default, set
+by the `branch_commit_count` flag). code-flow can only clone the repositories
+each person allows, and only that person sees a private import. Sign-in is the `github_signin` arm of a Flagsmith experiment against
 the URL form. [Setup, security model and experiment](docs/GITHUB_SIGNIN.md)
 
 ### Connect Flagsmith

@@ -1,8 +1,9 @@
 # Sign in with GitHub
 
-Visitors can sign in with GitHub and pick a repository to analyze, including a
-private one. This is the `github_signin` variant of the `github_signin`
-experiment. The control, `url_import`, keeps the public URL form.
+Visitors can sign in with GitHub, pick one of their repositories (including a
+private one), choose a branch, and analyze its latest commits. This is the
+`github_signin` variant of the `github_signin` experiment. The control,
+`url_import`, keeps the public URL form.
 
 ## What code-flow can see
 
@@ -35,13 +36,24 @@ experiment. The control, `url_import`, keeps the public URL form.
 1. **Sign in with GitHub** sends the visitor to GitHub to authorize the app,
    with a one-time `state` value in a sealed, ten-minute cookie.
 2. GitHub returns them to `/api/auth/github/callback`. The server checks the
-   state, exchanges the code, creates the session and redirects to
-   `/?signed_in=1`.
-3. The repo picker lists the repositories the app is installed on. If it lists
+   state, exchanges the code, creates the session and redirects to the repos
+   page, `/github?signed_in=1`.
+3. The repos page lists the repositories the app is installed on. If it lists
    none, **Choose repositories on GitHub** opens the install page. GitHub
-   returns the visitor to the Setup URL, `/?github=installed`.
-4. The visitor picks a repository and starts the analysis. The server checks
-   that the repository really is one of theirs before it clones.
+   returns the visitor to the Setup URL, `/github?github=installed`.
+4. Picking a repository opens its details page, `/github/<repo id>`. The visitor
+   chooses a branch (the default branch is selected first) and sees its latest
+   commits along the branch's first-parent history, the same history the
+   analysis follows. The number of commits comes from the
+   `branch_commit_count` flag in Flagsmith (default 20), capped by
+   `CODEFLOW_MAX_IMPORT_COMMITS`.
+5. **Analyze N commits** imports that branch. The server checks that the
+   repository really is one of theirs before it clones, then opens the flow.
+
+Each branch other than the default is its own import, with an id such as
+`owner__name@feature~cart` (or `p_<uid>__owner__name@feature~cart` when
+private) and the name `owner/name@feature/cart`. The default branch keeps the
+plain id, so it matches a pasted URL of the same repository.
 
 The browser has to see the API as the same site for the cookie to work, so
 the web app calls `/api` on its own origin. Locally, Vite proxies `/api` to the
@@ -63,7 +75,7 @@ app has a single callback URL, so one app can't serve both.
 | Expire user authorization tokens | On | On |
 | Request user authorization (OAuth) during installation | **Off** | **Off** |
 | Enable Device Flow | Off | Off |
-| Setup URL | `http://localhost:5173/?github=installed` | `https://code-flow.pages.dev/?github=installed` |
+| Setup URL | `http://localhost:5173/github?github=installed` | `https://code-flow.pages.dev/github?github=installed` |
 | Redirect on update | On | On |
 | Webhook → Active | Off | Off |
 | Repository permissions | Contents: **Read-only**. Metadata: Read-only (required). | Same |
@@ -166,7 +178,17 @@ unless `CODEFLOW_WEB_ORIGIN` is a localhost origin.
 Until Flagsmith is reachable from the internet, the hosted site shows the
 `VITE_GITHUB_SIGNIN_FALLBACK` arm to everyone.
 
-## 5. The experiment
+## 5. The commit count flag
+
+`branch_commit_count` is a standard flag whose value is a whole number.
+`make flagsmith-setup` and `make flagsmith-setup-sim` create it on, with the
+value 20. Change the value in Flagsmith to list and analyze more or fewer
+commits; the repo details page picks up the new value within about ten seconds.
+When the flag is off, missing, outside 1 to 200, or Flagsmith is unreachable,
+the page uses 20. The server also caps it at `CODEFLOW_MAX_IMPORT_COMMITS`
+(50 on Render).
+
+## 6. The experiment
 
 The flag is `github_signin`: control `url_import`, variant `github_signin`,
 split 50/50. The web app records exposure with `getExperimentFlag` and sends
@@ -177,9 +199,9 @@ same through sign-in:
 | --- | --- | --- |
 | `import_started` | URL form submitted, or **Sign in with GitHub** clicked | |
 | `signin_started` | **Sign in with GitHub** clicked | |
-| `signin_completed` | Back from GitHub, signed in | |
+| `signin_completed` | Back from GitHub on the repos page, signed in | |
 | `app_installed` | Back from the install page with repositories to pick | |
-| `repo_selected` | A repository picked for analysis | |
+| `repo_selected` | **Analyze** pressed for a repository and branch | |
 | `import_completed` | The analysis finished | ms since landing |
 | `first_flow_viewed` | The first flow diagram drew | ms since landing |
 | `import_abandoned` | Left after `import_started` without finishing (not while away at GitHub) | |

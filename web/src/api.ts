@@ -1,7 +1,8 @@
 import { apiUrl } from "./config";
 import { waitFor } from "./waitFor";
 import type {
-  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GitHubRepoChoice, GraphSnapshot, ImportRequest,
+  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GitHubBranches, GitHubCommitList, GitHubRepoChoice,
+  GraphSnapshot, ImportRequest,
   ImportResponse, ImportStatus, Me, PickedImportRequest, Repo, RepoFlags,
 } from "./types";
 
@@ -30,7 +31,9 @@ async function requestJson<T>(path: string, signal?: AbortSignal, options?: Requ
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    if ([400, 401, 404, 409].includes(response.status) && options?.method === "POST" && typeof body?.detail === "string") {
+    // POSTs and the GitHub routes explain themselves, so show their message as it is.
+    const plain = options?.method === "POST" || path.startsWith("/github/");
+    if ([400, 401, 404, 409].includes(response.status) && plain && typeof body?.detail === "string") {
       throw new Error(body.detail);
     }
     const detail = typeof body?.detail === "string" ? `: ${body.detail}` : "";
@@ -90,6 +93,15 @@ export async function fetchMe(signal?: AbortSignal): Promise<Me> {
 
 export function fetchGitHubRepos(signal?: AbortSignal) {
   return requestJson<GitHubRepoChoice[]>("/github/repos", signal, { cache: "no-store" });
+}
+
+export function fetchGitHubBranches(repoId: number, signal?: AbortSignal) {
+  return requestJson<GitHubBranches>(`/github/repos/${repoId}/branches`, signal, { cache: "no-store" });
+}
+
+export function fetchGitHubCommits(repoId: number, branch: string, limit: number, signal?: AbortSignal) {
+  const query = new URLSearchParams({ branch, limit: String(limit) });
+  return requestJson<GitHubCommitList>(`/github/repos/${repoId}/commits?${query}`, signal, { cache: "no-store" });
 }
 
 export async function signOut() {

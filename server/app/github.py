@@ -4,7 +4,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import jwt
 import urllib3
@@ -80,6 +80,38 @@ class GitHubRepo:
             "private": self.private,
             "default_branch": self.default_branch,
             "installation_id": self.installation_id,
+        }
+
+
+@dataclass(frozen=True)
+class GitHubCommit:
+    sha: str
+    message: str
+    author: str
+    date: str
+    url: str
+
+    @classmethod
+    def from_api(cls, item: dict) -> "GitHubCommit":
+        commit = item.get("commit") or {}
+        author = commit.get("author") or {}
+        login = (item.get("author") or {}).get("login")
+        message = str(commit.get("message", "")).split("\n", 1)[0][:200]
+        return cls(
+            sha=str(item["sha"]),
+            message=message,
+            author=str(login or author.get("name") or ""),
+            date=str(author.get("date") or ""),
+            url=str(item.get("html_url") or ""),
+        )
+
+    def response(self) -> dict:
+        return {
+            "sha": self.sha,
+            "message": self.message,
+            "author": self.author,
+            "date": self.date,
+            "url": self.url,
         }
 
 
@@ -190,6 +222,55 @@ class GitHubApp:
                 )
         return sorted(repos, key=lambda repo: repo.full_name.lower())
 
+    def branches(self, access_token: str, full_name: str) -> list[str]:
+        items = self._get_list_pages(
+            f"{GITHUB_API}/repos/{full_name}/branches",
+            access_token,
+            "Could not list the branches of this repository",
+        )
+        return [str(item["name"]) for item in items]
+
+    def commits(
+        self, access_token: str, full_name: str, branch: str, limit: int
+    ) -> list[GitHubCommit]:
+        """Return the latest commits on a branch along its first-parent history.
+
+        The analyzer follows first parents too, so a merged pull request shows as its
+        merge commit here, the same as in the flow timeline.
+        """
+        by_sha: dict[str, dict] = {}
+        head: str | None = None
+        chain: list[GitHubCommit] = []
+        page = 1
+        url = f"{GITHUB_API}/repos/{full_name}/commits"
+        query = f"sha={quote(branch, safe='')}&per_page={PAGE_SIZE}"
+        while len(chain) < limit:
+            if head is None or head not in by_sha:
+                if page > MAX_PAGES:
+                    break
+                batch = self._get_json(
+                    f"{url}?{query}&page={page}",
+                    access_token,
+                    "Could not list the commits on this branch",
+                )
+                if not isinstance(batch, list):
+                    raise GitHubError("Could not list the commits on this branch")
+                page += 1
+                by_sha.update((str(item["sha"]), item) for item in batch)
+                if head is None and batch:
+                    head = str(batch[0]["sha"])
+                if head is None or head not in by_sha:
+                    if len(batch) < PAGE_SIZE:
+                        break
+                    continue
+            item = by_sha[head]
+            chain.append(GitHubCommit.from_api(item))
+            parents = item.get("parents") or []
+            if not parents:
+                break
+            head = str(parents[0]["sha"])
+        return chain
+
     # App calls
 
     def installation_token(self, installation_id: int, repository_id: int) -> str:
@@ -222,15 +303,32 @@ class GitHubApp:
             "User-Agent": "code-flow",
         }
 
-    def _get(self, url: str, access_token: str, error: str) -> dict:
+    def _get_json(self, url: str, access_token: str, error: str) -> object:
         status, data = self._transport(
             "GET", url, {**self._api_headers(), "Authorization": f"Bearer {access_token}"}, None
         )
         if status == 401:
             raise GitHubAuthError("Your GitHub sign-in expired. Sign in again.")
-        if status != 200 or not isinstance(data, dict):
+        if status != 200:
             raise GitHubError(error)
         return data
+
+    def _get(self, url: str, access_token: str, error: str) -> dict:
+        data = self._get_json(url, access_token, error)
+        if not isinstance(data, dict):
+            raise GitHubError(error)
+        return data
+
+    def _get_list_pages(self, url: str, access_token: str, error: str) -> list[dict]:
+        items: list[dict] = []
+        for page in range(1, MAX_PAGES + 1):
+            batch = self._get_json(f"{url}?per_page={PAGE_SIZE}&page={page}", access_token, error)
+            if not isinstance(batch, list):
+                raise GitHubError(error)
+            items.extend(batch)
+            if len(batch) < PAGE_SIZE:
+                break
+        return items
 
     def _get_pages(self, url: str, key: str, access_token: str) -> list[dict]:
         items: list[dict] = []

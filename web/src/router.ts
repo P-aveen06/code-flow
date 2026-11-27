@@ -1,6 +1,11 @@
 import { useSyncExternalStore } from "react";
 
-type Route = { page: "landing" } | { page: "viewer"; id: string } | { page: "not-found" };
+type Route =
+  | { page: "landing" }
+  | { page: "viewer"; id: string }
+  | { page: "github-repos" }
+  | { page: "github-repo"; repoId: number }
+  | { page: "not-found" };
 
 function validRepoId(id: string) {
   return id.length > 0 && !id.includes("..") && !/[\/\\]/.test(id) && id !== ".";
@@ -8,6 +13,9 @@ function validRepoId(id: string) {
 
 export function parsePath(pathname: string): Route {
   if (pathname === "/") return { page: "landing" };
+  if (/^\/github\/?$/.test(pathname)) return { page: "github-repos" };
+  const github = /^\/github\/([1-9]\d{0,15})\/?$/.exec(pathname);
+  if (github) return { page: "github-repo", repoId: Number(github[1]) };
   const match = /^\/repo\/([^/]+)\/?$/.exec(pathname);
   if (match) {
     try {
@@ -22,6 +30,12 @@ export function parsePath(pathname: string): Route {
 
 export function repoPath(id: string): string {
   return `/repo/${encodeURIComponent(id)}`;
+}
+
+export const githubReposPath = "/github";
+
+export function githubRepoPath(repoId: number, branch?: string): string {
+  return `${githubReposPath}/${repoId}${branch ? `?${new URLSearchParams({ branch })}` : ""}`;
 }
 
 export function legacyRepoRedirect(pathname: string, search: string): string | null {

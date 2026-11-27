@@ -10,13 +10,14 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
-from test_importer import InlineExecutor, local_repo  # noqa: F401 (fixture)
+from test_importer import InlineExecutor, commit, git, local_repo  # noqa: F401 (fixture)
 
 from app import import_analysis
 from app.config import GitHubAppSettings, Settings
 from app.github import (
     GitHubApp,
     GitHubAuthError,
+    GitHubCommit,
     GitHubError,
     GitHubRepo,
     GitHubUser,
@@ -52,6 +53,7 @@ class FakeGitHub:
         self.minted: list[tuple[int, int]] = []
         self.revoked: list[str] = []
         self.refreshed: list[str] = []
+        self.commit_requests: list[tuple[str, str, int]] = []
 
     def authorize_url(self, redirect_uri: str, state: str) -> str:
         return f"https://github.test/authorize?state={state}&redirect_uri={redirect_uri}"
@@ -79,6 +81,17 @@ class FakeGitHub:
         self.minted.append((installation_id, repository_id))
         return CLONE_TOKEN
 
+    def branches(self, token: str, full_name: str) -> list[str]:
+        assert token == "tok-1" and full_name == "Demo/shop"
+        return ["feature/cart", "Docs", "main"]
+
+    def commits(self, token: str, full_name: str, branch: str, limit: int) -> list[GitHubCommit]:
+        self.commit_requests.append((full_name, branch, limit))
+        return [
+            GitHubCommit(f"{n:040x}", f"Commit {n}", "owner", "2026-11-27T10:00:00Z", "")
+            for n in range(min(limit, 3))
+        ]
+
     def revoke(self, token: str) -> None:
         self.revoked.append(token)
 
@@ -92,7 +105,7 @@ def sign_in(client: TestClient, code: str) -> None:
         params={"code": code, "state": state},
         follow_redirects=False,
     )
-    assert callback.headers["location"] == f"{ORIGIN}/?signed_in=1"
+    assert callback.headers["location"] == f"{ORIGIN}/github?signed_in=1"
     cookie = callback.headers["set-cookie"]
     assert "cf_session=" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie
 
@@ -264,6 +277,73 @@ def test_picked_repo_must_come_from_the_users_installations(app):
         assert bad.status_code == 400
 
 
+def test_repo_details_list_branches_and_recent_commits(app, github: FakeGitHub):
+    with TestClient(app) as client:
+        assert client.get("/api/github/repos/7/branches").status_code == 401
+        sign_in(client, "1")
+        branches = client.get("/api/github/repos/7/branches").json()
+        assert branches["repo"]["full_name"] == "Demo/shop"
+        assert branches["branches"] == ["main", "Docs", "feature/cart"]
+
+        commits = client.get("/api/github/repos/7/commits", params={"branch": "feature/cart"})
+        assert commits.json()["branch"] == "feature/cart"
+        assert commits.json()["limit"] == 20
+        assert [c["message"] for c in commits.json()["commits"]] == [
+            "Commit 0",
+            "Commit 1",
+            "Commit 2",
+        ]
+        # An empty branch means the default branch, and the import cap bounds the count.
+        latest = client.get("/api/github/repos/7/commits", params={"branch": "", "limit": 500})
+        assert (latest.json()["branch"], latest.json()["limit"]) == ("main", 200)
+        assert github.commit_requests == [
+            ("Demo/shop", "feature/cart", 20),
+            ("Demo/shop", "main", 200),
+        ]
+
+        bad = client.get("/api/github/repos/7/commits", params={"branch": "../main"})
+        assert bad.status_code == 400
+        assert client.get("/api/github/repos/99/branches").status_code == 404
+
+        stranger = TestClient(app)
+        sign_in(stranger, "2")
+        assert stranger.get("/api/github/repos/7/branches").status_code == 404
+        assert stranger.get("/api/github/repos/7/commits", params={"branch": ""}).status_code == 404
+
+
+def test_private_import_of_a_chosen_branch(app, local_repo: Path, tmp_path: Path):  # noqa: F811
+    git(local_repo, "checkout", "--quiet", "-b", "feature/cart")
+    branch_head = commit(local_repo, "shop/cart.py", "def cart(): return []\n", "Empty cart")
+    git(local_repo, "checkout", "--quiet", "main")
+    branch_id = "p_1__Demo__shop@feature~cart"
+    with TestClient(app) as owner:
+        sign_in(owner, "1")
+        body = {**PRIVATE, "branch": "feature/cart"}
+        assert owner.post("/api/repos", json=body, headers=CSRF).json()["id"] == branch_id
+        assert owner.get(f"/api/repos/{branch_id}/status").json()["status"] == "ready"
+        shas = [c["sha"] for c in owner.get(f"/api/repos/{branch_id}/commits").json()["commits"]]
+        assert shas[-1] == branch_head
+        listing = owner.get("/api/repos").json()
+        assert [(repo["id"], repo["name"]) for repo in listing] == [
+            (branch_id, "Demo/shop@feature/cart")
+        ]
+        source = json.loads((tmp_path / "data" / branch_id / "source.json").read_text())
+        assert source["branch"] == "feature/cart"
+        # Refresh rebuilds the same branch import from source.json.
+        assert owner.post(f"/api/repos/{branch_id}/refresh", headers=CSRF).status_code == 202
+        assert owner.get(f"/api/repos/{branch_id}/status").json()["status"] == "ready"
+
+        stranger = TestClient(app)
+        sign_in(stranger, "2")
+        assert stranger.get(f"/api/repos/{branch_id}/commits").status_code == 404
+
+        # Picking the default branch by name keeps the plain id (and hits the cap of 1 here).
+        default = owner.post("/api/repos", json={**PRIVATE, "branch": "main"}, headers=CSRF)
+        assert default.status_code == 409
+        bad = owner.post("/api/repos", json={**PRIVATE, "branch": "-x"}, headers=CSRF)
+        assert bad.status_code == 400
+
+
 def test_session_posts_need_the_code_flow_header_and_origin(app):
     with TestClient(app) as client:
         sign_in(client, "1")
@@ -395,3 +475,40 @@ def test_rejected_user_token_asks_for_a_new_sign_in():
     app, _ = github_app([(401, {"message": "Bad credentials"})])
     with pytest.raises(GitHubAuthError):
         app.user("ghu_old")
+
+
+def commit_item(sha: str, parents: list[str], message: str = "Change\n\nBody") -> dict:
+    return {
+        "sha": sha,
+        "html_url": f"https://github.com/o/r/commit/{sha}",
+        "author": {"login": "dev"},
+        "commit": {"message": message, "author": {"name": "Dev", "date": "2026-11-27T10:00:00Z"}},
+        "parents": [{"sha": parent} for parent in parents],
+    }
+
+
+def test_commits_follow_first_parents_across_pages():
+    # m merges side branch x into a; the walk skips x like git rev-list --first-parent.
+    first = [commit_item("m", ["a", "x"]), commit_item("x", ["a"])]
+    first += [commit_item(f"pad{n}", ["pad"]) for n in range(98)]
+    second = [commit_item("a", ["b"]), commit_item("b", [])]
+    app, calls = github_app([(200, first), (200, second)])
+    commits = app.commits("ghu_x", "o/r", "feature/cart", 5)
+    assert [commit.sha for commit in commits] == ["m", "a", "b"]
+    assert commits[0].message == "Change" and commits[0].author == "dev"
+    assert calls[0][1] == (
+        "https://api.github.com/repos/o/r/commits?sha=feature%2Fcart&per_page=100&page=1"
+    )
+    assert calls[1][1].endswith("&page=2")
+
+    app, calls = github_app([(200, [commit_item("m", ["a"]), commit_item("a", ["b"])])])
+    assert [commit.sha for commit in app.commits("ghu_x", "o/r", "main", 1)] == ["m"]
+    assert len(calls) == 1
+
+
+def test_branches_follow_pages():
+    page = [{"name": f"b{n:03}"} for n in range(100)]
+    app, calls = github_app([(200, page), (200, [{"name": "main"}])])
+    names = app.branches("ghu_x", "o/r")
+    assert len(names) == 101 and names[-1] == "main"
+    assert calls[1][1] == "https://api.github.com/repos/o/r/branches?per_page=100&page=2"

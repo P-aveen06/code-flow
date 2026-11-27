@@ -78,10 +78,12 @@ interface FlagSnapshot {
   flagsmithMode: boolean;
   variantPreview: boolean;
   signinFlag: IFlagsmithFeature | null;
+  commitCountFlag: IFlagsmithFeature | null;
 }
 
 const unavailableFlags: FlagSnapshot = {
   assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false, signinFlag: null,
+  commitCountFlag: null,
 };
 
 function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
@@ -90,7 +92,10 @@ function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
 
 export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getAllFlags" | "hasFeature">): FlagSnapshot {
   if (!hasServerFlags(client)) return unavailableFlags;
-  const { flow_view: viewFlag, flow_direction: directionFlag, github_signin: signinFlag } = client.getAllFlags();
+  const {
+    flow_view: viewFlag, flow_direction: directionFlag, github_signin: signinFlag,
+    branch_commit_count: commitCountFlag,
+  } = client.getAllFlags();
   return {
     assignmentKey: JSON.stringify([viewFlag?.value, viewFlag?.variant, viewFlag?.enabled, viewFlag?.experiment]),
     assignedView: parseFlowView(viewFlag?.value),
@@ -98,6 +103,7 @@ export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getA
     flagsmithMode: client.hasFeature("flagsmith_mode"),
     variantPreview: client.hasFeature("variant_preview"),
     signinFlag: signinFlag ?? null,
+    commitCountFlag: commitCountFlag ?? null,
   };
 }
 
@@ -301,4 +307,23 @@ export function useSigninVariant(search: string): SigninAssignment {
     preview: override !== null,
     ready: flags !== undefined && (override !== null || flagVariant === null || current !== undefined),
   };
+}
+
+// The repo details page lists and analyzes this many recent commits of a branch.
+export const DEFAULT_BRANCH_COMMIT_COUNT = 20;
+const MAX_BRANCH_COMMIT_COUNT = 200;
+
+export function parseCommitCount(flag: IFlagsmithFeature | null | undefined): number {
+  if (!flag?.enabled) return DEFAULT_BRANCH_COMMIT_COUNT;
+  const { value } = flag;
+  const count = typeof value === "number" ? value
+    : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN;
+  return Number.isInteger(count) && count >= 1 && count <= MAX_BRANCH_COMMIT_COUNT
+    ? count : DEFAULT_BRANCH_COMMIT_COUNT;
+}
+
+// Remote config from the branch_commit_count flag. Not ready until Flagsmith answers or fails.
+export function useBranchCommitCount(search: string) {
+  const flags = useFlagSnapshot(readReviewerId(search));
+  return { count: parseCommitCount(flags?.commitCountFlag), ready: flags !== undefined };
 }

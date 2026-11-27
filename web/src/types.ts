@@ -23,6 +23,8 @@ export interface ImportRequest {
 export interface PickedImportRequest {
   github_repo_id: number;
   installation_id: number;
+  // The default branch when left out.
+  branch?: string;
   subdir: string;
   max_commits: number;
 }
@@ -37,6 +39,27 @@ export interface GitHubRepoChoice {
   private: boolean;
   default_branch: string;
   installation_id: number;
+}
+
+export interface GitHubBranches {
+  repo: GitHubRepoChoice;
+  // The default branch comes first.
+  branches: string[];
+}
+
+export interface GitHubCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
+export interface GitHubCommitList {
+  branch: string;
+  // The count actually used: the server's import cap can lower the requested one.
+  limit: number;
+  commits: GitHubCommit[];
 }
 
 export interface ImportResponse {

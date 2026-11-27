@@ -111,8 +111,8 @@ the web build.
 Use the Node version from [web/.nvmrc](../web/.nvmrc). If you use nvm, run
 `nvm use` inside `web/` first. The build root is
 `web/`, the build command is `npm ci && npm run build`, and the output
-directory is `dist`. The `/repo/* / 200` rewrite serves the index for viewer
-links and preserves their query strings. Pages also has a built-in SPA fallback.
+directory is `dist`. The `/repo/*` and `/github` rewrites serve the index for
+viewer links and the GitHub repo pages, and preserve their query strings. Pages also has a built-in SPA fallback.
 Wrangler rejects the catch-all `/* /index.html 200` as a redirect loop.
 [Pages redirect rules](https://developers.cloudflare.com/pages/configuration/redirects/) · [Pages SPA routing](https://developers.cloudflare.com/pages/configuration/serving-pages/)
 

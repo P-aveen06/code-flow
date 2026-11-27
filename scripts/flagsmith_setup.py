@@ -174,6 +174,8 @@ GITHUB_SIGNIN_FLAG = Flag(
     "MULTIVARIATE",
     (Variant("github_signin", 50, "github_signin"),),
 )
+# How many recent commits the repo details page lists and analyzes for a chosen branch.
+BRANCH_COMMIT_COUNT_FLAG = Flag("branch_commit_count", True, 20)
 
 
 def same_value(left: FlagValue, right: FlagValue) -> bool:
@@ -639,6 +641,7 @@ def setup(
         FLOW_VIEW_FLAG,
         FLOW_DIRECTION_FLAG,
         GITHUB_SIGNIN_FLAG,
+        BRANCH_COMMIT_COUNT_FLAG,
         Flag("flagsmith_mode", True),
         Flag("ai_summary", False),
         Flag(VARIANT_PREVIEW, not app_environment),
