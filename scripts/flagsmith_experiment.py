@@ -18,6 +18,7 @@ from flagsmith_setup import (
     PRODUCTION_ENVIRONMENT,
     PROJECT_NAME,
     SIM_ENVIRONMENT_SETTING,
+    SYNC_MODE_FLAG,
     AdminClient,
     AdminError,
     Record,
@@ -33,20 +34,21 @@ RESULTS_POLL_SECONDS = 2
 
 
 @dataclass(frozen=True)
+class MetricDefinition:
+    name: str
+    event: str
+    aggregation: str
+    direction: str
+    expected_direction: str
+
+
+@dataclass(frozen=True)
 class ExperimentDefinition:
     name: str
     hypothesis: str
     control: str
     treatments: dict[str, int]
-    metric_subject: str
-    success_event: str
-
-    @property
-    def metrics(self) -> tuple[tuple[str, str, str, str], ...]:
-        return (
-            (f"{self.metric_subject} understood", "occurrence", "up", "increase"),
-            (f"{self.metric_subject} time to understand (ms)", "mean", "down", "decrease"),
-        )
+    metrics: tuple[MetricDefinition, ...]
 
     @property
     def allocations(self) -> dict[str, int]:
@@ -62,8 +64,12 @@ EXPERIMENTS = {
         ),
         control="side_by_side",
         treatments={"overlay": 33, "overlay_summary": 33},
-        metric_subject="Diff",
-        success_event="diff_understood",
+        metrics=(
+            MetricDefinition("Diff understood", "diff_understood", "occurrence", "up", "increase"),
+            MetricDefinition(
+                "Diff time to understand (ms)", "diff_understood", "mean", "down", "decrease"
+            ),
+        ),
     ),
     FLOW_DIRECTION_FLAG.name: ExperimentDefinition(
         name="flow_direction: vertical vs horizontal for long flows",
@@ -72,8 +78,38 @@ EXPERIMENTS = {
         treatments={
             str(option.value): int(option.allocation) for option in FLOW_DIRECTION_FLAG.variants
         },
-        metric_subject="Layout",
-        success_event="layout_understood",
+        metrics=(
+            MetricDefinition(
+                "Layout understood", "layout_understood", "occurrence", "up", "increase"
+            ),
+            MetricDefinition(
+                "Layout time to understand (ms)", "layout_understood", "mean", "down", "decrease"
+            ),
+        ),
+    ),
+    SYNC_MODE_FLAG.name: ExperimentDefinition(
+        name="sync_mode: manual button vs auto-sync per repo vs global auto-sync",
+        hypothesis="Auto-sync shows new commits sooner without a noticeable cost in page load or server load.",
+        control=str(SYNC_MODE_FLAG.value),
+        treatments={
+            str(option.value): int(option.allocation) for option in SYNC_MODE_FLAG.variants
+        },
+        metrics=(
+            MetricDefinition(
+                "New commit seen within 5 min",
+                "new_commit_seen_within_5min",
+                "occurrence",
+                "up",
+                "increase",
+            ),
+            MetricDefinition("Freshness (s)", "sync_freshness_s", "mean", "down", "decrease"),
+            MetricDefinition(
+                "Landing page load (ms)", "sync_page_load_ms", "mean", "down", "decrease"
+            ),
+            MetricDefinition(
+                "Server CPU (ms per hour)", "sync_server_cpu_ms", "mean", "down", "decrease"
+            ),
+        ),
     ),
 }
 
@@ -181,19 +217,20 @@ def create(
     metric_path = f"{environment_path}experiment-metrics/"
     existing_metrics = api.list(metric_path)
     metric_records = []
-    for name, aggregation, direction, expected in definition.metrics:
+    for metric_definition in definition.metrics:
+        name = metric_definition.name
         body = {
             "name": name,
-            "aggregation": aggregation,
-            "direction": direction,
-            "definition": {"version": 1, "event": definition.success_event},
+            "aggregation": metric_definition.aggregation,
+            "direction": metric_definition.direction,
+            "definition": {"version": 1, "event": metric_definition.event},
         }
         metric = find_record(existing_metrics, "name", name, "metric")
         if metric is not None and any(metric[key] != value for key, value in body.items()):
             raise SetupError(
                 f"The existing {name} metric has a different definition or aggregation."
             )
-        metric_records.append((metric, body, expected))
+        metric_records.append((metric, body, metric_definition.expected_direction))
 
     if experiment is None:
         attachments = []
@@ -407,9 +444,11 @@ def status(
         by_id = {metric["metric_id"]: metric for metric in results["metrics"]}
         by_name = {row["metric_name"]: row["metric"] for row in experiment["metrics"]}
         displayed = False
-        for name, aggregation, _, _ in definition.metrics:
-            if metric_result := by_id.get(by_name.get(name)):
-                show_metric(name, aggregation, metric_result, variants, definition.control)
+        for metric in definition.metrics:
+            if metric_result := by_id.get(by_name.get(metric.name)):
+                show_metric(
+                    metric.name, metric.aggregation, metric_result, variants, definition.control
+                )
                 displayed = True
         if displayed:
             return
@@ -443,6 +482,14 @@ def refresh(api: ExperimentAPI, path: str) -> None:
                 print(f"Requested {name} refresh.")
 
 
+def validate_experiment_environment(experiment_flag: str, environment_name: str) -> None:
+    if (
+        experiment_flag == SYNC_MODE_FLAG.name
+        and environment_name.casefold() != DEFAULT_SIM_ENVIRONMENT.casefold()
+    ):
+        raise SetupError("The sync_mode experiment is available only in Development.")
+
+
 def run(
     api: ExperimentAPI,
     command: str,
@@ -452,6 +499,7 @@ def run(
     experiment_flag: str = "flow_view",
     wait_seconds: int = 0,
 ) -> None:
+    validate_experiment_environment(experiment_flag, environment_name)
     definition = EXPERIMENTS[experiment_flag]
     organisations = api.list("organisations/")
     if len(organisations) != 1:
@@ -562,6 +610,7 @@ def main() -> int:
             else configured or DEFAULT_SIM_ENVIRONMENT
         )
         print(f"Using Flagsmith environment {PROJECT_NAME}/{environment}.", flush=True)
+        validate_experiment_environment(args.experiment, environment)
         if (
             environment.casefold() == PRODUCTION_ENVIRONMENT.casefold()
             and args.environment != PRODUCTION_ENVIRONMENT

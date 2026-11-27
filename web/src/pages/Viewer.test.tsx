@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { useCodeFlowFlags } from "../flags";
 import { useRequest } from "../useRequest";
 import { Viewer } from "./Viewer";
+import { SYNC_MODES } from "../view";
+import type { SyncMode } from "../view";
 
 vi.mock("../flags", async (importOriginal) => ({
   ...await importOriginal<typeof import("../flags")>(),
@@ -11,11 +13,14 @@ vi.mock("../flags", async (importOriginal) => ({
 vi.mock("../useRequest", () => ({ useRequest: vi.fn(() => ({ status: "loading" })) }));
 
 describe("viewer previews", () => {
-  function renderViewer(variantPreview: boolean) {
+  function renderViewer(variantPreview: boolean, syncMode: SyncMode = "global_toggle") {
     vi.mocked(useCodeFlowFlags).mockReturnValue({
       reviewerId: "demo",
       viewOverride: "overlay",
       directionOverride: "vertical",
+      syncOverride: variantPreview ? syncMode : null,
+      syncMode,
+      assignedSyncMode: null,
       variantPreview,
       ready: true,
       assignedView: null,
@@ -28,7 +33,7 @@ describe("viewer previews", () => {
       status: "ready",
       data: {
         name: "shop-demo",
-        url: null,
+        url: "https://github.com/Demo/shop",
         subdir: null,
         hasNodes: true,
         commits: [{
@@ -40,23 +45,28 @@ describe("viewer previews", () => {
         }],
       },
     });
-    return renderToStaticMarkup(<Viewer id="shop-demo" search="?view=overlay&direction=vertical" />);
+    return renderToStaticMarkup(<Viewer id="shop-demo" search={`?view=overlay&direction=vertical&sync=${syncMode}`} />);
   }
 
-  it("shows both labeled controls and override actions with variant_preview on", () => {
+  it("shows all labeled controls and override actions with variant_preview on", () => {
     const markup = renderViewer(true);
-    for (const name of ["variant", "direction"]) {
+    for (const name of ["variant", "direction", "sync"]) {
       expect(markup).toContain(`>Preview ${name}<`);
       expect(markup).toContain(`>Back to my assigned ${name}<`);
     }
     expect(markup).toContain("Dev override: <code>view=overlay</code>");
     expect(markup).toContain("Dev override: <code>direction=vertical</code>");
+    expect(markup).toContain("Dev override: <code>sync=global_toggle</code>");
   });
 
-  it("hides both controls and override actions with variant_preview off", () => {
+  it("hides all controls and override actions with variant_preview off", () => {
     const markup = renderViewer(false);
     expect(markup).toContain("Show neighbours");
-    expect(markup).not.toMatch(/Preview variant|Preview direction|Dev override|Back to my assigned/);
+    expect(markup).not.toMatch(/Preview variant|Preview direction|Preview sync|Dev override|Back to my assigned/);
+  });
+
+  it.each(SYNC_MODES)("keeps manual refresh for %s", (mode) => {
+    expect(renderViewer(false, mode)).toContain(">Check for new commits<");
   });
 
   it("shows the four section headings and review settings with flag checks off", () => {

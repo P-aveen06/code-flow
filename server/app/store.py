@@ -134,6 +134,19 @@ class Store:
         self._index(directory)
         return self._read_source(directory)
 
+    def source_repo_ids(self) -> list[str]:
+        """Find published imports without reading their indexes or snapshots."""
+        if not self.data_dir.is_dir():
+            return []
+        return sorted(
+            directory.name
+            for directory in self.data_dir.iterdir()
+            if _valid_repo_name(directory.name)
+            and self._is_repo_dir(directory)
+            and (directory / "source.json").is_file()
+            and (directory / "commits.json").is_file()
+        )
+
     def repo_info(self, repo: str) -> dict:
         directory = self._repo_dir(repo)
         index = self._index(directory)

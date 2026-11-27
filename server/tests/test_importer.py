@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from pathlib import Path
+from threading import Event, current_thread
 from time import monotonic, sleep
 from unittest.mock import Mock
 
@@ -14,14 +15,17 @@ from codeflow import analyze
 from fastapi.testclient import TestClient
 
 from app import importer
+from app.auto_sync import AutoSync
 from app.config import Settings
 from app.main import create_app
+from app.store import Store
 
 URL = "https://github.com/Demo/shop"
 REPOS = "/api/repos"
 REPO_ID = "Demo__shop"
 REPO = f"{REPOS}/{REPO_ID}"
 ORIGIN = "http://example.test"
+AUTO_SYNC = "/api/auto-sync"
 
 
 class InlineExecutor(Executor):
@@ -35,6 +39,22 @@ class InlineExecutor(Executor):
         future = Future()
         future.set_result(fn(*args, **kwargs))
         return future
+
+
+class HeldExecutor(Executor):
+    """Hold submitted jobs until the test runs them."""
+
+    def __init__(self):
+        self.pending = []
+
+    def submit(self, fn, /, *args, **kwargs):
+        future = Future()
+        self.pending.append((future, fn, args, kwargs))
+        return future
+
+    def run_next(self):
+        future, fn, args, kwargs = self.pending.pop(0)
+        future.set_result(fn(*args, **kwargs))
 
 
 def git(repo: Path, *args: str) -> str:
@@ -480,6 +500,193 @@ def test_unavailable_repo_reports_readable_failure(tmp_path: Path):
         status = client.get(f"{REPO}/status").json()
         assert status["status"] == "error"
         assert status["error"] == "Repository not found or not public"
+
+
+def test_auto_sync_api_persists_valid_updates_and_loads_once(tmp_path, local_repo):
+    data_dir = tmp_path / "data"
+    settings = Settings(data_dir, ORIGIN)
+    path = data_dir / "auto_sync.json"
+    analyze.analyze_repo(local_repo, data_dir / "local", max_commits=1)
+    executor = HeldExecutor()
+
+    def app():
+        return create_app(
+            settings,
+            git_url_builder=lambda _: local_repo.as_uri(),
+            executor=executor,
+            auto_sync_interval=12,
+        )
+
+    with TestClient(app()) as client:
+        assert client.get(AUTO_SYNC).json() == {
+            "interval_seconds": 12,
+            "all": False,
+            "repos": {},
+            "status": {},
+        }
+        assert client.post(REPOS, json={"url": URL, "max_commits": 1}).status_code == 202
+        executor.run_next()
+        response = client.put(AUTO_SYNC, json={"repos": {REPO_ID: True}})
+        assert response.status_code == 200
+        assert response.json()["repos"] == {REPO_ID: True}
+        response = client.put(AUTO_SYNC, json={"all": True})
+        assert response.json()["all"] is True
+        assert response.json()["repos"] == {REPO_ID: True}
+        persisted = path.read_text()
+        assert json.loads(persisted) == {
+            "schema": "code-flow/auto-sync@1",
+            "all": True,
+            "repos": {REPO_ID: True},
+        }
+
+        for payload, code in [
+            ({"all": False, "repos": {"missing": True}}, 404),
+            ({"repos": {"local": True}}, 409),
+            ({"all": 1}, 400),
+            ({"repos": {REPO_ID: "false"}}, 400),
+            ({"extra": True}, 400),
+            ({"repos": []}, 400),
+            (None, 400),
+        ]:
+            assert client.put(AUTO_SYNC, json=payload).status_code == code
+        invalid_json = client.put(
+            AUTO_SYNC, content="{", headers={"Content-Type": "application/json"}
+        )
+        assert invalid_json.status_code == 400
+        assert path.read_text() == persisted
+        cors = client.options(
+            AUTO_SYNC, headers={"Origin": ORIGIN, "Access-Control-Request-Method": "PUT"}
+        )
+        assert cors.status_code == 200
+
+        path.write_text("broken")
+        assert client.get(AUTO_SYNC).json()["all"] is True
+        path.write_text(persisted)
+
+    with TestClient(app()) as client:
+        state = client.get(AUTO_SYNC).json()
+        assert state["all"] is True
+        assert state["repos"] == {REPO_ID: True}
+        assert "local" not in state["status"]
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "broken",
+        '{"schema":"code-flow/auto-sync@2","all":true,"repos":{}}',
+        '{"schema":"code-flow/auto-sync@1","all":true,"repos":{"a":1}}',
+        '{"schema":"code-flow/auto-sync@1","all":true}',
+    ],
+)
+def test_invalid_auto_sync_file_defaults_to_off(tmp_path, contents):
+    (tmp_path / "auto_sync.json").write_text(contents)
+    with TestClient(create_app(Settings(tmp_path, ORIGIN))) as client:
+        state = client.get(AUTO_SYNC).json()
+        assert state["all"] is False
+        assert state["repos"] == {}
+
+
+def test_auto_sync_schedule_reuses_worker_and_counts_work(tmp_path, local_repo):
+    store = Store(tmp_path / "data")
+    executor = HeldExecutor()
+    git_url = Mock(return_value=local_repo.as_uri())
+    repo_importer = importer.RepoImporter(store, git_url, executor)
+    clock = Mock(return_value=100.0)
+    sync = AutoSync(repo_importer, 10, clock=clock)
+    other_id = "Demo__other"
+    for url in (URL, "https://github.com/Demo/other"):
+        repo_importer.start(
+            importer.validate_import({"url": url, "subdir": "shop", "max_commits": 1})
+        )
+        executor.run_next()
+
+    sync.update({"repos": {REPO_ID: True}})
+    repo_importer.refresh(REPO_ID)
+    sync.tick()
+    assert len(executor.pending) == 1
+    assert sync.response()["status"] == {}
+
+    def tick_during_manual_refresh(_url):
+        assert repo_importer.job(REPO_ID).status == "cloning"
+        sync.tick()
+        assert executor.pending == []
+        return local_repo.as_uri()
+
+    git_url.side_effect = tick_during_manual_refresh
+    executor.run_next()
+    git_url.side_effect = None
+    assert sync.response()["status"][REPO_ID]["manual_runs"] == 1
+    assert sync.response()["status"][REPO_ID]["runs"] == 0
+
+    commit(local_repo, "shop/cart.py", "def cart(): return 1\n", "Change cart")
+    sync.tick()
+    assert len(executor.pending) == 1
+    assert repo_importer.refresh(REPO_ID)["status"] == "queued"
+    assert len(executor.pending) == 1
+    executor.run_next()
+    status = sync.response()["status"][REPO_ID]
+    assert status["last_result"] == "new_commits"
+    assert status["new_commits"] == 1
+    assert status["runs"] == status["fetches"] == status["analysed_commits"] == 1
+    assert status["last_started"] <= status["last_finished"] < status["next_run"]
+    assert status["seconds"] > 0
+    assert other_id not in sync.response()["status"]
+
+    clock.return_value += 9
+    sync.tick()
+    assert executor.pending == []
+    clock.return_value += 1
+    sync.tick()
+    executor.run_next()
+    second = sync.response()["status"][REPO_ID]
+    assert second["last_result"] == "up_to_date"
+    assert second["new_commits"] == 0
+    assert second["runs"] == second["fetches"] == 2
+    assert second["analysed_commits"] == second["manual_runs"] == 1
+    assert second["seconds"] > status["seconds"]
+
+    sync.update({"all": True, "repos": {REPO_ID: False}})
+    sync.tick()
+    assert len(executor.pending) == 1
+    assert repo_importer.job(other_id).status == "queued"
+    executor.run_next()
+    clock.return_value += 10
+    git_url.return_value = (tmp_path / "missing").as_uri()
+    sync.tick()
+    assert len(executor.pending) == 2
+    while executor.pending:
+        executor.run_next()
+    failure = sync.response()["status"][REPO_ID]
+    assert failure["runs"] == 3
+    assert failure["last_result"] == "error"
+    assert failure["error"] == importer.UNAVAILABLE
+    assert failure["new_commits"] is None
+    assert failure["next_run"]
+
+    sync.update({"all": False})
+    clock.return_value += 10
+    sync.tick()
+    assert executor.pending == []
+    assert all(status["next_run"] is None for status in sync.response()["status"].values())
+
+
+def test_auto_sync_ticks_and_joins_thread_on_lifespan_shutdown(tmp_path, monkeypatch):
+    ticks = Event()
+    threads = []
+
+    def observe_tick(self):
+        threads.append(current_thread())
+        if len(threads) == 2:
+            ticks.set()
+
+    monkeypatch.setattr(AutoSync, "tick", observe_tick)
+    app = create_app(Settings(tmp_path, ORIGIN), auto_sync_interval=0.001)
+    with TestClient(app):
+        assert ticks.wait(1)
+        assert threads[0].is_alive()
+    assert all(thread is threads[0] for thread in threads)
+    assert not threads[0].is_alive()
 
 
 @pytest.mark.network

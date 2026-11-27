@@ -8,6 +8,8 @@ from pathlib import Path
 from codeflow.diff import LONG_FLOW_MIN_DEPTH
 
 DEFAULT_FLAGSMITH_API_URL = "http://localhost:8000/api/v1/"
+DEFAULT_AUTO_SYNC_INTERVAL = 300
+MIN_AUTO_SYNC_INTERVAL = 10
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -40,6 +42,7 @@ class Settings:
     flagsmith_server_key: str | None = field(default=None, repr=False)
     scopes_path: Path | None = None
     long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH
+    auto_sync_interval: int = DEFAULT_AUTO_SYNC_INTERVAL
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -60,6 +63,16 @@ class Settings:
                 raise ValueError
         except ValueError:
             raise ValueError("CODEFLOW_LONG_FLOW_MIN_DEPTH must be a positive integer.") from None
+        try:
+            interval = int(
+                values.get("CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS") or DEFAULT_AUTO_SYNC_INTERVAL
+            )
+            if interval < MIN_AUTO_SYNC_INTERVAL:
+                raise ValueError
+        except ValueError:
+            raise ValueError(
+                f"CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS must be an integer of at least {MIN_AUTO_SYNC_INTERVAL}."
+            ) from None
         return cls(
             data_dir=data_dir,
             web_origin=values.get("CODEFLOW_WEB_ORIGIN", "http://localhost:5173"),
@@ -69,6 +82,7 @@ class Settings:
                 "CODEFLOW_FLAGSMITH_SCOPES_PATH", data_dir / "flagsmith_scopes.json"
             ),
             long_flow_min_depth=min_depth,
+            auto_sync_interval=interval,
         )
 
     def flag_scope(self, repo: str) -> tuple[str, set[str]]:

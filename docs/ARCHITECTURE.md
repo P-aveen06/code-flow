@@ -194,6 +194,19 @@ and responses use full SHAs.
   Refresh reuses cached parses and snapshots and publishes the refreshed
   output and limit together. The previous output remains readable during a
   refresh and after a failure.
+- `GET /api/auto-sync` returns `interval_seconds`, `all` (boolean), `repos`
+  (repository IDs mapped to booleans), and `status` (repository IDs mapped to
+  refresh status and counters). Status has nullable UTC timestamps
+  `last_started`, `last_finished`, and `next_run`, a nullable `last_result`
+  (`up_to_date`, `new_commits`, or `error`), and nullable `new_commits` and
+  `error` fields. The in-memory counters are `runs` (automatic jobs started),
+  `fetches` (Git fetch attempts), `analysed_commits` (graphs built, including
+  a missing diff base), and `seconds` (wall time spent in automatic refresh
+  jobs). A separate `manual_runs` counter tracks manual jobs started.
+- `PUT /api/auto-sync` merges optional `all` and `repos` fields into the
+  saved settings and returns the same shape as GET. A malformed body returns
+  400, an unknown repository returns 404, and a repository without a GitHub
+  import returns 409.
 - `GET /api/repos/{id}/status` returns `id`, `name`, `status`, `message`,
   `current` and `total` commit counts, `seconds` elapsed, and nullable `warning`
   and `error` fields. The nullable integer `new_commits` counts SHAs in a
@@ -256,6 +269,21 @@ and responses use full SHAs.
 - Unknown repos, SHAs, or files return 404 with `{"detail": "…"}`. Bad
   parameters return 400 or FastAPI's 422 for type errors.
 
+### Automatic refresh
+
+The server loads `data/auto_sync.json` once at startup and writes updates
+atomically. The file uses schema `code-flow/auto-sync@1` and fields `all`
+and `repos`. A missing or invalid file starts with both switches off.
+For a published GitHub import, either `all: true` or `repos[id]: true`
+enables a refresh. The scheduler runs for the app lifespan and checks for
+newly enabled repositories on its next tick. It submits due refreshes to
+the existing single worker and skips repos with queued or running jobs.
+The switches are shared for a data directory, including changes made in
+preview mode.
+`CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS` sets the interval (300 seconds by
+default, minimum 10). Tests and scripts can supply `auto_sync_interval`
+to `create_app`.
+
 ## Colours
 
 | Meaning | Colour |
@@ -278,7 +306,7 @@ simulation environments. Later Production runs report any state differences.
 
 | Tag | Flags |
 |---|---|
-| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
+| `code-flow` | `flow_view`, `flow_direction`, `sync_mode`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
 | `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
 | `repo:shop-demo` | `new_checkout`, `holiday_discount` |
 
@@ -292,9 +320,10 @@ also the web client key for Development. See `.env.example` for configuration.
 |---|---|---|
 | `flow_view` | multivariate string | The Track 01 experiment. Control `side_by_side`; variants `overlay` and `overlay_summary`. Allocation 34/33/33 while the test runs; roll out the winner by setting it to 100%. |
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
+| `sync_mode` | multivariate string | Commit refresh experiment with `manual_button`, `per_repo_toggle`, and `global_toggle`, split 34/33/33 in Development. Production is disabled with `manual_button` as the default and zero treatment allocation. |
 | `flagsmith_mode` | boolean | Toggles flag findings and live colouring. The Flagsmith section always shows the active flow settings. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
-| `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
+| `variant_preview` | boolean | Enables the view, direction, and sync preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 
 The web app identifies each reviewer to Flagsmith (`flagsmith.identify(reviewerId)`),
 so variant allocation is sticky per reviewer. View outcome events include the
@@ -304,9 +333,11 @@ assigned variant.
 
 With `variant_preview` enabled, the viewer accepts `?view=side_by_side`,
 `?view=overlay`, or `?view=overlay_summary`, and `?direction=horizontal` or
-`?direction=vertical`. Either override skips experiment exposures and keeps
-review outcomes local. With previews disabled, the viewer uses the Flagsmith
-assignments and keeps short flows horizontal.
+`?direction=vertical`. The landing page and viewer also accept
+`?sync=manual_button`, `?sync=per_repo_toggle`, or `?sync=global_toggle`.
+Any preview override skips experiment exposures and keeps review outcomes
+local. With previews disabled, the app uses the Flagsmith assignments and
+keeps short flows horizontal.
 
 - **A `side_by_side`**: two synchronized canvases, before (base) and after (head).
 - **B `overlay`**: one canvas with the union graph, coloured added/removed/changed.
@@ -365,6 +396,30 @@ cutoff. It prefers the Flagsmith analysis and falls back to another local
 analysis with long flows. `simulator/experiments/flow_direction.yaml` records
 the hypothesis and null behaviour assumptions. The setup and experiment CLI
 dry runs preview the new flag, both metrics, and the 50/50 experiment.
+
+### Commit freshness experiment
+
+`sync_mode` runs only in Development. The hypothesis is that auto-sync
+shows new commits sooner without a noticeable cost in page load or server
+load. The landing page evaluates the assigned variant with
+`getExperimentFlag('sync_mode')` outside previews.
+
+- **A `manual_button` (34%)** uses **Check for new commits** in the viewer.
+- **B `per_repo_toggle` (33%)** adds an **Auto-sync** switch per GitHub
+  import on the landing page.
+- **C `global_toggle` (33%)** adds one **Auto-sync all repos** switch.
+
+The manual button is available in all three variants. The two auto-sync
+variants show each GitHub import's sync status on the landing page. The
+benchmark will compare the variants as the repository and commit counts
+grow, using these metrics in Flagsmith.
+
+| Metric | Event | Aggregation | Expected direction |
+|---|---|---|---|
+| New commit seen within 5 min (primary) | `new_commit_seen_within_5min` | Occurrence | Increase |
+| Freshness (s) | `sync_freshness_s` | Mean | Decrease |
+| Landing page load (ms) | `sync_page_load_ms` | Mean | Decrease |
+| Server CPU (ms per hour) | `sync_server_cpu_ms` | Mean | Decrease |
 
 ## Flagsmith mode
 

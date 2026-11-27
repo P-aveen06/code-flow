@@ -85,6 +85,7 @@ def analyze_repo(
     on_progress: Callable[[int, int, Commit], None] | None = None,
     touching: str | None = None,
     parse_cache: BlobParseCache | None = None,
+    on_analyzed: Callable[[], None] | None = None,
 ) -> list[CommitResult]:
     """Write missing snapshots and report progress before each indexed commit, oldest first."""
     repo = Path(repo).resolve()
@@ -122,6 +123,8 @@ def analyze_repo(
                     else:
                         parsed_files.append(parsed)
                 data = build_graph(parsed_files, repo_name, commit, keep_external).to_json()
+                if on_analyzed is not None:
+                    on_analyzed()
                 _write_json(snapshot_path, data)
             else:
                 data = json.loads(snapshot_path.read_text(encoding="utf-8"))

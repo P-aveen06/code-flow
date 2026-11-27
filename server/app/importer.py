@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from tempfile import TemporaryDirectory
@@ -129,6 +129,32 @@ class RefreshUnavailable(ValueError):
     """The published repository was not imported from GitHub."""
 
 
+class RefreshBusy(RuntimeError):
+    """A queued or running job already owns this repository."""
+
+
+@dataclass
+class RefreshStats:
+    """Per-process totals and the latest automatic refresh outcome."""
+
+    last_started: str | None = None
+    last_finished: str | None = None
+    last_result: str | None = None
+    new_commits: int | None = None
+    error: str | None = None
+    runs: int = 0
+    fetches: int = 0
+    analysed_commits: int = 0
+    seconds: float = 0
+    manual_runs: int = 0
+
+    def finish(self, new_commits: int | None, error: str | None) -> None:
+        self.last_finished = datetime.now(UTC).isoformat()
+        self.last_result = "error" if error else "new_commits" if new_commits else "up_to_date"
+        self.new_commits = new_commits
+        self.error = error
+
+
 def _git(*args: str, error: str) -> str:
     try:
         result = subprocess.run(
@@ -150,7 +176,11 @@ def _git(*args: str, error: str) -> str:
 
 
 def _refresh_limit(
-    clone: Path, branch: str, refspec: str, source: ImportSource, previous_head: str
+    clone: Path,
+    branch: str,
+    source: ImportSource,
+    previous_head: str,
+    fetch: Callable[..., None],
 ) -> int:
     if source.max_commits == MAX_COMMITS:
         return MAX_COMMITS
@@ -160,7 +190,7 @@ def _refresh_limit(
         if _git(*git, "rev-parse", "--is-shallow-repository", error=UNAVAILABLE) == "false":
             return source.max_commits
         # A shallow boundary can hide the old head even when the branch still contains it.
-        _git(*git, "fetch", "--unshallow", "origin", refspec, error=UNAVAILABLE)
+        fetch("--unshallow")
         history = _git(*git, "rev-list", "--first-parent", branch, error=UNAVAILABLE).splitlines()
         if previous_head not in history:
             return source.max_commits
@@ -182,10 +212,19 @@ def _refresh_limit(
 
 
 def _prepare_clone(
-    clone: Path, url: str, source: ImportSource, previous_head: str | None
+    clone: Path,
+    url: str,
+    source: ImportSource,
+    previous_head: str | None,
+    on_fetch: Callable[[], None],
 ) -> tuple[str, int]:
     depth = max(4 * source.max_commits, 100)
     git = ("-C", str(clone))
+
+    def fetch(*options: str) -> None:
+        on_fetch()
+        _git(*git, "fetch", *options, "origin", refspec, error=UNAVAILABLE)
+
     if clone.exists():
         remote_head = _git("ls-remote", "--symref", url, "HEAD", error=UNAVAILABLE)
         first_line = remote_head.split("\n", 1)[0]
@@ -198,7 +237,7 @@ def _prepare_clone(
         refspec = f"+{head}:{branch}"
         # Keep the existing shallow boundary when fetching new commits for a refresh.
         depth_args = () if previous_head else ("--depth", str(depth))
-        _git(*git, "fetch", *depth_args, "origin", refspec, error=UNAVAILABLE)
+        fetch(*depth_args)
     else:
         with TemporaryDirectory(dir=clone.parent) as tmp:
             staged = Path(tmp) / clone.name
@@ -231,7 +270,7 @@ def _prepare_clone(
             raise ImportFailure(missing)
 
     limit = (
-        _refresh_limit(clone, branch, refspec, source, previous_head)
+        _refresh_limit(clone, branch, source, previous_head, fetch)
         if previous_head
         else source.max_commits
     )
@@ -241,7 +280,7 @@ def _prepare_clone(
             break
         if _git(*git, "rev-parse", "--is-shallow-repository", error=UNAVAILABLE) == "false":
             break
-        _git(*git, "fetch", f"--deepen={depth}", "origin", refspec, error=UNAVAILABLE)
+        fetch(f"--deepen={depth}")
     return branch, limit
 
 
@@ -261,6 +300,7 @@ class RepoImporter:
         self._parse_cache = BlobParseCache(max_entries=5000)
         self._lock = Lock()
         self._jobs: dict[str, ImportJob] = {}
+        self._refresh_stats: dict[str, RefreshStats] = {}
 
     def shutdown(self) -> None:
         if self._owns_executor:
@@ -277,30 +317,49 @@ class RepoImporter:
     def start(self, source: ImportSource) -> dict[str, str]:
         return self._start(source.id, source)
 
-    def refresh(self, repo_id: str) -> dict[str, str]:
-        return self._start(repo_id, None)
+    def refresh(self, repo_id: str, *, automatic: bool = False) -> dict[str, str]:
+        return self._start(repo_id, None, automatic=automatic)
 
-    def _start(self, repo_id: str, source: ImportSource | None) -> dict[str, str]:
+    def refresh_stats(self) -> dict[str, dict]:
+        with self._lock:
+            return {repo_id: asdict(stats) for repo_id, stats in self._refresh_stats.items()}
+
+    def record_auto_error(self, repo_id: str, message: str) -> None:
+        with self._lock:
+            self._refresh_stats.setdefault(repo_id, RefreshStats()).finish(None, message)
+
+    def github_source(self, repo_id: str) -> ImportSource:
+        """Validate published source metadata with the caller holding the store lock."""
+        metadata = self.store.repo_source(repo_id)
+        url = metadata.get("url") if isinstance(metadata, dict) else None
+        if not isinstance(url, str) or GITHUB_URL.fullmatch(url) is None:
+            raise RefreshUnavailable(
+                "Only repositories imported from GitHub can check for new commits"
+            )
+        source = validate_import(metadata)
+        if source.id != repo_id:
+            raise BadRequest("The stored GitHub URL does not match the repository ID")
+        return source
+
+    def _start(
+        self, repo_id: str, source: ImportSource | None, *, automatic: bool = False
+    ) -> dict[str, str]:
         refresh = source is None
         with self.store.lock, self._lock:
             job = self._jobs.get(repo_id)
             if job is not None and job.status in ACTIVE_STATUSES:
+                if automatic:
+                    raise RefreshBusy
                 return {"id": repo_id, "status": job.status}
             if source is None:
-                metadata = self.store.repo_source(repo_id)
-                url = metadata.get("url")
-                if not isinstance(url, str) or GITHUB_URL.fullmatch(url) is None:
-                    raise RefreshUnavailable(
-                        "Only repositories imported from GitHub can check for new commits"
-                    )
-                source = validate_import(metadata)
-                if source.id != repo_id:
-                    raise BadRequest("The stored GitHub URL does not match the repository ID")
+                source = self.github_source(repo_id)
             self._jobs[repo_id] = ImportJob(source, monotonic())
 
         try:
-            self.executor.submit(self._run, source, refresh)
+            self.executor.submit(self._run, source, refresh, automatic)
         except RuntimeError:
+            if automatic:
+                self.record_auto_error(repo_id, "Could not queue repository import")
             self._fail(repo_id, "Could not queue repository import")
         return {"id": repo_id, "status": "queued"}
 
@@ -311,7 +370,27 @@ class RepoImporter:
     def _fail(self, repo_id: str, message: str) -> None:
         self._update(repo_id, status="error", message=message, error=message, finished=monotonic())
 
-    def _run(self, source: ImportSource, refresh: bool) -> None:
+    def _run(self, source: ImportSource, refresh: bool, automatic: bool) -> None:
+        started = monotonic()
+        fetches = analysed_commits = 0
+        new_commits = error = warning = None
+        if refresh:
+            with self._lock:
+                stats = self._refresh_stats.setdefault(source.id, RefreshStats())
+                if automatic:
+                    stats.runs += 1
+                    stats.last_started = datetime.now(UTC).isoformat()
+                else:
+                    stats.manual_runs += 1
+
+        def count_fetch() -> None:
+            nonlocal fetches
+            fetches += 1
+
+        def count_analysis() -> None:
+            nonlocal analysed_commits
+            analysed_commits += 1
+
         try:
             self._update(source.id, status="cloning", message="Cloning repository")
             clones = self.store.data_dir / "repos"
@@ -327,7 +406,7 @@ class RepoImporter:
             previous_commits = [entry["sha"] for entry in index["commits"]] if refresh else []
             previous_head = previous_commits[-1] if previous_commits else None
             branch, limit = _prepare_clone(
-                clone, self.git_url_builder(source.url), source, previous_head
+                clone, self.git_url_builder(source.url), source, previous_head, count_fetch
             )
             self._update(
                 source.id,
@@ -356,6 +435,7 @@ class RepoImporter:
                     touching=source.subdir or None,
                     on_progress=progress,
                     parse_cache=self._parse_cache,
+                    on_analyzed=count_analysis if automatic else None,
                 )
                 metadata = {
                     "url": source.url,
@@ -376,19 +456,29 @@ class RepoImporter:
             warning = (
                 python_warning(source.subdir) if not results or not results[-1].node_count else None
             )
-            self._update(
-                source.id,
-                status="ready",
-                message="Ready",
-                warning=warning,
-                new_commits=new_commits,
-                finished=monotonic(),
-            )
         except ImportFailure as exc:
-            self._fail(source.id, str(exc))
+            error = str(exc)
         # Unexpected failures must still move the job to a terminal status.
         except Exception:  # noqa: BLE001
-            self._fail(source.id, "Could not analyze repository")
+            error = "Could not analyze repository"
+
+        finished = monotonic()
+        with self._lock:
+            if automatic:
+                stats = self._refresh_stats[source.id]
+                stats.fetches += fetches
+                stats.analysed_commits += analysed_commits
+                stats.seconds += finished - started
+                stats.finish(new_commits if error is None else None, error)
+            self._jobs[source.id] = replace(
+                self._jobs[source.id],
+                status="error" if error else "ready",
+                message=error or "Ready",
+                error=error,
+                warning=warning,
+                new_commits=new_commits if error is None else None,
+                finished=finished,
+            )
 
     @staticmethod
     def _reuse_snapshots(output: Path, staged: Path, source_root: str, index: dict) -> None:

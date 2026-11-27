@@ -49,8 +49,14 @@ For GitHub imports, click **Check for new commits** in the viewer to fetch
 updates to the default branch for your imported folder (screenshot:
 [docs/screenshots/check-for-new-commits.png](docs/screenshots/check-for-new-commits.png)). New commits appear
 in **Commits** alongside existing history, up to 200 commits, and the viewer
-stays on your selected commit while it remains in that history. Checks only
-run when you click the button.
+stays on your selected commit while it remains in that history.
+
+The Development-only `sync_mode` experiment adds an **Auto-sync** switch
+for each GitHub import or an **Auto-sync all repos** switch on the landing
+page, depending on your assignment. Both variants keep manual refresh
+available in the viewer. The server saves the switches in the data directory.
+Set `CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS` to change the refresh interval
+(300 seconds by default, minimum 10).
 
 ## How we use Flagsmith
 

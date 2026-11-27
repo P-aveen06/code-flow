@@ -332,6 +332,19 @@ def test_invalid_long_flow_threshold(threshold: str, monkeypatch: pytest.MonkeyP
         Settings.from_env()
 
 
+def test_auto_sync_interval_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "_read_dotenv", lambda _: {})
+    name = "CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS"
+    monkeypatch.delenv(name, raising=False)
+    assert Settings.from_env().auto_sync_interval == 300
+    monkeypatch.setenv(name, "10")
+    assert Settings.from_env().auto_sync_interval == 10
+    for invalid in ("9", "fast"):
+        monkeypatch.setenv(name, invalid)
+        with pytest.raises(ValueError, match=name):
+            Settings.from_env()
+
+
 def test_code(client: TestClient, checkout_commit: Commit) -> None:
     url = f"{REPO_URL}/code"
     params = {"sha": checkout_commit.sha[:8], "file": "shop/checkout.py"}

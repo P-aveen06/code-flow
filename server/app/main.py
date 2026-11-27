@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.auto_sync import AutoSync
 from app.config import Settings
 from app.flag_findings import find_flags
 from app.flagsmith_client import FlagsmithClient
@@ -25,26 +26,32 @@ def create_app(
     git_url_builder: Callable[[str], str] | None = None,
     executor: Executor | None = None,
     flagsmith_client: FlagsmithClient | None = None,
+    auto_sync_interval: float | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     store = Store(settings.data_dir, long_flow_min_depth=settings.long_flow_min_depth)
     importer = RepoImporter(store, git_url_builder, executor)
+    auto_sync = AutoSync(
+        importer, settings.auto_sync_interval if auto_sync_interval is None else auto_sync_interval
+    )
     flagsmith = flagsmith_client or FlagsmithClient(
         settings.flagsmith_server_key, settings.flagsmith_api_url
     )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        auto_sync.start()
         try:
             yield
         finally:
+            auto_sync.stop()
             importer.shutdown()
 
     app = FastAPI(title="code-flow", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.web_origin],
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT"],
         allow_headers=["Content-Type"],
     )
 
@@ -58,6 +65,10 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if request.method == "PUT" and request.url.path == "/api/auto-sync":
+            return JSONResponse(
+                status_code=400, content={"detail": "Auto-sync settings must be valid JSON"}
+            )
         if request.method == "POST" and request.url.path == "/api/repos":
             return JSONResponse(
                 status_code=400, content={"detail": "Import request must be valid JSON"}
@@ -67,6 +78,21 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "analyzer_version": codeflow.__version__}
+
+    @app.get("/api/auto-sync")
+    def auto_sync_status() -> dict:
+        return auto_sync.response()
+
+    @app.put("/api/auto-sync")
+    def update_auto_sync(payload: Annotated[Any, Body()] = None) -> dict:
+        try:
+            return auto_sync.update(payload)
+        except RefreshUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail="Could not save auto-sync settings"
+            ) from exc
 
     @app.get("/api/repos")
     def repos() -> list[dict]:

@@ -81,6 +81,15 @@ class FakeClient:
                     {"multivariate_feature_option": 19, "percentage_allocation": 50}
                 ],
             )
+        if flag == "sync_mode":
+            self.feature.update(
+                name=flag,
+                multivariate_options=[
+                    {"id": option_id, "type": "unicode", "key": name, "string_value": name}
+                    for option_id, name in [(17, "per_repo_toggle"), (18, "global_toggle")]
+                ],
+            )
+            self.flag_state["feature_state_value"] = "manual_button"
 
     @property
     def writes(self):
@@ -650,6 +659,70 @@ def test_flow_direction_create_status_refresh_and_rollout(capsys):
         ("POST", f"{DETAIL}complete/", {"rollout_decision": "variant", "rollout_variant": 19}),
     ]
     assert ("GET", f"{EXPERIMENTS}?q=flow_direction", None) in client.calls
+
+
+def test_sync_mode_creates_four_ordered_metrics_in_development(capsys):
+    client = FakeClient("sync_mode")
+    api = script.ExperimentAPI(client, dry_run=False)
+    script.run(api, "create", experiment_flag="sync_mode")
+    script.run(api, "create", experiment_flag="sync_mode")
+    assert [path for _, path, _ in client.writes] == [
+        METRICS,
+        METRICS,
+        METRICS,
+        METRICS,
+        EXPERIMENTS,
+        f"{DETAIL}start/",
+    ]
+    assert [body for _, path, body in client.writes if path == METRICS] == [
+        {
+            "name": name,
+            "aggregation": aggregation,
+            "direction": direction,
+            "definition": {"version": 1, "event": event},
+        }
+        for name, event, aggregation, direction in [
+            ("New commit seen within 5 min", "new_commit_seen_within_5min", "occurrence", "up"),
+            ("Freshness (s)", "sync_freshness_s", "mean", "down"),
+            ("Landing page load (ms)", "sync_page_load_ms", "mean", "down"),
+            ("Server CPU (ms per hour)", "sync_server_cpu_ms", "mean", "down"),
+        ]
+    ]
+    body = client.writes[4][2]
+    assert body["name"] == "sync_mode: manual button vs auto-sync per repo vs global auto-sync"
+    assert body["metrics"] == [
+        {"metric": 31, "expected_direction": "increase"},
+        *({"metric": metric_id, "expected_direction": "decrease"} for metric_id in (32, 33, 34)),
+    ]
+    assert body["experiment_rollout"]["feature_state_value"]["value"] == "manual_button"
+    assert body["experiment_rollout"]["multivariate_feature_state_values"] == WEIGHTS
+    assert "manual_button 34%, per_repo_toggle 33%, global_toggle 33%" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_sync_mode_refuses_production_before_sending_requests(dry_run, monkeypatch, capsys):
+    client = FakeClient("sync_mode", environment="Production")
+    api = script.ExperimentAPI(client, dry_run=dry_run)
+    with pytest.raises(script.SetupError, match="only in Development"):
+        script.run(api, "create", environment_name="Production", experiment_flag="sync_mode")
+    assert client.calls == []
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "flagsmith_experiment.py",
+            "--experiment",
+            "sync_mode",
+            "--environment",
+            "Production",
+            "create",
+            *(["--dry-run"] if dry_run else []),
+        ],
+    )
+    monkeypatch.setattr(script, "read_env", lambda _: {})
+    assert script.main() == 1
+    assert "only in Development" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("feature_exists", [True, False])

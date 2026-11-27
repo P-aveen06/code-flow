@@ -12,6 +12,30 @@ export interface Repo {
   warning: string | null;
 }
 
+export interface AutoSyncStatus {
+  last_started: string | null;
+  last_finished: string | null;
+  last_result: "up_to_date" | "new_commits" | "error" | null;
+  new_commits: number | null;
+  error: string | null;
+  next_run: string | null;
+  runs: number;
+  fetches: number;
+  analysed_commits: number;
+  seconds: number;
+  manual_runs: number;
+}
+
+export interface AutoSyncSettings {
+  all: boolean;
+  repos: Record<string, boolean>;
+}
+
+export interface AutoSyncResponse extends AutoSyncSettings {
+  interval_seconds: number;
+  status: Record<string, AutoSyncStatus>;
+}
+
 export interface ImportRequest {
   url: string;
   subdir: string;
