@@ -34,7 +34,17 @@ export function SignInImport({ onSignedOut, onUseUrl }: {
       <h2 id="signin-title">Analyze a repo from your GitHub</h2>
       {me.status === "loading" && <p role="status">Checking your GitHub sign-in…</p>}
       {me.status === "error" && <p role="alert">{me.message}</p>}
-      {me.status === "ready" && !me.data.signed_in && (
+      {me.status === "ready" && !me.data.configured && (
+        <>
+          <p className="signin-card__lead">
+            GitHub sign-in is not set up on this server yet. You can still analyze a public repo.
+          </p>
+          <div className="signin-card__actions">
+            <button type="button" className="btn btn--primary" onClick={onUseUrl}>Paste a public URL</button>
+          </div>
+        </>
+      )}
+      {me.status === "ready" && me.data.configured && !me.data.signed_in && (
         <>
           <p className="signin-card__lead">
             Sign in to pick any repo you allow, including private ones. code-flow can only read the

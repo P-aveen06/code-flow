@@ -181,6 +181,17 @@ describe("Sign in with GitHub variant", () => {
     );
   });
 
+  it("points to the URL form when the server has no GitHub App", async () => {
+    me = { configured: false, signed_in: false };
+    await open();
+
+    expect(container.textContent).toContain("GitHub sign-in is not set up on this server yet.");
+    expect(container.querySelector(".signin-card a[href$='/api/auth/github/login']")).toBeNull();
+    const useUrl = [...container.querySelectorAll("button")].find((b) => b.textContent === "Paste a public URL");
+    await act(async () => useUrl?.click());
+    expect(container.querySelector("#import-url")).not.toBeNull();
+  });
+
   it("explains a failed sign-in", async () => {
     await open("?signin_error=denied");
     expect(container.querySelector(".signin-error")?.textContent).toBe("GitHub sign-in was cancelled.");
