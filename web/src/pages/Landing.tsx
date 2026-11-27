@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
 import { AppLink } from "../AppLink";
-import { useCodeFlowFlags } from "../flags";
 import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
 import type { ImportRequest, ImportResponse, ImportStatus, RepoStatus } from "../types";
 import { useRequest } from "../useRequest";
-import { replaceSyncOverride, syncPreviewPath } from "../view";
-import { SyncPreview } from "../views/VariantPreview";
-import { AutoSyncSwitch, autoSyncStatusText } from "./AutoSyncControls";
 import { displaySubdir, validateImport } from "./importHelpers";
 import type { ImportFields } from "./importHelpers";
 import { ImportProgress } from "./ImportProgress";
-import { useAutoSync } from "./useAutoSync";
 
 const example: ImportFields = { url: "https://github.com/Flagsmith/flagsmith", subdir: "api", maxCommits: "50" };
 const repoStatusLabels: Record<RepoStatus, string> = {
@@ -22,11 +17,8 @@ const repoStatusLabels: Record<RepoStatus, string> = {
 type Job = ImportResponse & { body: ImportRequest };
 type FormError = { field?: keyof ImportFields; message: string };
 
-export function Landing({ search }: { search: string }) {
+export function Landing() {
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
-  const { syncMode, syncOverride, assignedSyncMode, variantPreview } = useCodeFlowFlags(search, "landing");
-  const autoSyncEnabled = syncMode !== "manual_button";
-  const autoSync = useAutoSync(autoSyncEnabled);
   const [fields, setFields] = useState<ImportFields>({ url: "", subdir: "", maxCommits: "30" });
   const [formError, setFormError] = useState<FormError | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -62,10 +54,7 @@ export function Landing({ search }: { search: string }) {
         if (controller.signal.aborted) return;
         setRepoRevision((revision) => revision + 1);
         if (status.status === "ready") {
-          navigationTimer = window.setTimeout(() => {
-            const override = new URLSearchParams(window.location.search).get("sync");
-            navigate(syncPreviewPath(repoPath(id), override));
-          }, 2000);
+          navigationTimer = window.setTimeout(() => navigate(repoPath(id)), 2000);
         }
       },
       (error: unknown) => {
@@ -187,14 +176,14 @@ export function Landing({ search }: { search: string }) {
           {hosted && (
             <p className="muted field__hint">
               Imports and new commits on this demo are temporary and reset when the server restarts.
-              The Flagsmith/flagsmith and shop-demo examples are always available.
+              The Flagsmith/flagsmith example is always available.
             </p>
           )}
           <div className="import-examples">
             <h3>Try an example</h3>
             <div className="import-examples__actions">
               {hosted ? (
-                <AppLink href={syncPreviewPath(repoPath("Flagsmith__flagsmith"), syncOverride)} className="btn btn--sm">
+                <AppLink href={repoPath("Flagsmith__flagsmith")} className="btn btn--sm">
                   Flagsmith/flagsmith (api/)
                 </AppLink>
               ) : <button
@@ -203,7 +192,6 @@ export function Landing({ search }: { search: string }) {
               >
                 Flagsmith/flagsmith (api/)
               </button>}
-              <AppLink href={syncPreviewPath(repoPath("shop-demo"), syncOverride)} className="btn btn--sm">shop-demo (tutorial)</AppLink>
             </div>
           </div>
         </section>
@@ -223,53 +211,27 @@ export function Landing({ search }: { search: string }) {
 
       <section className="card repositories" aria-labelledby="repositories-title">
         <h2 id="repositories-title">Analyzed repositories</h2>
-        {variantPreview && (
-          <SyncPreview mode={syncMode} override={syncOverride} assignedMode={assignedSyncMode}
-            onChange={replaceSyncOverride} />
-        )}
-        {syncMode === "global_toggle" && (
-          <AutoSyncSwitch checked={autoSync.checked(null)} disabled={autoSync.disabled}
-            error={autoSync.saveError?.repoId === null ? autoSync.saveError.message : undefined}
-            onChange={(checked) => void autoSync.change(null, checked)} />
-        )}
-        {autoSyncEnabled && autoSync.loadError && (
-          <p className="muted" role="alert">Could not load auto-sync settings. {autoSync.loadError}</p>
-        )}
         {repos.status === "loading" && <p role="status">{waking ? "Waking up the demo server…" : "Loading repositories…"}</p>}
         {repos.status === "error" && <p role="alert">{repos.message}</p>}
         {repos.status === "ready" && (repos.data.length ? (
           <ul className="repo-list">
-            {repos.data.map((repo) => {
-              const status = autoSync.saved?.status[repo.id];
-              const showSync = autoSyncEnabled && repo.url?.startsWith("https://github.com/")
-                && (repo.status === "ready" || repo.commit_count > 0 || status);
-              const synced = autoSync.checked(null) || autoSync.checked(repo.id);
-              return (
-                <li key={repo.id}>
-                  <div className="repo-list__details">
-                    <strong>{repo.name}</strong>
-                    <span className="muted">
-                      {repo.subdir ? `${displaySubdir(repo.subdir)} · ` : ""}
-                      {repo.commit_count} {repo.commit_count === 1 ? "commit" : "commits"}
-                    </span>
-                    {repo.status === "error" && <p className="muted">{repo.message}</p>}
-                    {repo.warning && <p className="state-warning">{repo.warning}</p>}
-                    {showSync && autoSync.saved && (
-                      <p className="muted">{autoSyncStatusText(status, synced)}</p>
-                    )}
-                  </div>
-                  {showSync && syncMode === "per_repo_toggle" && (
-                    <AutoSyncSwitch repoName={repo.name} checked={autoSync.checked(repo.id)} disabled={autoSync.disabled}
-                      error={autoSync.saveError?.repoId === repo.id ? autoSync.saveError.message : undefined}
-                      onChange={(checked) => void autoSync.change(repo.id, checked)} />
-                  )}
-                  <span className="status-chip repo-status" data-status={repo.status}>{repoStatusLabels[repo.status]}</span>
-                  {(repo.status === "ready" || repo.commit_count > 0) && (
-                    <AppLink href={syncPreviewPath(repoPath(repo.id), syncOverride)} className="btn btn--sm" label={`Open ${repo.name}`}>Open</AppLink>
-                  )}
-                </li>
-              );
-            })}
+            {repos.data.map((repo) => (
+              <li key={repo.id}>
+                <div className="repo-list__details">
+                  <strong>{repo.name}</strong>
+                  <span className="muted">
+                    {repo.subdir ? `${displaySubdir(repo.subdir)} · ` : ""}
+                    {repo.commit_count} {repo.commit_count === 1 ? "commit" : "commits"}
+                  </span>
+                  {repo.status === "error" && <p className="muted">{repo.message}</p>}
+                  {repo.warning && <p className="state-warning">{repo.warning}</p>}
+                </div>
+                <span className="status-chip repo-status" data-status={repo.status}>{repoStatusLabels[repo.status]}</span>
+                {(repo.status === "ready" || repo.commit_count > 0) && (
+                  <AppLink href={repoPath(repo.id)} className="btn btn--sm" label={`Open ${repo.name}`}>Open</AppLink>
+                )}
+              </li>
+            ))}
           </ul>
         ) : <p className="empty-state">No repositories analyzed yet. Add a GitHub repo above to get started.</p>)}
       </section>

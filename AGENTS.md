@@ -15,7 +15,7 @@ for code that is **simple, readable and well named**, not clever.
 - `server/`: FastAPI app (uv project, depends on `analyzer` by path)
 - `web/`: Vite + React + TypeScript (`@xyflow/react`, `elkjs`, `@flagsmith/flagsmith`)
 - `simulator/`: Python traffic simulator
-- `examples/`: demo repo builder and analysis scripts
+- `examples/`: Flagsmith API demo analysis script
 
 ## Commands
 

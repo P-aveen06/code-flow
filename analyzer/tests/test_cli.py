@@ -36,53 +36,58 @@ def code_flow(*args: str | Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_demo_cli(make_shop_demo, tmp_path):
-    repo, _ = make_shop_demo()
+def test_workflow_cli(workflow_repo, tmp_path):
     out = tmp_path / "output"
-    analyze = code_flow("analyze", repo, "--out", out)
+    analyze = code_flow("analyze", workflow_repo.path, "--out", out)
     assert analyze.returncode == 0, analyze.stderr
     commits = load_commits(out)
     lines = analyze.stdout.splitlines()
-    assert len(lines) == 9
-    assert [line.split()[0] for line in lines[:8]] == [commit.sha[:7] for commit in commits]
-    c4, c5 = commits[3:5]
-    assert lines[4] == f"{c5.sha[:7]} +2 −0 ~1 {c5.message}"
-    assert lines[-1].startswith("Total: 8 commits")
+    assert len(lines) == 4
+    assert [line.split()[0] for line in lines[:3]] == [commit.sha[:7] for commit in commits]
+    first, guarded, refactored = commits
+    assert lines[1] == f"{guarded.sha[:7]} +2 −0 ~1 {guarded.message}"
+    assert lines[-1].startswith("Total: 3 commits")
 
-    summary = code_flow("diff", out, "--base", c4.sha[:7], "--head", c5.sha, "--format", "summary")
+    summary = code_flow(
+        "diff", out, "--base", first.sha[:7], "--head", guarded.sha, "--format", "summary"
+    )
     assert summary.returncode == 0, summary.stderr
-    assert "`checkout` now routes to `new_checkout` behind flag `new_checkout`" in summary.stdout
+    assert "`run` now routes to `process_fast` behind flag `fast_path`" in summary.stdout
 
-    default_diff = code_flow("diff", out, "--head", c5.sha[:7])
+    default_diff = code_flow("diff", out, "--head", guarded.sha[:7])
     assert default_diff.returncode == 0, default_diff.stderr
-    assert json.loads(default_diff.stdout)["base"] == c4.sha
+    assert json.loads(default_diff.stdout)["base"] == first.sha
 
     root_diff = code_flow("diff", out, "--head", commits[0].sha)
     assert root_diff.returncode == 0, root_diff.stderr
-    assert json.loads(root_diff.stdout)["stats"]["nodes_added"] == 5
+    assert json.loads(root_diff.stdout)["stats"]["nodes_added"] == 3
 
-    mermaid = code_flow("diff", out, "--head", c5.sha, "--format", "mermaid", "--hops", "0")
+    mermaid = code_flow("diff", out, "--head", guarded.sha, "--format", "mermaid", "--hops", "0")
     assert mermaid.returncode == 0, mermaid.stderr
     assert mermaid.stdout.startswith("flowchart LR\n")
-    assert 'n_shop_checkout_new_checkout["new_checkout"]' in mermaid.stdout
-    assert "class n_shop_checkout_new_checkout added" in mermaid.stdout
-    assert '|"new_checkout: on"|' in mermaid.stdout
+    assert 'n_workflow_jobs_process_fast["process_fast"]' in mermaid.stdout
+    assert "class n_workflow_jobs_process_fast added" in mermaid.stdout
+    assert '|"fast_path: on"|' in mermaid.stdout
 
-    flags = code_flow("flags", out, "--commit", c5.sha[:7])
+    flags = code_flow("flags", out, "--commit", guarded.sha[:7])
     assert flags.returncode == 0, flags.stderr
-    assert "new_checkout\n  shop/api.py:" in flags.stdout
-    assert "holiday_discount\n  shop/cart.py:" in flags.stdout
-    assert "shop.api:checkout -> shop.checkout:new_checkout (on)" in flags.stdout
-    assert "shop.api:checkout -> shop.checkout:legacy_checkout (off)" in flags.stdout
+    assert "fast_path\n  workflow/api.py:" in flags.stdout
+    assert "tiered_rate\n  workflow/rates.py:" in flags.stdout
+    assert "workflow.api:run -> workflow.jobs:process_fast (on)" in flags.stdout
+    assert "workflow.api:run -> workflow.jobs:process_standard (off)" in flags.stdout
 
-    flags_json = code_flow("flags", out, "--commit", c5.sha, "--format", "json")
+    flags_json = code_flow("flags", out, "--commit", guarded.sha, "--format", "json")
     assert flags_json.returncode == 0, flags_json.stderr
     report = json.loads(flags_json.stdout)
-    assert [check["name"] for check in report["flags"]] == ["holiday_discount", "new_checkout"]
-    assert report["guarded_edges"]["new_checkout"] == [
-        {"source": "shop.api:checkout", "target": "shop.checkout:legacy_checkout", "when": "off"},
-        {"source": "shop.api:checkout", "target": "shop.checkout:new_checkout", "when": "on"},
+    assert [check["name"] for check in report["flags"]] == ["fast_path", "tiered_rate"]
+    assert report["guarded_edges"]["fast_path"] == [
+        {"source": "workflow.api:run", "target": "workflow.jobs:process_fast", "when": "on"},
+        {"source": "workflow.api:run", "target": "workflow.jobs:process_standard", "when": "off"},
     ]
+
+    refactor = code_flow("diff", out, "--head", refactored.sha)
+    assert refactor.returncode == 0, refactor.stderr
+    assert json.loads(refactor.stdout)["nodes"]["removed"] == ["workflow.jobs:process"]
 
     bad_ref = code_flow("diff", out, "--head", "unknown")
     assert bad_ref.returncode == 2

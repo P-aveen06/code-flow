@@ -11,8 +11,6 @@ services:
     envVars:
       - key: CODEFLOW_WEB_ORIGIN
         sync: false
-      - key: CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS
-        value: "3600"
       - key: CODEFLOW_MAX_IMPORT_COMMITS
         value: "50"
       - key: CODEFLOW_SNAPSHOT_CACHE_SIZE

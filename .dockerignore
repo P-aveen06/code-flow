@@ -14,9 +14,6 @@ analyzer/**
 !analyzer/codeflow/
 analyzer/codeflow/**
 !analyzer/codeflow/*.py
-!examples/
-examples/**
-!examples/make_shop_demo.sh
 !scripts/
 scripts/**
 !scripts/build_demo_data.sh

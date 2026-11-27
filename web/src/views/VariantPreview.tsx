@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
-import { FLOW_DIRECTIONS, FLOW_VIEWS, SYNC_MODES } from "../view";
-import type { FlowDirection, FlowView, SyncMode } from "../view";
+import { FLOW_DIRECTIONS, FLOW_VIEWS } from "../view";
+import type { FlowDirection, FlowView } from "../view";
 
 export const flowViewLabels: Record<FlowView, string> = {
   side_by_side: "Side by side",
@@ -12,12 +12,6 @@ export const flowViewLabels: Record<FlowView, string> = {
 export const flowDirectionLabels: Record<FlowDirection, string> = {
   horizontal: "Horizontal",
   vertical: "Vertical",
-};
-
-const syncModeLabels: Record<SyncMode, string> = {
-  manual_button: "Manual button",
-  per_repo_toggle: "Per-repo auto-sync",
-  global_toggle: "Global auto-sync",
 };
 
 interface VariantPreviewProps {
@@ -60,26 +54,11 @@ export function DirectionPreview({ direction, directionOverride, assignedDirecti
   );
 }
 
-export function SyncPreview({ mode, override, assignedMode, onChange }: {
-  mode: SyncMode;
-  override: string | null;
-  assignedMode: SyncMode | null;
-  onChange: (mode: SyncMode | null) => void;
-}) {
-  return (
-    <Preview
-      name="sync" param="sync" options={SYNC_MODES} labels={syncModeLabels}
-      selected={mode} override={override} ready onChange={onChange}
-      status={assignedMode ? `Assigned by Flagsmith: ${syncModeLabels[assignedMode]}` : "Default: Manual button"}
-    />
-  );
-}
-
 function Preview<Option extends string>({
   name, param, options, labels, selected, override, ready, onChange, status,
 }: {
-  name: "variant" | "direction" | "sync";
-  param: "view" | "direction" | "sync";
+  name: "variant" | "direction";
+  param: "view" | "direction";
   options: readonly Option[];
   labels: Record<Option, string>;
   selected: Option;

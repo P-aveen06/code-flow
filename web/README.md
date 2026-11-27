@@ -7,9 +7,9 @@ self-hosted Flagsmith SDK. Use a client-side environment key for the web app.
 
 The viewer assigns a reviewer ID saved in local storage. Add `?reviewer=demo-1`
 to repeat the assignment for a demo identity. Flagsmith's `flow_view` flag
-chooses `side_by_side`, `overlay`, or `overlay_summary`, with `side_by_side`
-as the control fallback. Add `&view=overlay_summary` to preview the summary
-variant with a developer badge and skip the experiment exposure.
+chooses `side_by_side`, `overlay`, or `overlay_summary`, with
+`overlay_summary` as the fallback. Add `&view=overlay_summary` in
+Development to preview the summary and skip the experiment exposure.
 
 `flagsmith_mode` controls the findings and live path styling. The viewer refreshes
 this setting and the commit's findings on a ten-second interval. Select a
@@ -19,6 +19,5 @@ check it. Select it again or press Escape to clear the highlight. Select a
 
 Press `F` to toggle fullscreen for the diagram or `Esc` to exit.
 
-Run `npm run build && npm test` to check the web client. The demo routes are
-`/repo/shop-demo?commit=f376f9c&reviewer=demo-1` and
+Run `npm run build && npm test` to check the web client. The demo route is
 `/repo/Flagsmith__flagsmith?commit=a9b66f5&reviewer=demo-1`.

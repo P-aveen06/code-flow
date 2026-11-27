@@ -11,7 +11,7 @@ import { useDiff, useDiffLayout } from "../useDiff";
 import type { Hops } from "../useDiff";
 import { useRepoFlags } from "../useRepoFlags";
 import { useRequest } from "../useRequest";
-import { parseFlowDirection, parseFlowView, replaceDirectionOverride, replaceSyncOverride, replaceViewOverride } from "../view";
+import { parseFlowDirection, parseFlowView, replaceDirectionOverride, replaceViewOverride } from "../view";
 import type { FlowDirection, FlowView } from "../view";
 import { CodePane } from "../views/CodePane";
 import { FlagsmithPanel } from "../views/FlagsmithPanel";
@@ -22,7 +22,7 @@ import { OverlaySummary } from "../views/OverlaySummary";
 import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
-import { DirectionPreview, SyncPreview, VariantPreview, flowDirectionLabels, flowViewLabels } from "../views/VariantPreview";
+import { DirectionPreview, VariantPreview, flowDirectionLabels, flowViewLabels } from "../views/VariantPreview";
 import type { ExpandedContext } from "../views/collapse";
 import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
 import { useDiagramFullscreen } from "../views/fullscreen";
@@ -91,7 +91,7 @@ function DiagramGuide({ onClose }: { onClose: () => void }) {
       </div>
       <ul id="diagram-guide-details" hidden={!more}>
         <li>Symbols are grouped by module. Click a context chip to expand its module.</li>
-        <li>A → B means A calls B. A label like <code>new_checkout: on</code> shows when that call runs.</li>
+        <li>A → B means A calls B. A label like <code>fast_path: on</code> shows when that call runs.</li>
         <li>Use <kbd>↑</kbd> and <kbd>↓</kbd> to step through commits.</li>
       </ul>
     </aside>
@@ -132,8 +132,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
   const [review, setReview] = useState(initial);
   const { name, subdir, url, hasNodes, commits } = review;
   const {
-    flowView: view, reviewerId, viewOverride, directionOverride, syncOverride, variantPreview, flagsmithMode,
-    syncMode, assignedSyncMode,
+    flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
     ready: flagsReady, assignedView, reviewEventClient, directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
@@ -188,7 +187,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
   }, [currentLayout, view, direction]);
   const diagramRendered = Boolean(currentLayout && rendered?.layout === currentLayout
     && rendered.view === view && rendered.direction === direction);
-  const previewOverride = viewOverride ?? directionOverride ?? syncOverride;
+  const previewOverride = viewOverride ?? directionOverride;
   const exposureKey = directionExposureKey(reviewerId, longFlow, previewOverride, directionFlag);
   const layoutReview = useDirectionExposure(reviewerId, exposureKey, diagramRendered);
   const reviewContext = diff && diagramRendered && layoutReview.ready
@@ -324,10 +323,6 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
             <DirectionPreview direction={direction} directionOverride={directionOverride}
               assignedDirection={assignedDirection} longFlow={longFlow}
               ready={directionReady} onChange={replaceDirectionOverride} />
-          )}
-          {variantPreview && (
-            <SyncPreview mode={syncMode} override={syncOverride} assignedMode={assignedSyncMode}
-              onChange={replaceSyncOverride} />
           )}
           {hasNodes && (
             <div className="neighbours" title={neighboursHint}>

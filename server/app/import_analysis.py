@@ -1,15 +1,12 @@
-"""Prepare repository imports and refreshes in a single spawned process."""
+"""Prepare repository imports and refreshes with Git and the Python analyzer."""
 
 import json
-import multiprocessing
 import os
 import shutil
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from multiprocessing.connection import Connection
-from multiprocessing.process import BaseProcess
 from pathlib import Path
 
 from codeflow.analyze import BlobParseCache, analyze_repo, load_index
@@ -100,14 +97,12 @@ def _prepare_clone(
     url: str,
     source: ImportSource,
     previous_head: str | None,
-    on_fetch: Callable[[], None],
     max_commits: int,
 ) -> tuple[str, int]:
     depth = max(4 * source.max_commits, 100)
     git = ("-C", str(clone))
 
     def fetch(*options: str) -> None:
-        on_fetch()
         _git(*git, "fetch", *options, "origin", refspec, error=UNAVAILABLE)
 
     if clone.exists():
@@ -168,92 +163,70 @@ def _prepare_clone(
 
 
 @dataclass(frozen=True)
-class ImportTask:
-    source: ImportSource
-    url: str
-    clone: Path
-    output: Path
-    staged: Path
-    max_commits: int
-    refresh: bool
-    automatic: bool
-
-
-@dataclass(frozen=True)
-class ImportProgress:
-    changes: dict[str, str | int] = field(default_factory=dict)
-    fetches: int = 0
-    analysed_commits: int = 0
-
-
-@dataclass(frozen=True)
 class ImportResult:
     new_commits: int | None = None
     warning: str | None = None
 
 
 class ImportAnalysis:
-    """Build staged output with a parse cache shared by the worker's jobs."""
+    """Build staged output with a parse cache shared by imports and refreshes."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_commits: int) -> None:
+        self._max_commits = max_commits
         self._parse_cache = BlobParseCache(max_entries=5000)
 
-    def run(self, task: ImportTask, report: Callable[[ImportProgress], None]) -> ImportResult:
-        source = task.source
+    def run(
+        self,
+        source: ImportSource,
+        url: str,
+        clone: Path,
+        output: Path,
+        staged: Path,
+        *,
+        refresh: bool,
+        report: Callable[..., None],
+    ) -> ImportResult:
         try:
-            index = load_index(task.output)
+            index = load_index(output)
         except FileNotFoundError:
             index = {}
-        previous_commits = [entry["sha"] for entry in index["commits"]] if task.refresh else []
+        previous_commits = [entry["sha"] for entry in index["commits"]] if refresh else []
         previous_head = previous_commits[-1] if previous_commits else None
         branch, limit = _prepare_clone(
-            task.clone,
-            task.staged.parent / "clone",
-            task.url,
+            clone,
+            staged.parent / "clone",
+            url,
             source,
             previous_head,
-            lambda: report(ImportProgress(fetches=1)),
-            task.max_commits,
+            self._max_commits,
         )
         report(
-            ImportProgress(
-                {
-                    "status": "analyzing",
-                    "message": "Analyzing repository",
-                    "branch": branch.removeprefix("refs/remotes/origin/"),
-                }
-            )
+            status="analyzing",
+            message="Analyzing repository",
+            branch=branch.removeprefix("refs/remotes/origin/"),
         )
 
         def progress(current: int, total: int, _commit: Commit) -> None:
             report(
-                ImportProgress(
-                    {
-                        "current": current,
-                        "total": total,
-                        "message": f"Analyzing commit {current} of {total}",
-                    }
-                )
+                current=current,
+                total=total,
+                message=f"Analyzing commit {current} of {total}",
             )
 
-        snapshots = task.output / "snapshots"
+        snapshots = output / "snapshots"
         if index and index.get("source_root", "") == source.subdir and snapshots.is_dir():
             # The analyzer replaces updated files atomically, so the old output stays readable.
-            shutil.copytree(snapshots, task.staged / "snapshots", copy_function=os.link)
-
-        def count_analysis() -> None:
-            report(ImportProgress(analysed_commits=1))
+            shutil.copytree(snapshots, staged / "snapshots", copy_function=os.link)
 
         results = analyze_repo(
-            task.clone,
-            task.staged,
+            clone,
+            staged,
             branch=branch,
             max_commits=limit,
             source_root=source.subdir,
             touching=source.subdir or None,
             on_progress=progress,
             parse_cache=self._parse_cache,
-            on_analyzed=count_analysis if task.automatic else None,
         )
         metadata = {
             "url": source.url,
@@ -262,85 +235,13 @@ class ImportAnalysis:
             "max_commits": limit,
             "imported_at": datetime.now(UTC).isoformat(),
         }
-        (task.staged / "source.json").write_text(
-            json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
-        )
+        (staged / "source.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         new_commits = (
             len({result.commit.sha for result in results}.difference(previous_commits))
-            if task.refresh
+            if refresh
             else None
         )
         warning = (
             python_warning(source.subdir) if not results or not results[-1].node_count else None
         )
         return ImportResult(new_commits, warning)
-
-
-def _worker_main(connection: Connection) -> None:
-    """Process tasks until the API closes its end of the pipe."""
-    analysis = ImportAnalysis()
-    with connection:
-        while True:
-            try:
-                task = connection.recv()
-            except EOFError:
-                return
-            try:
-                result = analysis.run(task, connection.send)
-            except ImportFailure as exc:
-                result = exc
-            except Exception:  # noqa: BLE001
-                result = ImportFailure(ANALYSIS_ERROR)
-            connection.send(result)
-
-
-class ImportWorker:
-    """Own the process and its pipe. Only the queue thread calls run()."""
-
-    def __init__(self) -> None:
-        self._context = multiprocessing.get_context("spawn")
-        self._process: BaseProcess | None = None
-        self._connection: Connection | None = None
-
-    def start(self) -> None:
-        if self._process is not None and self._process.is_alive():
-            return
-        self.close()
-        parent, child = self._context.Pipe()
-        process = self._context.Process(
-            target=_worker_main, args=(child,), name="code-flow-import-worker"
-        )
-        try:
-            process.start()
-        except Exception:
-            parent.close()
-            process.close()
-            raise
-        finally:
-            child.close()
-        self._process = process
-        self._connection = parent
-
-    def close(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
-        if self._process is not None:
-            self._process.join()
-            self._process.close()
-            self._process = None
-
-    def run(self, task: ImportTask, report: Callable[[ImportProgress], None]) -> ImportResult:
-        self.start()
-        connection = self._connection
-        assert connection is not None
-        try:
-            connection.send(task)
-            while isinstance(message := connection.recv(), ImportProgress):
-                report(message)
-        except (EOFError, OSError) as exc:
-            self.close()
-            raise ImportFailure(ANALYSIS_ERROR) from exc
-        if isinstance(message, ImportFailure):
-            raise message
-        return message

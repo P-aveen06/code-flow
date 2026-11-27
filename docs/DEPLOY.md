@@ -14,17 +14,17 @@ Redeploy the API with a manual deploy in Render (or `POST /v1/services/<id>/depl
 Redeploy the web with the build and `wrangler pages deploy` steps in section 3.
 
 Cloudflare Pages serves the Vite build. One free Render Docker web service serves
-the FastAPI API and runs Git imports in one child worker process. The free
-service has 512 MB of RAM and an ephemeral filesystem. After 15 minutes without
-inbound traffic, the service can spin down. The next request can take 30–60 seconds. The hosted landing page
-shows **Waking up the demo server…** after three seconds and retries the repo list
+the FastAPI API. A single background thread handles Git imports and manual
+refreshes. The free service has 512 MB of RAM and an ephemeral filesystem. After 15 minutes without
+inbound traffic, the service can spin down. The next request can take 30–60
+seconds. The hosted landing page shows **Waking up the demo server…** after three seconds and retries the repo list
 up to four times within a 75-second window. [Render free service behavior](https://render.com/docs/free)
 
-The Docker build creates the eight-commit `shop-demo` and analyzes the most
-recent 50 first-parent commits touching `api/` up to and including
+The Docker build analyzes the most recent 50 first-parent commits touching
+`api/` up to and including
 `0c37fca299b94d54760fe7fa76818d19f05bf639` in Flagsmith/flagsmith. It keeps a
 shallow Git clone and the base for the oldest displayed diff. The container seeds
-its writable `/app/data` directory on first start, with both source clones
+its writable `/app/data` directory on first start, with the source clone
 under `/app/data/repos`. **Check for new commits** fetches the default branch
 for the baked Flagsmith example. Imports and subsequent refreshes are shared
 by demo visitors and reset on Render restart, spin-down, or redeploy.
@@ -94,7 +94,6 @@ jq -n --arg owner "$RENDER_OWNER_ID" --arg origin "$CODEFLOW_WEB_ORIGIN" '{
   },
   envVars: [
     {key: "CODEFLOW_WEB_ORIGIN", value: $origin},
-    {key: "CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS", value: "3600"},
     {key: "CODEFLOW_MAX_IMPORT_COMMITS", value: "50"},
     {key: "CODEFLOW_SNAPSHOT_CACHE_SIZE", value: "8"}
   ]
@@ -132,8 +131,8 @@ curl -fsS -H "Origin: $CODEFLOW_WEB_ORIGIN" "$VITE_API_URL/api/repos"
 wrangler pages deploy web/dist --project-name code-flow --branch main
 ```
 
-Open the Pages URL from Wrangler, then check that the landing page lists both
-repos and that this direct path opens the viewer at the pinned commit.
+Open the Pages URL from Wrangler. Check that the landing page lists
+Flagsmith/flagsmith and that this path opens the viewer at the pinned commit.
 
 ```text
 /repo/Flagsmith__flagsmith?commit=0c37fca299b94d54760fe7fa76818d19f05bf639
@@ -148,7 +147,6 @@ deploying and belong in your local credential store.
 | Variable | Set where | Hosted value or behavior | Secret |
 | --- | --- | --- | --- |
 | `CODEFLOW_WEB_ORIGIN` | Render | Required for CORS. Set the exact Pages origin, without a path or trailing slash. | No |
-| `CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS` | Render | `3600`. Local default `300`, minimum `10`. Automatic refresh requires an enabled repo or global switch. | No |
 | `CODEFLOW_MAX_IMPORT_COMMITS` | Render | `50` for imports and rolling refresh history. Local default and maximum `200`. | No |
 | `CODEFLOW_SNAPSHOT_CACHE_SIZE` | Render | `8` recently used decoded graph snapshots across repos. Local default `16`. | No |
 | `PORT` | Render | Render provides the port. The image defaults to `8787` on its own. | No |
@@ -179,30 +177,11 @@ Build from the repo root and publish the API on an available port.
 docker build -f server/Dockerfile -t code-flow:deploy-local .
 docker run --rm --memory=512m --memory-swap=512m -p 127.0.0.1::8787 \
   -e CODEFLOW_WEB_ORIGIN=https://code-flow.pages.dev \
-  -e CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS=3600 \
   -e CODEFLOW_MAX_IMPORT_COMMITS=50 -e CODEFLOW_SNAPSHOT_CACHE_SIZE=8 \
   code-flow:deploy-local
 ```
 
-The worker build was verified on Docker Desktop (Linux arm64) with the hosted
-8-entry snapshot cache and a 512 MiB cgroup limit. Importing 50 commits touching
-Flagsmith's `api/` at the pinned SHA took 8.9 seconds. Git cloned the baked repo
-via a local `file://` URL. While analysis ran, `/api/health`, `/api/repos`, and a
-diff from the seeded Flagsmith repo all returned 200. A diff from the new import
-also returned 200 after publish.
-
-| Memory during verification | Peak |
-| --- | ---: |
-| API RSS during import | 79 MiB |
-| Analysis worker RSS during import | 50 MiB |
-| Combined API and analysis worker RSS during import | 129 MiB |
-| Whole container, including Git subprocesses and filesystem cache | 409 MiB |
-
-Process RSS was sampled every 20 ms from Linux `/proc`. Combined RSS is the
-maximum simultaneous sum. The API's kernel-reported high-water RSS after
-opening the imported diff was 90 MiB. The container recorded zero OOM kills.
-
-The earlier measurements used the in-process importer on the same platform.
+In an earlier in-process verification on Docker Desktop (Linux arm64),
 Docker reported **133 MB compressed content** and **580 MB of local image disk
 usage**. The Uvicorn process was PID 1. Peak RSS is Linux `VmHWM` read after
 each phase of the same run, rounded to the nearest MiB.

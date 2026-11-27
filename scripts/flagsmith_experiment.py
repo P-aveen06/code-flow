@@ -18,7 +18,6 @@ from flagsmith_setup import (
     PRODUCTION_ENVIRONMENT,
     PROJECT_NAME,
     SIM_ENVIRONMENT_SETTING,
-    SYNC_MODE_FLAG,
     AdminClient,
     AdminError,
     Record,
@@ -84,30 +83,6 @@ EXPERIMENTS = {
             ),
             MetricDefinition(
                 "Layout time to understand (ms)", "layout_understood", "mean", "down", "decrease"
-            ),
-        ),
-    ),
-    SYNC_MODE_FLAG.name: ExperimentDefinition(
-        name="sync_mode: manual button vs auto-sync per repo vs global auto-sync",
-        hypothesis="Auto-sync shows new commits sooner without a noticeable cost in page load or server load.",
-        control=str(SYNC_MODE_FLAG.value),
-        treatments={
-            str(option.value): int(option.allocation) for option in SYNC_MODE_FLAG.variants
-        },
-        metrics=(
-            MetricDefinition(
-                "New commit seen within 5 min",
-                "new_commit_seen_within_5min",
-                "occurrence",
-                "up",
-                "increase",
-            ),
-            MetricDefinition("Freshness (s)", "sync_freshness_s", "mean", "down", "decrease"),
-            MetricDefinition(
-                "Landing page load (ms)", "sync_page_load_ms", "mean", "down", "decrease"
-            ),
-            MetricDefinition(
-                "Server CPU (ms per hour)", "sync_server_cpu_ms", "mean", "down", "decrease"
             ),
         ),
     ),
@@ -482,14 +457,6 @@ def refresh(api: ExperimentAPI, path: str) -> None:
                 print(f"Requested {name} refresh.")
 
 
-def validate_experiment_environment(experiment_flag: str, environment_name: str) -> None:
-    if (
-        experiment_flag == SYNC_MODE_FLAG.name
-        and environment_name.casefold() != DEFAULT_SIM_ENVIRONMENT.casefold()
-    ):
-        raise SetupError("The sync_mode experiment is available only in Development.")
-
-
 def run(
     api: ExperimentAPI,
     command: str,
@@ -499,7 +466,6 @@ def run(
     experiment_flag: str = "flow_view",
     wait_seconds: int = 0,
 ) -> None:
-    validate_experiment_environment(experiment_flag, environment_name)
     definition = EXPERIMENTS[experiment_flag]
     organisations = api.list("organisations/")
     if len(organisations) != 1:
@@ -528,7 +494,7 @@ def run(
             api.dry_run
             and command == "create"
             and experiment is None
-            and (experiment_flag == FLOW_DIRECTION_FLAG.name)
+            and experiment_flag == FLOW_DIRECTION_FLAG.name
         ):
             print(f"Prerequisite: setup must create {experiment_flag} before these requests.")
             create(api, environment_path, None, None, definition)
@@ -610,7 +576,6 @@ def main() -> int:
             else configured or DEFAULT_SIM_ENVIRONMENT
         )
         print(f"Using Flagsmith environment {PROJECT_NAME}/{environment}.", flush=True)
-        validate_experiment_environment(args.experiment, environment)
         if (
             environment.casefold() == PRODUCTION_ENVIRONMENT.casefold()
             and args.environment != PRODUCTION_ENVIRONMENT

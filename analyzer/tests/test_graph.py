@@ -54,9 +54,9 @@ def test_three_file_package_build(tmp_path):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(source)
         files.append(parse_file(path, destination.read_bytes()))
-    graph = build_graph(files, "shop-demo", commit())
+    graph = build_graph(files, "review-fixture", commit())
     assert graph.schema == "code-flow/graph@1"
-    assert graph.repo == "shop-demo"
+    assert graph.repo == "review-fixture"
     assert graph.commit == commit()
     assert [node.id for node in graph.nodes] == ["shop.api:checkout", "shop.payment:charge"]
     assert graph.nodes[0].name == "checkout"
@@ -66,7 +66,9 @@ def test_three_file_package_build(tmp_path):
     assert graph.flags == [
         FlagCheck("new_checkout", "shop/api.py", 3, "shop.api:checkout", "has_feature")
     ]
-    assert build_graph(list(reversed(files)), "shop-demo", commit()).to_json() == graph.to_json()
+    assert (
+        build_graph(list(reversed(files)), "review-fixture", commit()).to_json() == graph.to_json()
+    )
 
 
 def test_build_external_nodes():

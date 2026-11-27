@@ -30,7 +30,6 @@ SIM_ENVIRONMENT_SETTING = "CODEFLOW_SIM_ENVIRONMENT"
 CODE_FLOW_TAG = "code-flow"
 VARIANT_PREVIEW = "variant_preview"
 REPO_ID_BY_TAG = {
-    "repo:shop-demo": "shop-demo",
     "repo:flagsmith-api": "Flagsmith__flagsmith",
 }
 SERVER_KEY_NAME = "code-flow server"
@@ -170,28 +169,6 @@ FLOW_DIRECTION_FLAG = Flag(
     "MULTIVARIATE",
     (Variant("vertical", 50, "vertical"),),
 )
-
-SYNC_MODE_FLAG = Flag(
-    "sync_mode",
-    True,
-    "manual_button",
-    "MULTIVARIATE",
-    (
-        Variant("per_repo_toggle", 33, "per_repo_toggle"),
-        Variant("global_toggle", 33, "global_toggle"),
-    ),
-)
-
-
-def sync_mode_defaults(environment_name: str) -> Flag:
-    if environment_name.casefold() == DEFAULT_SIM_ENVIRONMENT.casefold():
-        return SYNC_MODE_FLAG
-    return replace(
-        SYNC_MODE_FLAG,
-        enabled=False,
-        variants=tuple(replace(variant, allocation=0) for variant in SYNC_MODE_FLAG.variants),
-    )
-
 
 def same_value(left: FlagValue, right: FlagValue) -> bool:
     return type(left) is type(right) and left == right
@@ -382,9 +359,6 @@ def show_value(value: FlagValue) -> str:
         "overlay_summary",
         "horizontal",
         "vertical",
-        "manual_button",
-        "per_repo_toggle",
-        "global_toggle",
     ):
         return "<redacted>"
     return json.dumps(value)
@@ -706,13 +680,11 @@ def setup(
         CODE_FLOW_TAG: [
             FLOW_VIEW_FLAG,
             FLOW_DIRECTION_FLAG,
-            sync_mode_defaults(environment_name),
             Flag("flagsmith_mode", True),
             Flag("ai_summary", False),
             Flag(VARIANT_PREVIEW, not app_environment),
         ],
         "repo:flagsmith-api": defaults,
-        "repo:shop-demo": [Flag("new_checkout", True), Flag("holiday_discount", True)],
     }
     scope_file = scope_file.resolve()
     if scope_file == env_file.resolve():
@@ -749,7 +721,6 @@ def setup(
         tag_ids[label] = tag_id
         for flag in flags:
             name = flag.name.casefold()
-            is_sync_mode = name == SYNC_MODE_FLAG.name
             if feature := features.get(name):
                 configure_existing_flag(
                     client,
@@ -757,13 +728,10 @@ def setup(
                     feature,
                     flag,
                     active_experiment=active_experiments.get(feature["id"]),
-                    simulation_environment=flag.enabled if is_sync_mode else not app_environment,
+                    simulation_environment=not app_environment,
                     dry_run=dry_run,
                 )
-                if not is_sync_mode:
-                    add_tag_to_flag(client, feature_path, feature, label, tag_id, dry_run)
-                elif tag_id not in feature["tags"]:
-                    print(f"{name} differs from defaults (missing tag {label}).")
+                add_tag_to_flag(client, feature_path, feature, label, tag_id, dry_run)
             else:
                 verb = "Would create" if dry_run else "Created"
                 if tag_id is not None and not dry_run:
@@ -775,12 +743,6 @@ def setup(
                                 replace(flag, enabled=env["name"] != PRODUCTION_ENVIRONMENT),
                             )
                             for env in environments
-                        ]
-                    elif is_sync_mode and not app_environment:
-                        environment_defaults = [
-                            (env, sync_mode_defaults(env["name"]))
-                            for env in environments
-                            if env["name"] in (environment["name"], PRODUCTION_ENVIRONMENT)
                         ]
                     features[name] = create_flag(
                         client, feature_path, flag, tag_id, environment_defaults
@@ -810,7 +772,6 @@ def setup(
             label: {feature["name"] for feature in tagged_features if tag_id in feature["tags"]}
             for label, tag_id in tag_ids.items()
         }
-        tag_names[CODE_FLOW_TAG].add(SYNC_MODE_FLAG.name)
         if dry_run:
             for label, flags in groups.items():
                 for flag in flags:

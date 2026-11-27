@@ -423,7 +423,7 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert scope_file.read_bytes() == before_scope
     assert {key: client.states[key] for key in before_production} == before_production
     assert all(production["api_key"] not in path for _, path in client.calls)
-    assert len(client.features) == len(defaults) + 8
+    assert len(client.features) == len(defaults) + 5
     assert preview_state["enabled"] is True
     assert preview_state["feature_state_value"] is None
     assert set(client.keys) == {production["id"]}
@@ -431,7 +431,6 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     for flag_name, control, expected in (
         ("flow_view", "side_by_side", {"overlay": 33, "overlay_summary": 33}),
         ("flow_direction", "horizontal", {"vertical": 50}),
-        ("sync_mode", "manual_button", {"per_repo_toggle": 33, "global_toggle": 33}),
     ):
         flag, state = client.project_flag(development, flag_name)
         assert state["enabled"] is True
@@ -524,16 +523,15 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
     assert {tag["label"] for tag in client.tags} == {
         "code-flow",
         "repo:flagsmith-api",
-        "repo:shop-demo",
     }
     assert all(tag["project"] == project for tag in client.tags)
     assert (
         sum(
             (method, path) == ("POST", f"projects/{project}/tags/") for method, path in client.calls
         )
-        == 3
+        == 2
     )
-    assert len(client.features) == len(defaults) + 8
+    assert len(client.features) == len(defaults) + 5
     assert len(client.keys[environment["id"]]) == 1
 
     feature, state = client.project_flag(environment, "flow_view")
@@ -567,8 +565,6 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         ("flagsmith_mode", True),
         ("ai_summary", False),
         ("variant_preview", False),
-        ("new_checkout", True),
-        ("holiday_discount", True),
     ]:
         _, state = client.project_flag(environment, name)
         assert state["enabled"] is enabled
@@ -585,7 +581,6 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         "project": "code-flow",
         "environment": "Production",
         "repos": {
-            "shop-demo": ["holiday_discount", "new_checkout"],
             "Flagsmith__flagsmith": sorted(flag.name for flag in defaults),
         },
         "code_flow_flags": [
@@ -593,7 +588,6 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
             "flagsmith_mode",
             "flow_direction",
             "flow_view",
-            "sync_mode",
             "variant_preview",
         ],
     }
@@ -635,8 +629,6 @@ def test_production_preserves_existing_rollouts_and_preview_state(env_file, scop
             row["percentage_allocation"] = 0
     _, preview_state = client.project_flag(production, "variant_preview")
     preview_state["enabled"] = True
-    _, sync_state = client.project_flag(production, "sync_mode")
-    sync_state.update(enabled=True, feature_state_value="global_toggle")
     before = copy.deepcopy(client.states)
     client.calls.clear()
     capsys.readouterr()
@@ -646,61 +638,8 @@ def test_production_preserves_existing_rollouts_and_preview_state(env_file, scop
     assert client.states == before
     assert client.calls and all(method == "GET" for method, _ in client.calls)
     output = capsys.readouterr().out
-    for name in ("flow_view", "flow_direction", "variant_preview", "sync_mode"):
+    for name in ("flow_view", "flow_direction", "variant_preview"):
         assert f"{name} differs from defaults" in output
-
-
-def test_development_creates_sync_mode_with_production_off_and_preserves_experiments(
-    env_file,
-    scope_file,
-    capsys,
-):
-    client = FakeAdminClient()
-    project = client.add_project()
-    production = client.add_environment(project, "Production", versioned=True)
-    development = client.add_environment(project, "Development")
-    options = {"environment_name": "Development", "scope_file": scope_file}
-    setup_script.setup(client, [], env_file, dry_run=True, **options)
-    assert all(method == "GET" for method, _ in client.calls)
-    assert (
-        'Would create flag sync_mode with tag code-flow (on, "manual_button" 34%, '
-        '"per_repo_toggle" 33%, "global_toggle" 33%).'
-    ) in capsys.readouterr().out
-
-    setup_script.setup(client, [], env_file, dry_run=False, **options)
-    feature, production_state = client.project_flag(production, "sync_mode")
-    _, development_state = client.project_flag(development, "sync_mode")
-    assert feature["type"] == "MULTIVARIATE"
-    assert [tag["label"] for tag in client.tags if tag["id"] in feature["tags"]] == ["code-flow"]
-    assert production_state["enabled"] is False
-    assert production_state["feature_state_value"] == "manual_button"
-    assert production_state["multivariate_feature_state_values"] == []
-    assert development_state["enabled"] is True
-    assert development_state["feature_state_value"] == "manual_button"
-    assert [
-        row["percentage_allocation"]
-        for row in development_state["multivariate_feature_state_values"]
-    ] == [33, 33]
-
-    development_state["feature_state_value"] = "global_toggle"
-    client.experiments[development["id"]] = [
-        {"feature": {"id": feature["id"]}, "name": "Sync modes", "status": "running"}
-    ]
-    client.calls.clear()
-    capsys.readouterr()
-    setup_script.setup(client, [], env_file, dry_run=False, **options)
-    assert (
-        'Skipping sync_mode: experiment "Sync modes" is running in Development'
-        in capsys.readouterr().out
-    )
-    assert all(method == "GET" for method, _ in client.calls)
-    assert development_state["feature_state_value"] == "global_toggle"
-
-    client.experiments.clear()
-    client.calls.clear()
-    setup_script.setup(client, [], env_file, dry_run=False, **options)
-    assert "sync_mode differs from defaults" in capsys.readouterr().out
-    assert all(method == "GET" for method, _ in client.calls)
 
 
 @pytest.mark.parametrize(("environment", "state"), [("Production", "off"), ("Development", "on")])
@@ -733,9 +672,15 @@ def test_existing_flag_only_gets_missing_tag_and_scope_uses_actual_tags(
     environment = client.add_environment(project, "Production")
     tags_path = f"projects/{project}/tags/"
     features_path = f"projects/{project}/features/"
-    shop_tag = client.request("POST", tags_path, {"label": "repo:shop-demo"})
+    api_tag = client.request("POST", tags_path, {"label": "repo:flagsmith-api"})
+    unrelated_tag = client.request("POST", tags_path, {"label": "repo:legacy"})
+    unrelated = client.request(
+        "POST", features_path, {"name": "legacy_flag", "tags": [unrelated_tag["id"]]}
+    )
+    _, unrelated_state = client.project_flag(environment, "legacy_flag")
+    unrelated_state["enabled"] = True
     other_tag = client.request("POST", tags_path, {"label": "other"})
-    client.request("POST", features_path, {"name": "extra_shop_flag", "tags": [shop_tag["id"]]})
+    client.request("POST", features_path, {"name": "extra_api_flag", "tags": [api_tag["id"]]})
     client.request("POST", features_path, {"name": "untagged_flag"})
     existing = client.request(
         "POST",
@@ -771,11 +716,11 @@ def test_existing_flag_only_gets_missing_tag_and_scope_uses_actual_tags(
     assert feature == {**old_feature, "tags": [other_tag["id"], code_flow_tag["id"]]}
     assert state == old_state
     assert ("PATCH", f"{features_path}{existing['id']}/") in client.calls
-    assert json.loads(scope_file.read_bytes())["repos"]["shop-demo"] == [
-        "extra_shop_flag",
-        "holiday_discount",
-        "new_checkout",
-    ]
+    assert json.loads(scope_file.read_bytes())["repos"] == {
+        "Flagsmith__flagsmith": ["extra_api_flag"]
+    }
+    assert unrelated_state["enabled"] is True
+    assert all(f"{features_path}{unrelated['id']}/" not in path for _, path in client.calls)
     output = capsys.readouterr()
     (drift_note,) = [line for line in output.out.splitlines() if "differs from defaults" in line]
     assert "flow_view" in drift_note
@@ -812,7 +757,6 @@ def test_dry_run_has_no_api_or_file_writes(env_file, scope_file, capsys, existin
         'Would create flag flow_direction with tag code-flow (on, "horizontal" 50%, "vertical" 50%).'
         in output.out
     )
-    assert 'Would create flag sync_mode with tag code-flow (off, "manual_button").' in output.out
     assert '"side_by_side" 34%, "overlay" 33%, "overlay_summary" 33%' in output.out
     assert "Would create server-side key code-flow server." in output.out
     assert "Would enable the Flagsmith database warehouse." in output.out
@@ -826,7 +770,7 @@ def test_env_update_preserves_other_bytes_and_inline_comments(tmp_path):
     path.write_bytes(
         b"# header \xff\r\nFLAGSMITH_ADMIN_API_KEY=test-admin-secret\r\n"
         b"export CODEFLOW_FLAGSMITH_ENV_KEY = 'old'  # retain comment\r\n"
-        b"OTHER=a=b#c\nSHOP_DEMO_FLAGSMITH_SERVER_KEY=legacy-shop-key\r\n"
+        b"OTHER=a=b#c\nLEGACY_FLAGSMITH_SERVER_KEY=test-legacy-key\r\n"
         b"FLAGSMITH_API_FLAGSMITH_SERVER_KEY=legacy-api-key\r\n"
         b"VITE_CODEFLOW_FLAGSMITH_ENV_KEY=already-right\r\n# final comment"
     )
@@ -843,7 +787,7 @@ def test_env_update_preserves_other_bytes_and_inline_comments(tmp_path):
     assert path.read_bytes() == (
         b"# header \xff\r\nFLAGSMITH_ADMIN_API_KEY=test-admin-secret\r\n"
         b"export CODEFLOW_FLAGSMITH_ENV_KEY = 'new'  # retain comment\r\n"
-        b"OTHER=a=b#c\nSHOP_DEMO_FLAGSMITH_SERVER_KEY=legacy-shop-key\r\n"
+        b"OTHER=a=b#c\nLEGACY_FLAGSMITH_SERVER_KEY=test-legacy-key\r\n"
         b"FLAGSMITH_API_FLAGSMITH_SERVER_KEY=legacy-api-key\r\n"
         b"VITE_CODEFLOW_FLAGSMITH_ENV_KEY=already-right\r\n# final comment\r\n"
         b"CODEFLOW_FLAGSMITH_SERVER_KEY=appended\r\n"

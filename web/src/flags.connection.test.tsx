@@ -12,7 +12,7 @@ let container: HTMLDivElement;
 function Probe() {
   const flags = useCodeFlowFlags("?reviewer=demo");
   const { direction } = readFlowDirection(null, true, flags.directionFlag);
-  return <p>{[flags.flowView, direction, flags.syncMode, flags.ready ? "ready" : "loading"].join(" ")}</p>;
+  return <p>{[flags.flowView, direction, flags.ready ? "ready" : "loading"].join(" ")}</p>;
 }
 
 beforeEach(() => {
@@ -41,7 +41,7 @@ describe("Flagsmith connection", () => {
 
     await act(async () => root.render(<Probe />));
 
-    expect(container.textContent).toBe("overlay_summary vertical manual_button ready");
+    expect(container.textContent).toBe("overlay_summary vertical ready");
     expect(init).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -61,12 +61,12 @@ describe("Flagsmith connection", () => {
     vi.stubGlobal("fetch", fetch);
 
     await act(async () => root.render(<Probe />));
-    expect(container.textContent).toBe("overlay_summary vertical manual_button loading");
+    expect(container.textContent).toBe("overlay_summary vertical loading");
     expect(fetch).toHaveBeenCalledOnce();
     expect(fetch.mock.calls[0][0]).toBe("https://flags.test/api/v1/identities/?identifier=demo");
 
     await act(async () => vi.advanceTimersByTimeAsync(2_500));
     expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
-    expect(container.textContent).toBe("overlay_summary vertical manual_button ready");
+    expect(container.textContent).toBe("overlay_summary vertical ready");
   });
 });

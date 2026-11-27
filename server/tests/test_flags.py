@@ -1,4 +1,4 @@
-"""Exercise scoped Flagsmith state and findings using the analyzed shop demo."""
+"""Exercise scoped Flagsmith state and findings using a disposable Git repository."""
 
 import json
 import logging
@@ -19,7 +19,7 @@ from app.config import Settings
 from app.flagsmith_client import FlagsmithClient, FlagStates
 from app.main import create_app
 
-URL = "/api/repos/shop-demo/flags"
+URL = "/api/repos/review-fixture/flags"
 TEST_KEY = "ser.fake-secret-for-tests"
 
 
@@ -42,7 +42,7 @@ class FakeFlagsmith:
 
 
 @pytest.fixture
-def settings(demo_data: Path, tmp_path: Path) -> Settings:
+def settings(fixture_data: Path, tmp_path: Path) -> Settings:
     scopes = tmp_path / "scopes.json"
     scopes.write_text(
         json.dumps(
@@ -50,22 +50,22 @@ def settings(demo_data: Path, tmp_path: Path) -> Settings:
                 "schema": "code-flow/flagsmith-scopes@1",
                 "environment": "Production",
                 "repos": {
-                    "shop-demo": ["new_checkout", "unused_demo", "flow_view"],
-                    "other": ["holiday_discount", "other_demo"],
+                    "review-fixture": ["fast_path", "unused_demo", "flow_view"],
+                    "other": ["special_rate", "other_demo"],
                 },
                 "code_flow_flags": ["flow_view"],
             }
         )
     )
-    return Settings(demo_data, "http://example.test", scopes_path=scopes)
+    return Settings(fixture_data, "http://example.test", scopes_path=scopes)
 
 
-def test_scoped_findings_and_cache(settings: Settings, checkout_commit: Commit) -> None:
+def test_scoped_findings_and_cache(settings: Settings, fast_path_commit: Commit) -> None:
     now = 0.0
     sdk = FakeFlagsmith(
         {
-            "new_checkout": (True, None),
-            "holiday_discount": (True, 15),
+            "fast_path": (True, None),
+            "special_rate": (True, 15),
             "unused_demo": (False, "saved value"),
             "flow_view": (True, "overlay"),
             "other_demo": (True, None),
@@ -73,10 +73,10 @@ def test_scoped_findings_and_cache(settings: Settings, checkout_commit: Commit) 
     )
     flagsmith = FlagsmithClient(TEST_KEY, settings.flagsmith_api_url, sdk=sdk, clock=lambda: now)
     with TestClient(create_app(settings, flagsmith_client=flagsmith)) as client:
-        response = client.get(URL, params={"sha": checkout_commit.sha[:7]})
+        response = client.get(URL, params={"sha": fast_path_commit.sha[:7]})
         assert response.status_code == 200
         body = response.json()
-        assert (body["repo"], body["sha"]) == ("shop-demo", checkout_commit.sha)
+        assert (body["repo"], body["sha"]) == ("review-fixture", fast_path_commit.sha)
         assert body["flagsmith"] == {
             "connected": True,
             "environment": "Production",
@@ -84,31 +84,34 @@ def test_scoped_findings_and_cache(settings: Settings, checkout_commit: Commit) 
             "error": None,
         }
         assert body["flagsmith"]["fetched_at"].endswith("Z")
-        orphan, checkout, unused = body["flags"]
-        assert (orphan["name"], orphan["status"]) == ("holiday_discount", "orphan")
+        orphan, fast_path, unused = body["flags"]
+        assert (orphan["name"], orphan["status"]) == ("special_rate", "orphan")
         assert (orphan["in_flagsmith"], orphan["enabled"], orphan["value"]) == (False, None, None)
         assert orphan["guarded_edges"][0]["live"] is None
         assert orphan["dead_calls"] == []
-        assert (checkout["name"], checkout["status"], checkout["enabled"]) == (
-            "new_checkout",
+        assert (fast_path["name"], fast_path["status"], fast_path["enabled"]) == (
+            "fast_path",
             "live",
             True,
         )
-        assert checkout["checks"] == [
+        assert fast_path["checks"] == [
             {
-                "file": "shop/api.py",
-                "line": 14,
-                "function": "shop.api:checkout",
+                "file": "billing/api.py",
+                "line": 5,
+                "function": "billing.api:submit",
                 "call": "is_feature_enabled",
             }
         ]
-        legacy_call = {"source": "shop.api:checkout", "target": "shop.checkout:legacy_checkout"}
-        new_call = {"source": "shop.api:checkout", "target": "shop.checkout:new_checkout"}
-        assert checkout["guarded_edges"] == [
-            {**legacy_call, "when": "off", "live": False},
-            {**new_call, "when": "on", "live": True},
+        standard_call = {
+            "source": "billing.api:submit",
+            "target": "billing.handlers:standard_submit",
+        }
+        fast_call = {"source": "billing.api:submit", "target": "billing.handlers:fast_submit"}
+        assert fast_path["guarded_edges"] == [
+            {**fast_call, "when": "on", "live": True},
+            {**standard_call, "when": "off", "live": False},
         ]
-        assert checkout["dead_calls"] == [legacy_call]
+        assert fast_path["dead_calls"] == [standard_call]
         assert (unused["name"], unused["status"], unused["value"]) == (
             "unused_demo",
             "unused",
@@ -117,18 +120,18 @@ def test_scoped_findings_and_cache(settings: Settings, checkout_commit: Commit) 
         assert unused["in_flagsmith"] is True
         assert unused["checks"] == []
 
-        sdk.states["new_checkout"] = (False, None)
+        sdk.states["fast_path"] = (False, None)
         now = 9.99
-        assert client.get(URL, params={"sha": checkout_commit.sha}).json() == body
+        assert client.get(URL, params={"sha": fast_path_commit.sha}).json() == body
         assert sdk.calls == 1
         now = 10.0
-        checkout = client.get(URL, params={"sha": checkout_commit.sha}).json()["flags"][1]
-        assert (checkout["status"], checkout["enabled"]) == ("off", False)
-        assert checkout["guarded_edges"] == [
-            {**legacy_call, "when": "off", "live": True},
-            {**new_call, "when": "on", "live": False},
+        fast_path = client.get(URL, params={"sha": fast_path_commit.sha}).json()["flags"][1]
+        assert (fast_path["status"], fast_path["enabled"]) == ("off", False)
+        assert fast_path["guarded_edges"] == [
+            {**fast_call, "when": "on", "live": False},
+            {**standard_call, "when": "off", "live": True},
         ]
-        assert checkout["dead_calls"] == [new_call]
+        assert fast_path["dead_calls"] == [fast_call]
         assert sdk.calls == 2
 
         assert client.get(URL, params={"sha": "bad-sha"}).status_code == 404
@@ -154,7 +157,7 @@ def test_remote_environment_lookup(
 ) -> None:
     raw_flags = [
         {
-            "feature": {"id": 1, "name": "new_checkout"},
+            "feature": {"id": 1, "name": "fast_path"},
             "enabled": enabled,
             "feature_state_value": value,
         }
@@ -187,33 +190,35 @@ def test_remote_environment_lookup(
     assert send.call_args.kwargs["timeout"] == 4
 
     payload = response.json()
-    checkout = next(flag for flag in payload["flags"] if flag["name"] == "new_checkout")
-    assert checkout["status"] == expected_status
+    fast_path = next(flag for flag in payload["flags"] if flag["name"] == "fast_path")
+    assert fast_path["status"] == expected_status
     if expected_status == "live":
         assert payload["flagsmith"]["connected"] is True
-        assert checkout["value"] == 15
+        assert fast_path["value"] == 15
     else:
         assert payload["flagsmith"]["connected"] is False
         assert payload["flagsmith"]["error"] == "Flagsmith returned invalid flag data"
-        assert (checkout["enabled"], checkout["value"]) == (None, None)
+        assert (fast_path["enabled"], fast_path["value"]) == (None, None)
     assert TEST_KEY not in response.text
     assert TEST_KEY not in caplog.text
 
 
-def test_stale_in_every_listed_commit(demo_data: Path, tmp_path: Path, settings: Settings) -> None:
+def test_stale_in_every_listed_commit(
+    fixture_data: Path, tmp_path: Path, settings: Settings
+) -> None:
     now = 0.0
-    index = load_index(demo_data / "shop-demo")
+    index = load_index(fixture_data / "review-fixture")
     trimmed = tmp_path / "trimmed"
-    analyze_repo(index["repo_path"], trimmed / "shop-demo", branch="main", max_commits=5)
+    analyze_repo(index["repo_path"], trimmed / "review-fixture", branch="main", max_commits=5)
     assert settings.scopes_path is not None
     settings.scopes_path.write_text(
-        json.dumps({"environment": "Production", "repos": {"shop-demo": ["holiday_discount"]}})
+        json.dumps({"environment": "Production", "repos": {"review-fixture": ["special_rate"]}})
     )
-    sdk = FakeFlagsmith({"holiday_discount": (False, 15)})
+    sdk = FakeFlagsmith({"special_rate": (False, 15)})
     flagsmith = FlagsmithClient(TEST_KEY, settings.flagsmith_api_url, sdk=sdk, clock=lambda: now)
     with TestClient(create_app(settings, flagsmith_client=flagsmith)) as client:
         discount = client.get(URL).json()["flags"][1]
-        assert discount["name"] == "holiday_discount"
+        assert discount["name"] == "special_rate"
         assert discount["stale"] is False
         assert discount["stale_reason"] is None
 
@@ -229,16 +234,16 @@ def test_stale_in_every_listed_commit(demo_data: Path, tmp_path: Path, settings:
         assert after["stale"] is True
         assert after["stale_reason"] == "Off in Flagsmith and unchanged for 5 analyzed commits"
         assert after["dead_calls"] == [
-            {"source": "shop.cart:Cart.total", "target": "shop.pricing:apply_holiday_discount"}
+            {"source": "billing.pricing:quote", "target": "billing.pricing:discount"}
         ]
 
-        sdk.states["holiday_discount"] = (True, None)
+        sdk.states["special_rate"] = (True, None)
         now += 10
         discount = client.get(URL).json()["flags"][1]
         assert discount["stale_reason"] == "On in Flagsmith and unchanged for 5 analyzed commits"
         assert discount["dead_calls"] == []
 
-        sdk.states["holiday_discount"] = (True, 15)
+        sdk.states["special_rate"] = (True, 15)
         now += 10
         discount = client.get(URL).json()["flags"][1]
         assert discount["value"] == 15
@@ -271,7 +276,7 @@ def test_code_only_when_flagsmith_unavailable(
             else "Could not fetch flags from Flagsmith"
         ),
     }
-    assert [flag["name"] for flag in body["flags"]] == ["holiday_discount", "new_checkout"]
+    assert [flag["name"] for flag in body["flags"]] == ["fast_path", "special_rate"]
     for flag in body["flags"]:
         assert (flag["status"], flag["enabled"], flag["value"]) == ("unknown", None, None)
         assert flag["checks"]

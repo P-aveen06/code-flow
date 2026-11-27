@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   chooseFlowView, FLOW_DIRECTIONS, FLOW_VIEWS, readPreviewOverrides,
-  replaceDirectionOverride, replaceSyncOverride, replaceViewOverride, SYNC_MODES,
+  replaceDirectionOverride, replaceViewOverride,
 } from "./view";
 
 describe("chooseFlowView", () => {
@@ -25,17 +25,17 @@ describe("chooseFlowView", () => {
 });
 
 describe("readPreviewOverrides", () => {
-  const search = "?view=overlay&direction=horizontal&sync=global_toggle&commit=abc";
+  const search = "?view=overlay&direction=horizontal&commit=abc";
 
   it("reads all URL overrides with previews enabled", () => {
     expect(readPreviewOverrides(search, true)).toEqual({
-      viewOverride: "overlay", directionOverride: "horizontal", syncOverride: "global_toggle",
+      viewOverride: "overlay", directionOverride: "horizontal",
     });
   });
 
   it("ignores all URL overrides with previews disabled", () => {
     const overrides = readPreviewOverrides(search, false);
-    expect(overrides).toEqual({ viewOverride: null, directionOverride: null, syncOverride: null });
+    expect(overrides).toEqual({ viewOverride: null, directionOverride: null });
     expect(chooseFlowView(overrides.viewOverride, () => "overlay_summary")).toBe("overlay_summary");
   });
 });
@@ -55,8 +55,8 @@ describe("replaceViewOverride", () => {
     return { state, replaceState, pushState, dispatchEvent };
   }
 
-  const repo = "http://localhost:5173/repo/shop-demo";
-  const query = "?commit=f376f9c&reviewer=demo-1";
+  const repo = "http://localhost:5173/repo/review-fixture";
+  const query = "?commit=a9b66f5&reviewer=demo-1";
 
   it.each(FLOW_VIEWS)("previews %s by replacing the current history entry", (view) => {
     const { state, replaceState, pushState, dispatchEvent } = mockLocation(repo + query + "#flow");
@@ -89,12 +89,5 @@ describe("replaceViewOverride", () => {
     expect(readPreviewOverrides(window.location.search, true).directionOverride).toBe("vertical");
     replaceDirectionOverride(null);
     expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(page + "#flow"));
-  });
-
-  it.each(SYNC_MODES)("replaces sync with %s and preserves the other previews", (mode) => {
-    const page = repo + query + "&view=overlay&direction=vertical";
-    const { state, replaceState } = mockLocation(page + "#flow");
-    replaceSyncOverride(mode);
-    expect(replaceState).toHaveBeenCalledExactlyOnceWith(state, "", new URL(`${page}&sync=${mode}#flow`));
   });
 });

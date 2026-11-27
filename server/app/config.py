@@ -8,8 +8,6 @@ from pathlib import Path
 from codeflow.diff import LONG_FLOW_MIN_DEPTH
 
 DEFAULT_FLAGSMITH_API_URL = "http://localhost:8000/api/v1/"
-DEFAULT_AUTO_SYNC_INTERVAL = 300
-MIN_AUTO_SYNC_INTERVAL = 10
 MAX_IMPORT_COMMITS = 200
 DEFAULT_SNAPSHOT_CACHE_SIZE = 16
 
@@ -44,7 +42,6 @@ class Settings:
     flagsmith_server_key: str | None = field(default=None, repr=False)
     scopes_path: Path | None = None
     long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH
-    auto_sync_interval: int = DEFAULT_AUTO_SYNC_INTERVAL
     max_import_commits: int = MAX_IMPORT_COMMITS
     snapshot_cache_size: int = DEFAULT_SNAPSHOT_CACHE_SIZE
 
@@ -67,16 +64,6 @@ class Settings:
                 raise ValueError
         except ValueError:
             raise ValueError("CODEFLOW_LONG_FLOW_MIN_DEPTH must be a positive integer.") from None
-        try:
-            interval = int(
-                values.get("CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS") or DEFAULT_AUTO_SYNC_INTERVAL
-            )
-            if interval < MIN_AUTO_SYNC_INTERVAL:
-                raise ValueError
-        except ValueError:
-            raise ValueError(
-                f"CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS must be an integer of at least {MIN_AUTO_SYNC_INTERVAL}."
-            ) from None
         try:
             max_commits = int(values.get("CODEFLOW_MAX_IMPORT_COMMITS") or MAX_IMPORT_COMMITS)
             if not 1 <= max_commits <= MAX_IMPORT_COMMITS:
@@ -102,7 +89,6 @@ class Settings:
                 "CODEFLOW_FLAGSMITH_SCOPES_PATH", data_dir / "flagsmith_scopes.json"
             ),
             long_flow_min_depth=min_depth,
-            auto_sync_interval=interval,
             max_import_commits=max_commits,
             snapshot_cache_size=cache_size,
         )

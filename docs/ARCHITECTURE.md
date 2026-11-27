@@ -34,10 +34,10 @@ JSON, so renderers can be swapped without touching the analyzer.
 | Path | What it is | Tech |
 |---|---|---|
 | `analyzer/` | Python package `codeflow` + CLI `code-flow`. Parses code, builds graphs, walks git history, diffs snapshots, detects Flagsmith flag checks, exports Mermaid. Open-source core. | Python 3.11+, `tree-sitter`, `tree-sitter-python`, plain `git` via subprocess |
-| `server/` | FastAPI app. Serves snapshots, diffs, code snippets, and live flag state. One spawned worker process handles Git imports and refresh analysis in the same container. | FastAPI, uvicorn, Python `multiprocessing`, `flagsmith` Python SDK |
+| `server/` | FastAPI app. Serves snapshots, diffs, code snippets, and live flag state. Runs Git imports and manual refreshes on a single background thread. | FastAPI, uvicorn, `flagsmith` Python SDK |
 | `web/` | Reviewer UI: commit timeline, flow diff in three styles, Flagsmith mode panel. Sends experiment exposure and success events to Flagsmith. | Vite, React, TypeScript, `@xyflow/react`, `elkjs`, `@flagsmith/flagsmith` JS SDK |
 | `simulator/` | Generates simulated reviewers, each a Flagsmith identity, who receive a variant and send review events to Flagsmith Experimentation. | Python, `flagsmith` SDK |
-| `examples/` | Scripts that build a small demo repo with a scripted git history (flag-gated checkout flow), and a script to analyze Flagsmith/flagsmith. | bash / Python |
+| `examples/` | Script to analyze the `api/` folder of Flagsmith/flagsmith. | bash / Python |
 
 ## Graph JSON (`code-flow/graph@1`)
 
@@ -46,30 +46,30 @@ One file per commit: `<out>/snapshots/<sha>.json`.
 ```json
 {
   "schema": "code-flow/graph@1",
-  "repo": "shop-demo",
+  "repo": "example-api",
   "commit": {"sha": "abc123", "parents": ["def456"], "author": "…", "date": "2026-11-26T10:00:00Z", "message": "…"},
   "nodes": [
     {
-      "id": "shop.checkout:new_checkout",
+      "id": "billing.handlers:fast_submit",
       "kind": "function",               // function | method | class | module
-      "name": "new_checkout",
-      "module": "shop.checkout",
-      "file": "shop/checkout.py",
+      "name": "fast_submit",
+      "module": "billing.handlers",
+      "file": "billing/handlers.py",
       "line": 12, "end_line": 30,
       "body_hash": "sha1 of normalized body"   // drives "changed" detection
     }
   ],
   "edges": [
     {
-      "source": "shop.api:checkout",
-      "target": "shop.checkout:new_checkout",
+      "source": "billing.api:submit",
+      "target": "billing.handlers:fast_submit",
       "kind": "call",
       "line": 22,
-      "guard": {"flag": "new_checkout", "when": "on"}   // null when the call is not behind a flag
+      "guard": {"flag": "fast_path", "when": "on"}   // null when the call is not behind a flag
     }
   ],
   "flags": [
-    {"name": "new_checkout", "file": "shop/api.py", "line": 20, "function": "shop.api:checkout", "call": "is_feature_enabled"}
+    {"name": "fast_path", "file": "billing/api.py", "line": 20, "function": "billing.api:submit", "call": "is_feature_enabled"}
   ]
 }
 ```
@@ -108,12 +108,12 @@ source at a commit.
 ```json
 {
   "schema": "code-flow/commits@1",
-  "repo": "shop-demo",
-  "repo_path": "/path/to/shop-demo",
+  "repo": "example-api",
+  "repo_path": "/path/to/example-api",
   "branch": "main",
   "source_root": "",
   "commits": [
-    {"sha": "abc123", "parents": [], "author": "code-flow demo", "date": "2026-11-20T09:00:00Z", "message": "Add cart", "base": ""}
+    {"sha": "abc123", "parents": [], "author": "code-flow demo", "date": "2026-11-20T09:00:00Z", "message": "Add pricing", "base": ""}
   ]
 }
 ```
@@ -137,7 +137,7 @@ empty graph at a root commit or shallow history boundary.
   "base": "def456", "head": "abc123",
   "nodes": {"added": ["id"], "removed": ["id"], "changed": ["id"]},
   "edges": {"added": [{"source": "…", "target": "…"}], "removed": [{"source": "…", "target": "…"}]},
-  "flags": {"added": ["new_checkout"], "removed": []},
+  "flags": {"added": ["fast_path"], "removed": []},
   "stats": {"nodes_added": 3, "nodes_removed": 1, "nodes_changed": 2, "edges_added": 4, "edges_removed": 1}
 }
 ```
@@ -164,7 +164,7 @@ The Docker image listens on `PORT` when supplied. The
 `CODEFLOW_DATA_DIR` default is `data/` at the code-flow repo root. Relative
 paths from the repo-root `.env` resolve against the repo root. Paths from
 process environment variables resolve against the working directory.
-`{repo}` is a plain analyzer output directory name such as `shop-demo`,
+`{repo}` is a plain analyzer output directory name such as `example-api`,
 with no `/`, `\`, or `..`. SHA parameters accept full SHAs or unique prefixes,
 and responses use full SHAs.
 
@@ -197,19 +197,6 @@ and responses use full SHAs.
   Refresh reuses cached parses and snapshots and publishes the refreshed
   output and limit together. The previous output remains readable during a
   refresh and after a failure.
-- `GET /api/auto-sync` returns `interval_seconds`, `all` (boolean), `repos`
-  (repository IDs mapped to booleans), and `status` (repository IDs mapped to
-  refresh status and counters). Status has nullable UTC timestamps
-  `last_started`, `last_finished`, and `next_run`, a nullable `last_result`
-  (`up_to_date`, `new_commits`, or `error`), and nullable `new_commits` and
-  `error` fields. The in-memory counters are `runs` (automatic jobs started),
-  `fetches` (Git fetch attempts), `analysed_commits` (graphs built, including
-  a missing diff base), and `seconds` (wall time spent in automatic refresh
-  jobs). A separate `manual_runs` counter tracks manual jobs started.
-- `PUT /api/auto-sync` merges optional `all` and `repos` fields into the
-  saved settings and returns the same shape as GET. A malformed body returns
-  400, an unknown repository returns 404, and a repository without a GitHub
-  import returns 409.
 - `GET /api/repos/{id}/status` returns `id`, `name`, `status`, `message`,
   `current` and `total` commit counts, `seconds` elapsed, and nullable `warning`
   and `error` fields. The nullable integer `new_commits` counts SHAs in a
@@ -224,16 +211,12 @@ and responses use full SHAs.
 - Clones live in `data/repos/<owner>__<repo>`. Analysis outputs live in
   `data/<id>/`, with source URL, name, subfolder, commit limit, and import time
   in `data/<id>/source.json`.
-- The app starts one long-lived analysis worker using Python's spawn context.
-  A queue in the API process serializes imports and refreshes and deduplicates
-  active repository IDs. The worker runs Git, keeps the blob parse cache, and
-  writes a staged copy of the analysis while the API serves the last published
-  snapshots. A pipe carries progress, refresh counts, and the result back to
-  the API, which swaps in completed output under the store lock and invalidates
-  its caches. If the worker exits during a job, that job goes to `error` and
-  the next job starts a replacement worker. On shutdown, the scheduler stops
-  queuing refreshes, the import queue drains, and the app joins the worker.
-- `GET /api/repos/{repo}/commits` returns `{"repo": "shop-demo", "branch": "main", "commits": […]}`.
+- A single background thread handles imports and manual refreshes in the API
+  process. It reuses a blob parse cache and writes staged analysis while the API
+  serves the published snapshots. On success the store publishes the staged
+  output under its lock and invalidates its caches. Shutdown drains the import
+  queue before the app exits.
+- `GET /api/repos/{repo}/commits` returns `{"repo": "example-api", "branch": "main", "commits": […]}`.
   Entries are oldest first and include the commit index fields plus `stats`
   (the five diff counts) and `summary`. Legacy indexes without `base` use the
   first parent or an empty graph for a root commit.
@@ -277,26 +260,11 @@ and responses use full SHAs.
   that revision. Context symbols show head source with zero counts. The
   endpoint returns 404 for unknown nodes and unavailable source.
 - `GET /api/repos/{repo}/code?sha=SHA&file=PATH&start=N&end=M` returns
-  `{"sha": "…", "file": "shop/checkout.py", "start": 15, "end": 19, "lines": [{"number": 15, "text": "def new_checkout(…):"}, …]}`.
+  `{"sha": "…", "file": "billing/handlers.py", "start": 15, "end": 19, "lines": [{"number": 15, "text": "def fast_submit(…):"}, …]}`.
   Paths are repo-relative without `..`. Lines are 1-based and inclusive.
   Bounds are clamped to the file. Omit both to get the whole file.
 - Unknown repos, SHAs, or files return 404 with `{"detail": "…"}`. Bad
   parameters return 400 or FastAPI's 422 for type errors.
-
-### Automatic refresh
-
-The server loads `data/auto_sync.json` once at startup and writes updates
-atomically. The file uses schema `code-flow/auto-sync@1` and fields `all`
-and `repos`. A missing or invalid file starts with both switches off.
-For a published GitHub import, either `all: true` or `repos[id]: true`
-enables a refresh. The scheduler runs for the app lifespan and checks for
-newly enabled repositories on its next tick. It submits due refreshes to
-the existing single worker and skips repos with queued or running jobs.
-The switches are shared for a data directory, including changes made in
-preview mode.
-`CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS` sets the interval (300 seconds by
-default, minimum 10). Tests and scripts can supply `auto_sync_interval`
-to `create_app`.
 
 ## Colours
 
@@ -320,9 +288,8 @@ simulation environments. Later Production runs report any state differences.
 
 | Tag | Flags |
 |---|---|
-| `code-flow` | `flow_view`, `flow_direction`, `sync_mode`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
+| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
 | `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
-| `repo:shop-demo` | `new_checkout`, `holiday_discount` |
 
 The web app uses `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` and the API server uses
 `CODEFLOW_FLAGSMITH_SERVER_KEY`. Use Development keys for `develop` and
@@ -334,10 +301,9 @@ also the web client key for Development. See `.env.example` for configuration.
 |---|---|---|
 | `flow_view` | multivariate string | The Track 01 experiment. Control `side_by_side`; variants `overlay` and `overlay_summary`. Allocation 34/33/33 while the test runs; roll out the winner by setting it to 100%. |
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
-| `sync_mode` | multivariate string | Commit refresh experiment with `manual_button`, `per_repo_toggle`, and `global_toggle`, split 34/33/33 in Development. Production is disabled with `manual_button` as the default and zero treatment allocation. |
 | `flagsmith_mode` | boolean | Toggles flag findings and live colouring. The Flagsmith section always shows the active flow settings. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
-| `variant_preview` | boolean | Enables the view, direction, and sync preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
+| `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 
 The web app identifies each reviewer to Flagsmith (`flagsmith.identify(reviewerId)`),
 so variant allocation is sticky per reviewer. View outcome events include the
@@ -347,15 +313,14 @@ assigned variant.
 
 With `variant_preview` enabled, the viewer accepts `?view=side_by_side`,
 `?view=overlay`, or `?view=overlay_summary`, and `?direction=horizontal` or
-`?direction=vertical`. The landing page and viewer also accept
-`?sync=manual_button`, `?sync=per_repo_toggle`, or `?sync=global_toggle`.
+`?direction=vertical`.
 Any preview override skips experiment exposures and keeps review outcomes
 local. With previews disabled, the app uses the Flagsmith assignments and
 keeps short flows horizontal.
 
 - **A `side_by_side`**: two synchronized canvases, before (base) and after (head).
 - **B `overlay`**: one canvas with the union graph, coloured added/removed/changed.
-- **C `overlay_summary`**: B plus a one-line summary banner ("checkout now routes to `new_checkout` behind flag `new_checkout`; 3 functions added, 1 removed").
+- **C `overlay_summary`**: B plus a one-line summary banner ("submit now routes to `fast_submit` behind flag `fast_path`; 3 functions added, 1 removed").
   The summary is rule-based by default (deterministic, no key needed); an LLM
   provider can be plugged in behind `ai_summary`.
 
@@ -402,58 +367,11 @@ The distribution below uses `hops=1` and the indexed diff base for each commit.
 | Analysis | Indexed commits | Flow-changing commits | Depth 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Flagsmith__flagsmith` | 50 | 14 | 1 | 2 | 6 | 1 | 2 | 1 | 1 |
-| `openai__whisper` | 30 | 12 | 1 | 5 | 6 | 0 | 0 | 0 | 0 |
-| `openai__codex` | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 The simulator always samples eligible one-hop commits using the default
-cutoff. It prefers the Flagsmith analysis and falls back to another local
-analysis with long flows. `simulator/experiments/flow_direction.yaml` records
-the hypothesis and null behaviour assumptions. The setup and experiment CLI
+cutoff and the Flagsmith API analysis. The hypothesis and null behaviour
+assumptions are in `simulator/experiments/flow_direction.yaml`. The setup and experiment CLI
 dry runs preview the new flag, both metrics, and the 50/50 experiment.
-
-### Commit freshness experiment
-
-`sync_mode` runs only in Development. The hypothesis is that auto-sync
-shows new commits sooner without a noticeable cost in page load or server
-load. The landing page evaluates the assigned variant with
-`getExperimentFlag('sync_mode')` outside previews.
-
-- **A `manual_button` (34%)** uses **Check for new commits** in the viewer.
-- **B `per_repo_toggle` (33%)** adds an **Auto-sync** switch per GitHub
-  import on the landing page.
-- **C `global_toggle` (33%)** adds one **Auto-sync all repos** switch.
-
-The manual button is available in all three variants. The two auto-sync
-variants show each GitHub import's sync status on the landing page. The
-[benchmark harness](../scripts/sync_benchmark.py) compares three history sizes
-at one and five repositories with isolated local upstreams and a real
-server and Chrome. Its dated reports in `docs/benchmarks/` include the raw
-samples, observed rates, and formulas for the 300-second projections. CPU
-covers the API and its descendants. The report lists separate API and worker
-tree RSS peaks and the peak of their simultaneous sum. Use
-`--report-name sync_mode-worker` to choose a filename for a rerun. The default
-is `sync_mode-<UTC date>` and existing reports are protected.
-Each case records `suspended: false` and `max_sample_gap_s`. A clock
-divergence over 3 seconds or a sampling gap over 10 seconds triggers one
-retry. The benchmark resumes from completed cases and imported templates
-in its workdir. Case and template keys include the code-flow commit and
-process sampling version. Use `--fresh` to remeasure cases with the cached
-templates.
-The report's `settings.elapsed_s` totals the active time saved with the
-completed cases.
-The [measured simulator config](../simulator/experiments/sync_mode.yaml)
-assigns seeded workload traits to the default panel. After Flagsmith assigns
-a variant, the simulator replays values from the matching benchmark cell.
-It adds a modeled wait to measured refresh-to-visible time for freshness.
-See the [results record](experiment-results.md#sync_mode-development) for
-the measurement and reviewer assumptions.
-
-| Metric | Event | Aggregation | Expected direction |
-|---|---|---|---|
-| New commit seen within 5 min (primary) | `new_commit_seen_within_5min` | Occurrence | Increase |
-| Freshness (s) | `sync_freshness_s` | Mean | Decrease |
-| Landing page load (ms) | `sync_page_load_ms` | Mean | Decrease |
-| Server CPU (ms per hour) | `sync_server_cpu_ms` | Mean | Decrease |
 
 ## Flagsmith mode
 
@@ -521,8 +439,8 @@ code-flow/
   server/
     pyproject.toml
     app/{config,main,store,flagsmith_client}.py
-    app/importer.py    queues GitHub imports and reports progress
-    app/import_worker.py  runs Git and stages analysis in a child process
+    app/importer.py        queues GitHub imports and reports progress
+    app/import_analysis.py fetches commits and stages analysis
     tests/
   web/
     package.json, vite.config.ts
@@ -531,6 +449,5 @@ code-flow/
   simulator/
     simulate.py, behaviour.yaml
   examples/
-    make_shop_demo.sh   builds examples/shop-demo as a git repo with scripted commits
     analyze_flagsmith.sh
 ```

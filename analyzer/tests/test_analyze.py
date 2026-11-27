@@ -286,22 +286,6 @@ def test_progress_precedes_each_listed_snapshot_including_cached_ones(make_repo,
     assert progress == [(1, 2, first.commit, True), (2, 2, second.commit, True)]
 
 
-def test_analysis_callback_counts_new_graphs_including_unlisted_base(make_repo, tmp_path):
-    repo = make_repo([{"api.py": "def first(): pass\n"}, {"api.py": "def second(): pass\n"}])
-    out = tmp_path / "output"
-    analysed = []
-    options = {"max_commits": 1, "on_analyzed": lambda: analysed.append(None)}
-
-    (head,) = analyze_repo(repo.path, out, **options)
-    assert len(analysed) == 2
-    analyze_repo(repo.path, out, **options)
-    assert len(analysed) == 2
-    base_sha = head.commit.parents[0]
-    (out / "snapshots" / f"{base_sha}.json").unlink()
-    analyze_repo(repo.path, out, **options)
-    assert len(analysed) == 3
-
-
 def test_capped_history_writes_and_backfills_unlisted_parent(make_repo, tmp_path):
     repo = make_repo(
         [{"api.py": "def old(): pass\n"}, {"api.py": "def new(): pass\n"}, {"notes.md": "Notes"}]

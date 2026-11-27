@@ -8,12 +8,6 @@ fi
 # Require a fresh destination so a local run can't overwrite analyzed data.
 mkdir -- "$1"
 data_dir=$(cd -- "$1" && pwd -P)
-repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-
-shop="$data_dir/repos/shop-demo"
-bash "$repo_root/examples/make_shop_demo.sh" "$shop"
-code-flow analyze "$shop" --branch main --out "$data_dir/shop-demo"
-
 url=https://github.com/Flagsmith/flagsmith
 pin=0c37fca299b94d54760fe7fa76818d19f05bf639
 subdir=api

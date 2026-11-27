@@ -7,7 +7,7 @@ from pathlib import Path
 from codeflow.analyze import diff_base, load_index, load_snapshot
 from codeflow.diff import LONG_FLOW_MIN_DEPTH, diff_graphs, flow_depth
 
-REPOS = ("Flagsmith__flagsmith", "shop-demo")
+FLAGSMITH_REPO = "Flagsmith__flagsmith"
 NODE_COUNTS = ("nodes_added", "nodes_removed", "nodes_changed")
 EDGE_COUNTS = ("edges_added", "edges_removed")
 
@@ -49,26 +49,16 @@ def _repo_diffs(directory: Path, *, long_flows_only: bool) -> list[DiffSample]:
 
 
 def load_diffs(data_dir: Path, *, long_flows_only: bool = False) -> tuple[str, list[DiffSample]]:
-    """Prefer Flagsmith, then find another analysis with eligible commits."""
-    repos = list(REPOS)
-    if long_flows_only and data_dir.is_dir():
-        repos.extend(
-            directory.name
-            for directory in sorted(data_dir.iterdir())
-            if directory.name not in REPOS and (directory / "commits.json").is_file()
-        )
-    for repo in repos:
-        try:
-            samples = _repo_diffs(data_dir / repo, long_flows_only=long_flows_only)
-        except FileNotFoundError:
-            continue
-        if samples:
-            return repo, samples
+    """Read eligible commits from the Flagsmith API demo."""
+    try:
+        samples = _repo_diffs(data_dir / FLAGSMITH_REPO, long_flows_only=long_flows_only)
+    except FileNotFoundError:
+        samples = []
+    if samples:
+        return FLAGSMITH_REPO, samples
     if long_flows_only:
         raise ValueError(
             f"No analyzed commits with long flows (flow_depth >= {LONG_FLOW_MIN_DEPTH} at one hop). "
-            "Import Flagsmith/flagsmith or analyze another repository with long call chains."
+            "Run make analyze-flagsmith first."
         )
-    raise ValueError(
-        "No analyzed commits with flow changes. Import Flagsmith/flagsmith or analyze shop-demo first."
-    )
+    raise ValueError("No analyzed commits with flow changes. Run make analyze-flagsmith first.")

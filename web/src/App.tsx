@@ -3,7 +3,6 @@ import { AppLink } from "./AppLink";
 import { Landing } from "./pages/Landing";
 import { Viewer } from "./pages/Viewer";
 import { legacyRepoRedirect, navigate, parsePath, useLocation } from "./router";
-import { syncPreviewPath } from "./view";
 
 export default function App() {
   const { pathname, search, hash } = useLocation();
@@ -17,13 +16,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <AppLink href={syncPreviewPath("/", new URLSearchParams(search).get("sync"))} className="topbar__brand">
+        <AppLink href="/" className="topbar__brand">
           <span className="topbar__brand-mark" aria-hidden="true">↳</span>
           <strong>code-flow</strong>
         </AppLink>
       </header>
       {route.page === "viewer" && <Viewer key={route.id} id={route.id} search={search} />}
-      {route.page === "landing" && !redirect && <Landing search={search} />}
+      {route.page === "landing" && !redirect && <Landing />}
       {route.page === "not-found" && (
         <main className="app-message">
           <div className="message-stack">

@@ -6,7 +6,7 @@ import type { ReviewContext } from "./events";
 import { readPreviewOverrides } from "./view";
 
 const context: ReviewContext = {
-  repo: "shop-demo",
+  repo: "review-fixture",
   head: "abc123",
   base: "",
   view: "overlay_summary",
@@ -28,7 +28,7 @@ describe("review timing", () => {
       view: "overlay_summary",
       reviewerId: "demo-1",
       devOverride: true,
-      repo: "shop-demo",
+      repo: "review-fixture",
       head: "abc123",
       base: "",
     });

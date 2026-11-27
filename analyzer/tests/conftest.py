@@ -80,20 +80,68 @@ def make_repo(git_available: None, tmp_path: Path) -> Callable[[list[Changes]], 
 
 
 @pytest.fixture
-def make_shop_demo(git_available: None, tmp_path: Path) -> Callable[[], tuple[Path, str]]:
-    def generate() -> tuple[Path, str]:
-        script = Path(__file__).resolve().parents[2] / "examples" / "make_shop_demo.sh"
-        repo = tmp_path / "shop demo"
-        result = subprocess.run(
-            ["bash", str(script), repo.name],
-            cwd=tmp_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return repo, result.stdout
+def workflow_repo(make_repo: Callable[[list[Changes]], FixtureRepo]) -> FixtureRepo:
+    return make_repo(
+        [
+            {
+                "workflow/api.py": "from .jobs import process\n\ndef run():\n    return process()\n",
+                "workflow/jobs.py": "def process():\n    return 1\n",
+                "workflow/rates.py": (
+                    'def rate():\n    if client.has_feature("tiered_rate"):\n'
+                    "        return 2\n    return 1\n"
+                ),
+            },
+            {
+                "workflow/api.py": """\
+from .jobs import process_fast, process_standard
 
-    return generate
+
+def run():
+    if client.is_feature_enabled("fast_path"):
+        return process_fast()
+    else:
+        return process_standard()
+""",
+                "workflow/jobs.py": """\
+from .rates import rate
+
+
+def process():
+    return 1
+
+
+def process_standard():
+    return rate()
+
+
+def process_fast():
+    return rate()
+""",
+            },
+            {
+                "workflow/jobs.py": """\
+from .rates import rate
+
+
+def process_standard():
+    return rate()
+
+
+def process_fast():
+    processor = Processor()
+    return processor.send()
+
+
+class Processor:
+    def send(self):
+        return self.prepare()
+
+    def prepare(self):
+        return rate()
+""",
+            },
+        ]
+    )
 
 
 @pytest.fixture

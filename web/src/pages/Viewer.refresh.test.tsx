@@ -11,7 +11,7 @@ vi.mock("../flags", async (importOriginal) => ({
   ...await importOriginal<typeof import("../flags")>(),
   useCodeFlowFlags: () => ({
     ready: true, flowView: "overlay", flagsmithMode: false, variantPreview: false, reviewerId: "demo",
-    viewOverride: null, directionOverride: null, syncOverride: null, syncMode: "manual_button",
+    viewOverride: null, directionOverride: null,
   }),
 }));
 vi.mock("../useDiff", () => ({

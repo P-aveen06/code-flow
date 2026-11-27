@@ -1,7 +1,7 @@
 import { apiUrl } from "./config";
 import { waitFor } from "./waitFor";
 import type {
-  AutoSyncResponse, AutoSyncSettings, CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GraphSnapshot, ImportRequest, ImportResponse,
+  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GraphSnapshot, ImportRequest, ImportResponse,
   ImportStatus, Repo, RepoFlags,
 } from "./types";
 
@@ -84,18 +84,6 @@ export function fetchRepoStatus(id: string, signal?: AbortSignal) {
 
 export function refreshRepo(id: string, signal?: AbortSignal) {
   return requestJson<ImportResponse>(`${repoPath(id)}/refresh`, signal, { method: "POST" });
-}
-
-export function fetchAutoSync(signal?: AbortSignal) {
-  return requestJson<AutoSyncResponse>("/auto-sync", signal, { cache: "no-store" });
-}
-
-export function updateAutoSync(body: Partial<AutoSyncSettings>, signal?: AbortSignal) {
-  return requestJson<AutoSyncResponse>("/auto-sync", signal, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
 }
 
 export function fetchCommits(repo: string, signal?: AbortSignal) {

@@ -14,7 +14,7 @@ from diffs import DiffSample
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / "data" / "shop-demo"
+    directory = tmp_path / "data" / "Flagsmith__flagsmith"
     directory.mkdir(parents=True)
     stats = {
         "nodes_added": 3,
@@ -41,7 +41,7 @@ def test_dry_run_prints_a_simulated_summary(repo: Path, capsys: pytest.CaptureFi
     captured = capsys.readouterr()
     assert "Using Flagsmith environment code-flow/Development." in captured.out
     assert "Simulated reviewers (null model, dry run)" in captured.out
-    assert "shop-demo" in captured.out
+    assert "Flagsmith__flagsmith" in captured.out
     assert "Success rate" in captured.out
     assert "Median ms" in captured.out
     assert "Simulated persona counts" not in captured.out
@@ -317,7 +317,9 @@ def test_guard_blocks_the_recorded_production_panel_before_contacting_flagsmith(
 
     monkeypatch.setenv("CODEFLOW_FLAGSMITH_ENV_KEY", "test-key")
     monkeypatch.setenv("CODEFLOW_SIM_FLAGSMITH_ENV_KEY", "test-sim-key")
-    monkeypatch.setattr(simulate, "load_diffs", lambda *_, **__: ("shop-demo", [DiffSample(3, 4)]))
+    monkeypatch.setattr(
+        simulate, "load_diffs", lambda *_, **__: ("Flagsmith__flagsmith", [DiffSample(3, 4)])
+    )
     monkeypatch.setattr(simulate, "flagsmith_client", unexpected_client)
     args = ["--limit", "1", "--experiment", flag]
     production_args = [*args, "--environment", "Production"]

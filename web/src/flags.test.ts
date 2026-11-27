@@ -2,9 +2,9 @@ import { FlagSource } from "@flagsmith/flagsmith";
 import { describe, expect, it, vi } from "vitest";
 import {
   directionExposureKey, exposeDirectionAssignment, exposeFlowAssignment, readFlagSnapshot, readFlowDirection,
-  readReviewerId, readSyncMode,
+  readReviewerId,
 } from "./flags";
-import { FLOW_DIRECTIONS, FLOW_VIEWS, readPreviewOverrides, SYNC_MODES } from "./view";
+import { FLOW_DIRECTIONS, FLOW_VIEWS, readPreviewOverrides } from "./view";
 
 describe("reviewer identity", () => {
   it("generates an ID once and reuses it from storage", () => {
@@ -108,34 +108,6 @@ describe("experiment exposure", () => {
     const assigned = exposeFlowAssignment("demo-1", "rolled-out", null, undefined, readExperimentFlag);
     expect(assigned).toMatchObject({ view: "overlay_summary", exposed: false });
     expect(readExperimentFlag).toHaveBeenCalledOnce();
-  });
-});
-
-describe("sync mode assignment", () => {
-  const loaded = { source: FlagSource.SERVER, isLoading: false, isFetching: false, error: null };
-
-  it.each([
-    undefined, { enabled: false, value: "per_repo_toggle" }, { enabled: true, value: "unknown" },
-  ])("defaults to manual for %s", (flag) => {
-    expect(readSyncMode(flag, null)).toEqual({ syncMode: "manual_button", assignedSyncMode: null });
-  });
-
-  it.each(SYNC_MODES)("reads enabled server flag %s", (value) => {
-    const client = {
-      loadingState: loaded, hasFeature: () => false,
-      getAllFlags: () => ({ sync_mode: { enabled: true, value } }),
-    };
-    expect(readSyncMode(readFlagSnapshot(client).syncFlag, null).syncMode).toBe(value);
-  });
-
-  it("ignores cached assignments after a Flagsmith failure", () => {
-    const flags = readFlagSnapshot({
-      loadingState: { ...loaded, error: new Error("Unavailable") },
-      hasFeature: () => true,
-      getAllFlags: () => ({ sync_mode: { enabled: true, value: "global_toggle" } }),
-    });
-    const { syncOverride } = readPreviewOverrides("?sync=per_repo_toggle", flags.variantPreview);
-    expect(readSyncMode(flags.syncFlag, syncOverride).syncMode).toBe("manual_button");
   });
 });
 

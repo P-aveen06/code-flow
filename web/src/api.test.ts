@@ -15,17 +15,17 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("API client", () => {
   it("builds repo and commit URLs and returns JSON", async () => {
-    const repos = [{ name: "shop demo", branch: "main", commit_count: 1 }];
-    const history = { repo: "shop demo", branch: "main", commits: [] };
+    const repos = [{ name: "review fixture", branch: "main", commit_count: 1 }];
+    const history = { repo: "review fixture", branch: "main", commits: [] };
     mockFetch.mockResolvedValueOnce(Response.json(repos)).mockResolvedValueOnce(Response.json(history));
 
     await expect(fetchRepos()).resolves.toEqual([{
-      ...repos[0], id: "shop demo", url: null, subdir: null, status: "ready", message: "Ready", warning: null,
+      ...repos[0], id: "review fixture", url: null, subdir: null, status: "ready", message: "Ready", warning: null,
     }]);
-    await expect(fetchCommits("shop demo")).resolves.toEqual(history);
+    await expect(fetchCommits("review fixture")).resolves.toEqual(history);
     expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
       "https://flow.test/gateway/api/repos",
-      "https://flow.test/gateway/api/repos/shop%20demo/commits",
+      "https://flow.test/gateway/api/repos/review%20fixture/commits",
     ]);
   });
 
@@ -37,11 +37,11 @@ describe("API client", () => {
     mockFetch.mockResolvedValueOnce(Response.json([repo])).mockImplementation(async () => Response.json({}));
     await expect(fetchRepos()).resolves.toEqual([repo]);
     await fetchRepoStatus(repo.id);
-    await fetchSnapshot(repo.id, "f376f9c");
+    await fetchSnapshot(repo.id, "a9b66f5");
     expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
       "https://flow.test/gateway/api/repos",
       "https://flow.test/gateway/api/repos/Flagsmith__flagsmith/status",
-      "https://flow.test/gateway/api/repos/Flagsmith__flagsmith/snapshots/f376f9c",
+      "https://flow.test/gateway/api/repos/Flagsmith__flagsmith/snapshots/a9b66f5",
     ]);
   });
 

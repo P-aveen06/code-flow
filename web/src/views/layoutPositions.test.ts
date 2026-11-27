@@ -17,14 +17,14 @@ function sessionStorageFixture() {
 describe("session layout positions", () => {
   it("scopes saved positions and reset to the repo, commit, variant and direction", () => {
     const storage = sessionStorageFixture();
-    const key = layoutPositionKey("shop-demo", "head", "overlay_summary", "horizontal");
+    const key = layoutPositionKey("review-fixture", "head", "overlay_summary", "horizontal");
     const positions = new Map([["checkout", { x: -10, y: 120 }]]);
     writeLayoutPositions(key, positions, storage);
     expect(readLayoutPositions(key, storage)).toEqual(positions);
     expect(readLayoutPositions(layoutPositionKey("other", "head", "overlay_summary", "horizontal"), storage).size).toBe(0);
-    expect(readLayoutPositions(layoutPositionKey("shop-demo", "other", "overlay_summary", "horizontal"), storage).size).toBe(0);
-    const overlay = layoutPositionKey("shop-demo", "head", "overlay", "horizontal");
-    const vertical = layoutPositionKey("shop-demo", "head", "overlay_summary", "vertical");
+    expect(readLayoutPositions(layoutPositionKey("review-fixture", "other", "overlay_summary", "horizontal"), storage).size).toBe(0);
+    const overlay = layoutPositionKey("review-fixture", "head", "overlay", "horizontal");
+    const vertical = layoutPositionKey("review-fixture", "head", "overlay_summary", "vertical");
     expect(readLayoutPositions(overlay, storage).size).toBe(0);
     expect(readLayoutPositions(vertical, storage).size).toBe(0);
     writeLayoutPositions(overlay, positions, storage);
@@ -37,9 +37,9 @@ describe("session layout positions", () => {
 
   it("reads legacy positions for horizontal layouts and clears them on reset", () => {
     const storage = sessionStorageFixture();
-    const legacy = 'code-flow:layout:["shop-demo","head","overlay_summary"]';
-    const horizontal = layoutPositionKey("shop-demo", "head", "overlay_summary", "horizontal");
-    const vertical = layoutPositionKey("shop-demo", "head", "overlay_summary", "vertical");
+    const legacy = 'code-flow:layout:["review-fixture","head","overlay_summary"]';
+    const horizontal = layoutPositionKey("review-fixture", "head", "overlay_summary", "horizontal");
+    const vertical = layoutPositionKey("review-fixture", "head", "overlay_summary", "vertical");
     const positions = new Map([["checkout", { x: -10, y: 120 }]]);
     writeLayoutPositions(legacy, positions, storage);
     expect(readLayoutPositions(horizontal, storage)).toEqual(positions);

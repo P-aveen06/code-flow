@@ -24,16 +24,15 @@ simple and the docs clear.
 > **before/after diagrams side by side**.
 
 - Flag: `flow_view` (multivariate): `side_by_side` (control), `overlay`, `overlay_summary`.
-- Success event: reviewer clicks **Understood / Approve** (`understood`).
-- Secondary: time from `diff_viewed` to `understood`.
+- Success event: reviewer clicks **Yes, I understand it** (`diff_understood`).
+- Secondary: elapsed milliseconds from diagram render to the review answer, recorded with `diff_understood`.
 
 ## Scope (in) and (out)
 
 In: Python analyzer, per-commit graph JSON, diff, CLI, Mermaid export, web app
 (timeline + 3 diff views), Flagsmith-driven experiment with simulated
 reviewers, Flagsmith mode (flag-gated paths, live/off colouring, stale/orphan/
-unused flags) gated by the `flagsmith_mode` flag, a scripted demo repo, a run
-on Flagsmith/flagsmith.
+unused flags) gated by the `flagsmith_mode` flag, a demo of Flagsmith/flagsmith's `api/`.
 
 Out (post-hackathon): TypeScript analyzer, GitHub App / PR comment bot,
 hosted multi-tenant app, auth, runtime tracing.
@@ -46,8 +45,8 @@ push. Times are IST.
 | # | Target | Deliverable | Demo check |
 |---|---|---|---|
 | M0 | Nov 26, 2 PM | Repo scaffold, `AGENTS.md`, docs, `.env.example`, Python + web toolchains install cleanly | `uv run pytest` and `npm run build` succeed on empty skeleton |
-| M1 | Nov 26, 11 PM | Analyzer: Python parser, call resolution, graph JSON, git history walker (incremental by blob sha), diff, flag detection, Mermaid export, CLI. Demo repo script. | `code-flow analyze examples/shop-demo --out data/shop-demo` writes one snapshot per commit; `code-flow diff --base A --head B --format mermaid` prints a diagram that renders on GitHub |
-| M2 | Nov 26, 2 PM (done) | Server (snapshots, diffs, code snippets) + web app: commit timeline, overlay view, side-by-side view, click a node to see code, ELK layout of the changed neighbourhood | Open the web app, click through the shop-demo commits, watch the flow change |
+| M1 | Nov 26, 11 PM | Analyzer: Python parser, call resolution, graph JSON, first-parent Git history, diff, flag detection, Mermaid export, CLI | Analyze a temporary Git fixture and render a diff as Mermaid |
+| M2 | Nov 26, 2 PM (done) | Server and web viewer with a commit timeline, overlay, side-by-side diagrams, source, and ELK layout | Open the Flagsmith API analysis and step through the changes |
 | M2.5 | Nov 26, 11 PM (done 3 PM) | Landing page, "Analyze a GitHub repo" import with background analysis and progress, a self-explanatory viewer, OpenFeature flag detection, Flagsmith/flagsmith (`api/`, last ~50 commits) as the main demo | Paste `https://github.com/Flagsmith/flagsmith` + `api/` on the landing page, watch progress, open the repo and understand a real commit without being told what the screen means |
 | M3 | Nov 27, 6 PM (done Nov 26, 3:30 PM) | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings; seed a `flagsmith-api` project from `api/integrations/flagsmith/data/environment.json` | Flip a flag in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
 | M4 | Nov 28, 2 PM | Experiment: Flagsmith Experimentation enabled on the Docker instance, exposure + success events from web app and simulator, results, roll-out of the winner | Run 1,000+ simulated reviewers; Flagsmith's results page shows lift and win probability per variant; winner rolled out |
@@ -77,7 +76,6 @@ rule-based one). Never cut the experiment: it is what the track judges.
 - [x] `summary.py`: rule-based one-line summary of a diff
 - [x] `export_mermaid.py`: overlay diff as Mermaid `flowchart LR` with subgraphs per module and class-based colours
 - [x] `cli.py`: `code-flow analyze <repo> [--branch] [--max-commits] [--include] [--exclude] --out <dir>`, `code-flow diff <dir> --base --head [--format json|mermaid]`, `code-flow flags <dir> --commit`
-- [x] `examples/make_shop_demo.sh`: builds `examples/shop-demo/` git repo with ~8 commits (cart → payment → add `new_checkout` behind flag → refactor → remove dead path, etc.), deterministic dates
 - [x] Tests: fixture repo built in a tmp dir; snapshot and diff assertions
 
 ### M2 Server + web
@@ -89,14 +87,14 @@ rule-based one). Never cut the experiment: it is what the track judges.
 
 ### M2.5 Landing page, repo import, explained viewer, Flagsmith demo
 Why: a first-time user opening the M2 app had "zero idea what this web app does", no way to add a GitHub repo, and the demo must run on the real Flagsmith repo.
-- [x] A. Landing page at `/`: one-sentence pitch, 3-step "How it works", "Analyze a GitHub repo" form (URL, optional subfolder, recent commits, default 30), example buttons (Flagsmith/flagsmith with `api/`, shop-demo), list of analyzed repos with status; viewer moves to `/repo/:id`
+- [x] A. Landing page at `/`: one-sentence pitch, 3-step "How it works", "Analyze a GitHub repo" form (URL, optional subfolder, recent commits, default 30), an example button for Flagsmith/flagsmith with `api/`, list of analyzed repos with status; viewer moves to `/repo/:id`
 - [x] B. Repo import: `POST /api/repos {url, subdir, max_commits}` (public github.com only), clone into `data/repos/<owner>__<name>`, analyze in a background job, `GET /api/repos/{id}/status` (cloning / analyzing i of N / ready / error); web shows progress and opens the repo when ready; clear "Python only for now" message; re-analysis reuses the per-blob cache
 - [x] C. Self-explanatory viewer: header with the commit's message, author, date and counts in words; dismissible "What am I looking at?" panel; legend in words; empty state for commits with no Python flow change and a "hide commits with no flow change" toggle (on by default); review bar reworded ("Did this diagram help you understand the change?" Yes / No, answers feed a Flagsmith A/B test), raw timer hidden but still measured; summary only in `overlay_summary`
 - [x] D1. Analyzer: OpenFeature evaluation methods (`get_boolean_value`, `get_string_value`, `get_integer_value`, `get_float_value`, `get_object_value` and `_details` forms) in flag detection; progress callback; every listed commit gets a base snapshot when history is capped; performance on Flagsmith/flagsmith `api/`
 - [x] D2. Analyze Flagsmith/flagsmith `api/`, last ~50 commits, tests and migrations excluded; record analysis time and flag checks found
 
 ### M3 Flagsmith
-- [x] Flagsmith flags in the existing project `code-flow` (free org = one project), grouped by tags `code-flow`, `repo:flagsmith-api`, `repo:shop-demo`; scripted as `make flagsmith-setup` (`scripts/flagsmith_setup.py`), run on Nov 26
+- [x] Flagsmith flags in the existing project `code-flow` (free org = one project), grouped by tags `code-flow` and `repo:flagsmith-api`; scripted as `make flagsmith-setup` (`scripts/flagsmith_setup.py`), run on Nov 26
 - [x] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
 - [x] Server `flagsmith_client.py`: live flags for the analyzed app via server-side env key; cache 10 s
 - [x] `GET /api/repos/{repo}/flags?sha` returns detected flags + live state + findings (live/off/stale/orphan/unused)

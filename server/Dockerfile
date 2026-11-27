@@ -10,7 +10,6 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 FROM tooling AS demo
 COPY analyzer/ analyzer/
 RUN UV_PROJECT_ENVIRONMENT=/opt/demo uv sync --project analyzer --locked --no-dev --no-editable --no-cache
-COPY examples/make_shop_demo.sh examples/
 COPY scripts/build_demo_data.sh scripts/
 RUN PATH="/opt/demo/bin:$PATH" bash scripts/build_demo_data.sh /app/data
 

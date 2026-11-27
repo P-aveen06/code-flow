@@ -52,7 +52,7 @@ def test_use_flagsmith_stats_and_keep_only_flow_changes(tmp_path: Path) -> None:
             {"stats": _stats(edges_added=1)},
         ],
     )
-    _write_index(tmp_path, "shop-demo", [{"stats": _stats(nodes_added=3)}])
+    _write_index(tmp_path, "test-repo", [{"stats": _stats(nodes_added=3)}])
     assert load_diffs(tmp_path) == ("Flagsmith__flagsmith", [DiffSample(6), DiffSample(0)])
 
 
@@ -80,16 +80,8 @@ def test_compare_current_and_legacy_index_bases(tmp_path: Path) -> None:
     assert load_diffs(tmp_path) == ("Flagsmith__flagsmith", [DiffSample(3), DiffSample(0)])
 
 
-@pytest.mark.parametrize("flagsmith_exists", [False, True])
-def test_fall_back_to_shop_demo(tmp_path: Path, flagsmith_exists: bool) -> None:
-    if flagsmith_exists:
-        _write_index(tmp_path, "Flagsmith__flagsmith", [{"stats": _stats()}])
-    _write_index(tmp_path, "shop-demo", [{"stats": _stats(nodes_changed=2)}])
-    assert load_diffs(tmp_path) == ("shop-demo", [DiffSample(2)])
-
-
 def test_no_data_has_a_setup_error(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="analyze shop-demo first"):
+    with pytest.raises(ValueError, match="make analyze-flagsmith first"):
         load_diffs(tmp_path)
 
 
@@ -113,7 +105,7 @@ def _write_chain_history(data_dir: Path, repo: str, *, with_long_flow: bool) -> 
         _write_snapshot(directory, "local_edit", {**bodies, "a": "changed"}, calls)
 
 
-def test_long_flows_filter_by_one_hop_and_prefer_flagsmith(tmp_path: Path) -> None:
+def test_long_flows_filter_by_one_hop(tmp_path: Path) -> None:
     _write_chain_history(tmp_path, "Flagsmith__flagsmith", with_long_flow=True)
     _write_chain_history(tmp_path, "alternate", with_long_flow=True)
 
@@ -123,11 +115,12 @@ def test_long_flows_filter_by_one_hop_and_prefer_flagsmith(tmp_path: Path) -> No
     )
 
 
-def test_long_flows_fall_back_to_another_analysis(tmp_path: Path) -> None:
+def test_long_flows_ignore_other_repositories(tmp_path: Path) -> None:
     _write_chain_history(tmp_path, "Flagsmith__flagsmith", with_long_flow=False)
     _write_chain_history(tmp_path, "alternate", with_long_flow=True)
 
-    assert load_diffs(tmp_path, long_flows_only=True) == ("alternate", [DiffSample(2, 4)])
+    with pytest.raises(ValueError, match="No analyzed commits with long flows"):
+        load_diffs(tmp_path, long_flows_only=True)
 
 
 def test_no_long_flows_reports_eligibility_requirement(tmp_path: Path) -> None:
