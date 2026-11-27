@@ -216,6 +216,7 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
                     "status": "queued",
                     "message": "Queued",
                     "warning": None,
+                    "visibility": "public",
                 }
             ]
             executor.before_run = None
@@ -276,6 +277,7 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
                 "status": "ready",
                 "message": "Ready",
                 "warning": None,
+                "visibility": "public",
             }
         ]
 
@@ -285,7 +287,13 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
         assert not (clone / "shop").exists()
         source = json.loads((output / "source.json").read_text())
         assert source.pop("imported_at")
-        assert source == {"url": URL, "name": "Demo/shop", "subdir": "shop", "max_commits": 2}
+        assert source == {
+            "url": URL,
+            "name": "Demo/shop",
+            "subdir": "shop",
+            "max_commits": 2,
+            "visibility": "public",
+        }
         index = analyze.load_index(output)
         oldest, newest = index["commits"]
         assert (oldest["message"], newest["message"]) == ("Add price", "Update price")
@@ -462,7 +470,7 @@ def test_failed_refresh_preserves_published_output(github_import, monkeypatch):
     assert client.post(f"{REPO}/refresh").status_code == 202
     status = client.get(f"{REPO}/status").json()
     assert status["status"] == "error"
-    assert status["error"] == "Repository not found or not public"
+    assert status["error"] == import_analysis.UNAVAILABLE
     assert status["new_commits"] is None
     assert client.get(f"{REPO}/commits").json() == previous
     assert client.get(snapshot_url).json() == snapshot
@@ -506,7 +514,7 @@ def test_unavailable_repo_reports_readable_failure(tmp_path: Path):
         assert client.post(REPOS, json={"url": URL}).status_code == 202
         status = client.get(f"{REPO}/status").json()
         assert status["status"] == "error"
-        assert status["error"] == "Repository not found or not public"
+        assert status["error"] == import_analysis.UNAVAILABLE
 
 
 def _wait_for_status(

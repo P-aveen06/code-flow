@@ -11,6 +11,7 @@ from threading import Lock
 from time import monotonic
 
 from app.config import MAX_IMPORT_COMMITS
+from app.github import GitHubError, GitHubRepo
 from app.import_analysis import (
     ANALYSIS_ERROR,
     ImportAnalysis,
@@ -22,6 +23,8 @@ from app.store import BadRequest, Store
 
 GITHUB_URL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?")
 ACTIVE_STATUSES = ("queued", "cloning", "analyzing")
+# GitHub logins never contain "_", so this prefix cannot collide with a public "owner__name" id.
+PRIVATE_PREFIX = "p_"
 
 
 def validate_import(payload: object, *, limit: int = MAX_IMPORT_COMMITS) -> ImportSource:
@@ -60,6 +63,54 @@ def validate_import(payload: object, *, limit: int = MAX_IMPORT_COMMITS) -> Impo
         f"https://github.com/{display_name}",
         path.as_posix() if path.parts else "",
         max_commits,
+    )
+
+
+def private_repo_id(uid: int, full_name: str) -> str:
+    owner, name = full_name.split("/", 1)
+    return f"{PRIVATE_PREFIX}{uid}__{owner}__{name}"
+
+
+def picked_source(
+    payload: dict, repo: GitHubRepo, uid: int, *, limit: int = MAX_IMPORT_COMMITS
+) -> ImportSource:
+    """Build the import for a repo chosen in the picker.
+
+    A public repo is shared with every visitor, like a pasted URL. A private repo
+    belongs to the user who picked it and is cloned through the app installation.
+    """
+    options = {**payload, "url": f"https://github.com/{repo.full_name}"}
+    shared = validate_import(options, limit=limit)
+    if not repo.private:
+        return shared
+    return replace(
+        shared,
+        id=private_repo_id(uid, shared.name),
+        visibility="private",
+        owner_uid=uid,
+        installation_id=repo.installation_id,
+        github_repo_id=repo.id,
+    )
+
+
+def source_from_metadata(metadata: dict, *, limit: int = MAX_IMPORT_COMMITS) -> ImportSource:
+    """Rebuild an import from its source.json, keeping who owns a private repo."""
+    source = validate_import(metadata, limit=limit)
+    if metadata.get("visibility") != "private":
+        return source
+    try:
+        uid = int(metadata["owner_uid"])
+        installation_id = int(metadata["installation_id"])
+        repo_id = int(metadata["github_repo_id"])
+    except (KeyError, TypeError, ValueError):
+        raise BadRequest("The stored private repository is missing its GitHub details") from None
+    return replace(
+        source,
+        id=private_repo_id(uid, source.name),
+        visibility="private",
+        owner_uid=uid,
+        installation_id=installation_id,
+        github_repo_id=repo_id,
     )
 
 
@@ -105,6 +156,8 @@ class ImportJob:
             "status": self.status,
             "message": self.message,
             "warning": self.warning,
+            "visibility": self.source.visibility,
+            "owner_uid": self.source.owner_uid,
         }
 
 
@@ -122,9 +175,12 @@ class RepoImporter:
         executor: Executor | None = None,
         *,
         max_commits: int = MAX_IMPORT_COMMITS,
+        clone_token: Callable[[ImportSource], str | None] | None = None,
     ) -> None:
         self.store = store
         self.git_url_builder = git_url_builder or (lambda url: url)
+        # Returns the token for a clone, or None for an anonymous public clone.
+        self.clone_token = clone_token or (lambda _source: None)
         self.executor = executor if executor is not None else ThreadPoolExecutor(max_workers=1)
         self._owns_executor = executor is None
         self._max_commits = max_commits
@@ -158,7 +214,7 @@ class RepoImporter:
             raise RefreshUnavailable(
                 "Only repositories imported from GitHub can check for new commits"
             )
-        source = validate_import(metadata)
+        source = source_from_metadata(metadata)
         if source.id != repo_id:
             raise BadRequest("The stored GitHub URL does not match the repository ID")
         return replace(source, max_commits=min(source.max_commits, self._max_commits))
@@ -199,6 +255,10 @@ class RepoImporter:
             clones.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(dir=clones) as tmp:
                 staged = Path(tmp) / source.id
+                try:
+                    token = self.clone_token(source)
+                except GitHubError as exc:
+                    raise ImportFailure(str(exc)) from exc
                 result = self._analysis.run(
                     source,
                     self.git_url_builder(source.url),
@@ -207,6 +267,7 @@ class RepoImporter:
                     staged,
                     refresh=refresh,
                     report=partial(self._update, source.id),
+                    token=token,
                 )
                 self.store.publish_import(source.id, staged)
         except ImportFailure as exc:

@@ -41,6 +41,7 @@ def test_list_repos(client: TestClient) -> None:
             "status": "ready",
             "message": "Ready",
             "warning": None,
+            "visibility": "public",
         }
     ]
 

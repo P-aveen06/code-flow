@@ -1,5 +1,6 @@
 """Prepare repository imports and refreshes with Git and the Python analyzer."""
 
+import base64
 import json
 import os
 import shutil
@@ -15,30 +16,71 @@ from codeflow.graph import Commit
 
 from app.store import python_warning
 
-UNAVAILABLE = "Repository not found or not public"
+UNAVAILABLE = "Repository not found, or code-flow has no access to it"
 ANALYSIS_ERROR = "Could not analyze repository"
 
 
 @dataclass(frozen=True)
 class ImportSource:
-    """Validated settings for a public GitHub repository import."""
+    """Validated settings for a GitHub repository import.
+
+    A private source belongs to one GitHub user and is cloned through the GitHub App
+    installation that grants access to it.
+    """
 
     id: str
     name: str
     url: str
     subdir: str
     max_commits: int
+    visibility: str = "public"
+    owner_uid: int | None = None
+    installation_id: int | None = None
+    github_repo_id: int | None = None
+
+    def access_fields(self) -> dict:
+        """Fields that decide who may read the import, as stored in source.json."""
+        if self.visibility != "private":
+            return {"visibility": "public"}
+        return {
+            "visibility": "private",
+            "owner_uid": self.owner_uid,
+            "installation_id": self.installation_id,
+            "github_repo_id": self.github_repo_id,
+        }
 
 
 class ImportFailure(RuntimeError):
     """An import error safe to show in the API."""
 
 
-def _git(*args: str, error: str) -> str:
+def git_auth_env(token: str | None) -> dict[str, str]:
+    """Send a GitHub token as an HTTP header through Git's environment config.
+
+    The token never appears in the clone URL, the process arguments, `.git/config`,
+    or error messages.
+    """
+    if not token:
+        return {}
+    credentials = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {credentials}",
+    }
+
+
+def _git(*args: str, error: str, token: str | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "-c", "credential.helper=", "-c", "core.askPass=", *args],
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": ""},
+            env={
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": "",
+                "SSH_ASKPASS": "",
+                **git_auth_env(token),
+            },
             capture_output=True,
             text=True,
             errors="replace",
@@ -98,15 +140,16 @@ def _prepare_clone(
     source: ImportSource,
     previous_head: str | None,
     max_commits: int,
+    token: str | None = None,
 ) -> tuple[str, int]:
     depth = max(4 * source.max_commits, 100)
     git = ("-C", str(clone))
 
     def fetch(*options: str) -> None:
-        _git(*git, "fetch", *options, "origin", refspec, error=UNAVAILABLE)
+        _git(*git, "fetch", *options, "origin", refspec, error=UNAVAILABLE, token=token)
 
     if clone.exists():
-        remote_head = _git("ls-remote", "--symref", url, "HEAD", error=UNAVAILABLE)
+        remote_head = _git("ls-remote", "--symref", url, "HEAD", error=UNAVAILABLE, token=token)
         first_line = remote_head.split("\n", 1)[0]
         if not first_line.startswith("ref: refs/heads/"):
             raise ImportFailure("Repository has no default branch")
@@ -129,6 +172,7 @@ def _prepare_clone(
             url,
             str(staged_clone),
             error=UNAVAILABLE,
+            token=token,
         )
         branch = _git(
             "-C",
@@ -185,6 +229,7 @@ class ImportAnalysis:
         *,
         refresh: bool,
         report: Callable[..., None],
+        token: str | None = None,
     ) -> ImportResult:
         try:
             index = load_index(output)
@@ -199,6 +244,7 @@ class ImportAnalysis:
             source,
             previous_head,
             self._max_commits,
+            token,
         )
         report(
             status="analyzing",
@@ -234,6 +280,7 @@ class ImportAnalysis:
             "subdir": source.subdir,
             "max_commits": limit,
             "imported_at": datetime.now(UTC).isoformat(),
+            **source.access_fields(),
         }
         (staged / "source.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
         new_commits = (
