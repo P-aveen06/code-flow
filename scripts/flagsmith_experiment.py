@@ -15,6 +15,7 @@ from flagsmith_setup import (
     DEFAULT_API_URL,
     DEFAULT_SIM_ENVIRONMENT,
     FLOW_DIRECTION_FLAG,
+    GITHUB_SIGNIN_FLAG,
     PRODUCTION_ENVIRONMENT,
     PROJECT_NAME,
     SIM_ENVIRONMENT_SETTING,
@@ -86,6 +87,28 @@ EXPERIMENTS = {
             ),
         ),
     ),
+    GITHUB_SIGNIN_FLAG.name: ExperimentDefinition(
+        name="github_signin: sign in with GitHub vs public URL import",
+        hypothesis=(
+            "More visitors finish an import when they can sign in with GitHub and pick a repo, "
+            "including private ones, even though sign-in adds time before the first flow."
+        ),
+        control=str(GITHUB_SIGNIN_FLAG.value),
+        treatments={
+            str(option.value): int(option.allocation) for option in GITHUB_SIGNIN_FLAG.variants
+        },
+        metrics=(
+            MetricDefinition(
+                "Import completed", "import_completed", "occurrence", "up", "increase"
+            ),
+            MetricDefinition(
+                "Time to first flow (ms)", "first_flow_viewed", "mean", "down", "increase"
+            ),
+            MetricDefinition(
+                "Import abandoned", "import_abandoned", "occurrence", "down", "decrease"
+            ),
+        ),
+    ),
 }
 
 
@@ -153,7 +176,7 @@ def create(
         return
 
     if feature is None:
-        feature_id = "<new feature ID for flow_direction>"
+        feature_id = f"<new feature ID for {definition.name.partition(':')[0]}>"
         weights = {
             f"<new option ID for {name}>": weight for name, weight in definition.treatments.items()
         }

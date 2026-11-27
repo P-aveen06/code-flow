@@ -81,6 +81,25 @@ class FakeClient:
                     {"multivariate_feature_option": 19, "percentage_allocation": 50}
                 ],
             )
+        if flag == "github_signin":
+            self.feature.update(
+                name=flag,
+                multivariate_options=[
+                    {
+                        "id": 20,
+                        "type": "unicode",
+                        "key": "github_signin",
+                        "string_value": "github_signin",
+                    }
+                ],
+            )
+            self.flag_state.update(
+                feature_state_value="url_import",
+                multivariate_feature_state_values=[
+                    {"multivariate_feature_option": 20, "percentage_allocation": 50}
+                ],
+            )
+
     @property
     def writes(self):
         return [call for call in self.calls if call[0] != "GET"]
@@ -649,6 +668,40 @@ def test_flow_direction_create_status_refresh_and_rollout(capsys):
         ("POST", f"{DETAIL}complete/", {"rollout_decision": "variant", "rollout_variant": 19}),
     ]
     assert ("GET", f"{EXPERIMENTS}?q=flow_direction", None) in client.calls
+
+
+def test_github_signin_create_tracks_completion_time_and_abandons(capsys):
+    client = FakeClient("github_signin")
+    api = script.ExperimentAPI(client, dry_run=False)
+
+    script.run(api, "create", experiment_flag="github_signin")
+
+    metric_bodies = [body for _, path, body in client.writes if path == METRICS]
+    assert [
+        (body["name"], body["definition"]["event"], body["aggregation"], body["direction"])
+        for body in metric_bodies
+    ] == [
+        ("Import completed", "import_completed", "occurrence", "up"),
+        ("Time to first flow (ms)", "first_flow_viewed", "mean", "down"),
+        ("Import abandoned", "import_abandoned", "occurrence", "down"),
+    ]
+    created = next(body for _, path, body in client.writes if path == EXPERIMENTS)
+    assert created["name"] == "github_signin: sign in with GitHub vs public URL import"
+    # Sign-in is expected to cost time, so that metric is a guardrail, not a goal.
+    assert [row["expected_direction"] for row in created["metrics"]] == [
+        "increase",
+        "increase",
+        "decrease",
+    ]
+    assert created["experiment_rollout"]["feature_state_value"] == {
+        "type": "string",
+        "value": "url_import",
+    }
+    assert created["experiment_rollout"]["multivariate_feature_state_values"] == [
+        {"multivariate_feature_option": 20, "percentage_allocation": 50}
+    ]
+    assert "url_import 50%, github_signin 50%" in capsys.readouterr().out
+    assert client.writes[-1] == ("POST", f"{DETAIL}start/", {})
 
 
 @pytest.mark.parametrize("feature_exists", [True, False])

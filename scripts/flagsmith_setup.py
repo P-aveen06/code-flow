@@ -166,6 +166,14 @@ FLOW_DIRECTION_FLAG = Flag(
     "MULTIVARIATE",
     (Variant("vertical", 50, "vertical"),),
 )
+# Control keeps the public URL form; the variant leads with Sign in with GitHub.
+GITHUB_SIGNIN_FLAG = Flag(
+    "github_signin",
+    True,
+    "url_import",
+    "MULTIVARIATE",
+    (Variant("github_signin", 50, "github_signin"),),
+)
 
 
 def same_value(left: FlagValue, right: FlagValue) -> bool:
@@ -304,6 +312,8 @@ def show_value(value: FlagValue) -> str:
         "overlay_summary",
         "horizontal",
         "vertical",
+        "url_import",
+        "github_signin",
     ):
         return "<redacted>"
     return json.dumps(value)
@@ -341,6 +351,7 @@ def configure_existing_flag(
     restore_defaults = simulation_environment and flag.name in (
         FLOW_VIEW_FLAG.name,
         FLOW_DIRECTION_FLAG.name,
+        GITHUB_SIGNIN_FLAG.name,
         VARIANT_PREVIEW,
     )
     state = get_flag_state(client, environment, feature["id"])
@@ -627,6 +638,7 @@ def setup(
     app_flags = [
         FLOW_VIEW_FLAG,
         FLOW_DIRECTION_FLAG,
+        GITHUB_SIGNIN_FLAG,
         Flag("flagsmith_mode", True),
         Flag("ai_summary", False),
         Flag(VARIANT_PREVIEW, not app_environment),

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim simulate-dry-run simulate panel-profiles
+.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim simulate-dry-run simulate simulate-signin-dry-run simulate-signin panel-profiles
 
 help:
 	@echo "install  Install Python and web dependencies"
@@ -14,6 +14,8 @@ help:
 	@echo "flagsmith-setup-sim      Set up Flagsmith Development for simulations"
 	@echo "simulate-dry-run         Rehearse flow_view offline with the default reviewer panel"
 	@echo "simulate                 Run flow_view in the simulation environment with the default panel"
+	@echo "simulate-signin-dry-run  Rehearse the github_signin import funnel offline"
+	@echo "simulate-signin          Run the github_signin import funnel in the simulation environment"
 	@echo "panel-profiles          Show the default reviewer panel's traits offline"
 
 analyze-flagsmith:
@@ -33,6 +35,12 @@ simulate-dry-run:
 
 simulate:
 	cd simulator && uv run python simulate.py --experiment flow_view --panel default
+
+simulate-signin-dry-run:
+	cd simulator && uv run python simulate.py --experiment github_signin --panel default --dry-run
+
+simulate-signin:
+	cd simulator && uv run python simulate.py --experiment github_signin --panel default
 
 panel-profiles:
 	cd simulator && uv run python simulate.py --panel default --profiles
