@@ -7,6 +7,13 @@ const browserPath = process.env.CODEFLOW_CHROME_PATH
   || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const headlessShell = basename(browserPath) === "chrome-headless-shell";
 const singleProcess = headlessShell && process.platform === "darwin";
+const shutdown = new AbortController();
+function stop() {
+  shutdown.abort();
+  process.stdin.destroy();
+}
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
 let browser;
 let stage = "launch";
 try {
@@ -18,6 +25,9 @@ try {
     executablePath: browserPath,
     headless: headlessShell ? "shell" : true,
     pipe: true,
+    signal: shutdown.signal,
+    handleSIGINT: false,
+    handleSIGTERM: false,
     userDataDir: process.argv[2],
     args,
   });
@@ -32,6 +42,7 @@ try {
   console.log(JSON.stringify({
     browser: await browser.version(),
     mode: singleProcess ? "single-process headless shell with storage reset" : "fresh browser contexts",
+    pid: browser.process().pid,
   }));
   stage = "navigation";
   for await (const line of createInterface({ input: process.stdin })) {
