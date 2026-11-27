@@ -116,46 +116,124 @@ The time metric is the mean `diff_understood` value per exposure, with reviewers
 
 # sync_mode (Development)
 
-**Status** · Full benchmark and Flagsmith results pending.
+**Status** · Running in the Flagsmith **Development** environment since
+2026-11-27 08:16 UTC. Not rolled out. Production has the flag disabled and
+serves `manual_button`.
 
-| Variant | Share | Refresh schedule |
+**Question** (Paveen): how should code-flow pick up new commits, and what does
+it cost in app performance, page load and server load as repos get bigger and
+more numerous?
+
+| Variant | Share | What reviewers get |
 |---|---:|---|
-| A · `manual_button` | 34% | Manual check on each modeled reviewer visit |
-| B · `per_repo_toggle` | 33% | Auto-sync for the only repo or two of five. Manual checks for the rest |
-| C · `global_toggle` | 33% | Auto-sync for every repo |
+| A · `manual_button` (control) | 34% | The "Check for new commits" button in the viewer |
+| B · `per_repo_toggle` | 33% | An Auto-sync switch per repo on the landing page (plus the button) |
+| C · `global_toggle` | 33% | One "Auto-sync all repos" switch (plus the button) |
 
-**Measured** · The [benchmark harness](../scripts/sync_benchmark.py) times
-the real importer, local Git fetches, snapshot analysis, API requests, and the
-production landing page in headless Chrome. It samples API process CPU and
-RSS, tracks disk growth, and polls for each upstream SHA to become visible in
-`/commits`. Chrome uses the Development client key with a benchmark-local
-preview endpoint, so the timing includes the SDK and UI work on loopback.
-GitHub network latency and Flagsmith service latency are outside the
-benchmark. The three sizes start with the shop demo's eight commits or 50 and
-200 first-parent commits touching Flagsmith's `api/` directory.
+## What is measured and what is simulated
 
-**Modeled** · Each interval delivers one new commit per repo at a seeded
-phase. Manual checks follow a seeded visit schedule, defaulting to 12 visits
-per repo per hour at the five-minute interval. CPU per hour at 300 seconds
-is a projection from measured process samples and refresh counts. Freshness
-for Flagsmith combines measured time from refresh start to the SHA appearing
-with a seeded uniform wait until the next tick or visit. A value of at most
-300 seconds emits the conversion. The default panel gets a seeded workload
-per identity, with a 40/40/20 size mix and a 70/30 mix of one and five repos.
-Flagsmith assigns variants using those traits and the reviewer identity.
+**Measured** (real runs on Paveen's MacBook, Apple M2, 2026-11-27 06:37–08:15
+UTC, mains power, no sleep during any case; [harness](../scripts/sync_benchmark.py),
+[tables](benchmarks/sync_mode-2026-11-27.md), [raw samples](benchmarks/sync_mode-2026-11-27.json)):
 
-## Full benchmark by variant, size, and repo count
+- the real code-flow API and importer on copies of imported data (never the real `data/`),
+  fed by local bare Git upstreams that receive one new commit per repo per interval;
+- landing page load in headless Chrome (production build, cold cache, ready = repo list and sync controls rendered);
+- API p50/p95 for `/repos`, `/commits` and `/diff` while syncs run;
+- API process CPU and peak RSS (1 s samples), Git fetches (Git trace), graphs built, disk growth;
+- freshness: time from an upstream commit to the SHA showing in `/commits`.
 
-**[Pending]** Link the dated Markdown tables and raw JSON in
-`docs/benchmarks/` after completing the full 18-cell matrix.
+**Simulated or modelled** (stated assumptions, not measurements):
 
-## Flagsmith results
+- the workload mix of the reviewers: each of the 1,300 panel identities gets a
+  seeded `repo_size` (small 40 % / medium 40 % / large 20 %) and `repo_count`
+  (1 repo 70 % / 5 repos 30 %), sent as traits;
+- how often a person clicks the manual button: **2 checks per repo per hour** (A, and
+  repos not followed in B);
+- which repos are followed in B: the only repo, or 2 of 5;
+- the benchmark ran at a 30 s interval; per-hour CPU and freshness are
+  projected to the 300 s default with the formulas in the tables file
+  (freshness = measured detection-to-visible time + a seeded uniform wait for
+  the next tick or visit).
 
-| Variant | Exposures | New commit within 5 min | Mean freshness (s) | Mean landing page (ms) | Mean server CPU (ms/hour) |
-|---|---:|---:|---:|---:|---:|
-| A · Manual button | Pending | Pending | Pending | Pending | Pending |
-| B · Per-repo toggle | Pending | Pending | Pending | Pending | Pending |
-| C · Global toggle | Pending | Pending | Pending | Pending | Pending |
+Sizes: small = the 8-commit shop demo, medium = 50 and large = 200 first-parent
+commits touching Flagsmith/flagsmith `api/`. Each identity's events are the
+measured samples of the benchmark cell matching its assigned variant, size and
+repo count; the conversion `new_commit_seen_within_5min` fires when its
+freshness is at most 300 s.
 
-**[Pending]** Add the observed lift, credible intervals, and interpretation
-after replaying the full benchmark in Development.
+## Benchmark by variant, size and repo count
+
+Page load p50 / p95 in ms; CPU and freshness projected to the 300 s default.
+
+| Variant | Size | Repos | Page load ms | API CPU s/h | Freshness p50 s | Peak RSS MiB |
+|---|---|---:|---:|---:|---:|---:|
+| A | small | 1 | 88 / 102 | 33 | 621 | 53 |
+| A | small | 5 | 85 / 96 | 97 | 665 | 54 |
+| A | medium | 1 | 84 / 91 | 187 | 624 | 150 |
+| A | medium | 5 | 85 / 95 | 341 | 668 | 152 |
+| A | large | 1 | 85 / 101 | 267 | 629 | 160 |
+| A | large | 5 | 91 / 117 | 351 | 675 | 158 |
+| B | small | 1 | 94 / 102 | 53 | 104 | 63 |
+| B | small | 5 | 96 / 106 | 100 | 242 | 44 |
+| B | medium | 1 | 96 / 106 | 218 | 106 | 153 |
+| B | medium | 5 | 106 / **1,018** | 236 | 245 | 162 |
+| B | large | 1 | 96 / 113 | 258 | 112 | 159 |
+| B | large | 5 | 95 / **4,728** | 472 | 254 | 180 |
+| C | small | 1 | 85 / 103 | 54 | 104 | 64 |
+| C | small | 5 | 88 / 95 | 99 | 111 | 64 |
+| C | medium | 1 | 91 / 102 | 203 | 106 | 159 |
+| C | medium | 5 | 92 / **592** | 346 | 114 | 169 |
+| C | large | 1 | 100 / 121 | 261 | 111 | 161 |
+| C | large | 5 | **3,312 / 5,396** | **732** | 124 | 172 |
+
+One-time imports: small 0.5 s, medium 7.7 s (129 MiB of snapshots), large
+25.8 s (423 MiB), API peak RSS 63–102 MiB.
+
+## Flagsmith results (Development, refreshed 2026-11-27 08:23 UTC)
+
+| Metric | A · manual button (control) | B · per-repo toggle | C · global toggle |
+|---|---:|---:|---:|
+| Exposures | 477 | 426 | 397 |
+| New commit seen within 5 min | 74 / 15.5 % | 362 / 85.0 % | 392 / 98.7 % |
+| | | +447.8 % [+330.9, +564.7], win 100 % | +536.5 % [+402.9, +670.1], win 100 % |
+| Mean freshness (s) | 931 | 287 | 156 |
+| | | −69.1 % [−73.1, −65.1], win 100 % | −83.3 % [−84.5, −82.0], win 100 % |
+| Mean landing page load (ms) | 89 | 192 | 261 |
+| | | +114.8 % [+51.0, +178.5], win 0 % | +192.5 % [+98.8, +286.1], win 0 % |
+| Mean API CPU (ms per hour) | 164,500 | 178,477 | 196,099 |
+| | | +8.5 % [−1.0, +18.0], win 4 % | +19.2 % [+7.6, +30.8], win 0.1 % |
+
+Lift is vs control with Flagsmith's 95 % credible interval; "win" is the
+probability the variant beats control in the metric's expected direction.
+
+## Reading the results
+
+- **Freshness is the big win.** With 2 manual checks per repo per hour, only
+  15.5 % of A reviewers see a new commit within 5 minutes (mean wait 15.5 min).
+  Auto-sync gets B to 85 % and C to 98.7 %. B is lower than C only because
+  reviewers with 5 repos follow 2 of them.
+- **Page load is the cost, and it is a tail problem.** The median landing page
+  stays at 85–106 ms in every cell except C with five large repos. The means
+  in Flagsmith rise because of a few very slow loads in the 5-repo medium and
+  large cells (p95 0.6–4.7 s) and C/large/5 (p50 3.3 s): every page load there
+  overlapped a sync, and the analysis runs in the API process, so requests
+  wait behind it.
+- **Server CPU** barely moves for B (+8.5 %, not significant) and rises for C
+  (+19 %), up to 732 CPU s/h (about 20 % of a core) for five large repos.
+- Memory stays under 185 MiB in every cell, so all three fit the 512 MB Render
+  instance; at 5 large repos the hosted instance would still feel C's page-load
+  tail.
+
+## Recommendation (not rolled out)
+
+**B · per-repo toggle** is the better trade-off today: 85 % see new commits
+within 5 minutes (vs 15.5 %), with no significant CPU increase and normal
+median page loads. C is fresher still but costs the most CPU and makes the
+landing page slow when several large repos sync together.
+
+Before rolling B out, move the refresh analysis off the API's request path
+(a separate worker process, or lower priority) and re-run the large/5-repo
+cells: that should remove the page-load tail for both B and C, and then C may
+become the better default for small setups. Leave the experiment running in
+Development until then.

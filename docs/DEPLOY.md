@@ -7,6 +7,7 @@
 | Web (Cloudflare Pages, project `code-flow`) | https://code-flow.pages.dev |
 | API (Render free web service `code-flow-api`, Docker, Oregon) | https://code-flow-api-y9k1.onrender.com |
 | Deployed from | branch `claude/project-thread-f2sqbg`, auto-deploy off |
+| Cold start (measured 2026-11-27) | first request after the free instance slept: 22.9 s; warm requests 0.3–0.5 s |
 | Flagsmith | not reachable from the internet yet: the site uses the rolled-out views (overlay + summary, vertical for long flows), flag checks and experiments are off |
 
 Redeploy the API with a manual deploy in Render (or `POST /v1/services/<id>/deploys`).
