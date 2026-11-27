@@ -10,12 +10,33 @@ export interface Repo {
   status: RepoStatus;
   message: string;
   warning: string | null;
+  // Private repos are visible only to the GitHub user who imported them.
+  visibility?: "public" | "private";
 }
 
 export interface ImportRequest {
   url: string;
   subdir: string;
   max_commits: number;
+}
+
+export interface PickedImportRequest {
+  github_repo_id: number;
+  installation_id: number;
+  subdir: string;
+  max_commits: number;
+}
+
+export type Me =
+  | { configured: boolean; signed_in: false }
+  | { configured: true; signed_in: true; login: string; avatar_url: string; install_url: string };
+
+export interface GitHubRepoChoice {
+  id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  installation_id: number;
 }
 
 export interface ImportResponse {

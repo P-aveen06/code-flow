@@ -6,6 +6,7 @@ import { directionExposureKey, readFlowDirection, useCodeFlowFlags, useDirection
 import type { FlowLayout } from "../layout/elk";
 import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
+import { trackSignin } from "../signinEvents";
 import type { FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
 import { useDiff, useDiffLayout } from "../useDiff";
 import type { Hops } from "../useDiff";
@@ -187,6 +188,10 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
   }, [currentLayout, view, direction]);
   const diagramRendered = Boolean(currentLayout && rendered?.layout === currentLayout
     && rendered.view === view && rendered.direction === direction);
+  useEffect(() => {
+    // Ends the github_signin journey clock; it only counts after an import was started.
+    if (diagramRendered) trackSignin("first_flow_viewed");
+  }, [diagramRendered]);
   const previewOverride = viewOverride ?? directionOverride;
   const exposureKey = directionExposureKey(reviewerId, longFlow, previewOverride, directionFlag);
   const layoutReview = useDirectionExposure(reviewerId, exposureKey, diagramRendered);

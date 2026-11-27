@@ -260,6 +260,30 @@ button { font: inherit; }
   background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
 }
 .empty-state { color: var(--color-text-muted); }
+.repo-private {
+  margin-inline-start: var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-sunken);
+  font-size: var(--text-xs);
+}
+
+/* Sign in with GitHub (github_signin experiment variant) */
+.signin-card__lead { max-width: 60ch; }
+.signin-card__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.signin-card__account { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.signin-card__account img { border-radius: var(--radius-pill); }
+.signin-error { color: color-mix(in srgb, var(--color-danger) 75%, var(--color-text)); }
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+  justify-self: start;
+}
 .message-stack { display: grid; gap: var(--space-3); }
 
 .viewer { display: flex; flex: 1; flex-direction: column; }
