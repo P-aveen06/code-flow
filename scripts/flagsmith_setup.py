@@ -1,11 +1,10 @@
-"""Set up tagged demo flags in an existing code-flow Flagsmith project."""
+"""Set up code-flow's app flags and read repo scopes from existing Flagsmith tags."""
 
 import argparse
 import fcntl
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from collections import Counter
@@ -20,9 +19,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 DEFAULT_API_URL = "http://localhost:8000/api/v1/"
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-DEFAULT_CLONE = DATA_DIR / "repos/Flagsmith__flagsmith"
 DEFAULT_SCOPE_FILE = DATA_DIR / "flagsmith_scopes.json"
-ENVIRONMENT_EXPORT = "api/integrations/flagsmith/data/environment.json"
 PROJECT_NAME = "code-flow"
 PRODUCTION_ENVIRONMENT = "Production"
 DEFAULT_SIM_ENVIRONMENT = "Development"
@@ -170,6 +167,7 @@ FLOW_DIRECTION_FLAG = Flag(
     (Variant("vertical", 50, "vertical"),),
 )
 
+
 def same_value(left: FlagValue, right: FlagValue) -> bool:
     return type(left) is type(right) and left == right
 
@@ -181,58 +179,6 @@ def value_fields(value: FlagValue) -> Record:
     if isinstance(value, int):
         return {"type": "int", "integer_value": value}
     return {"type": "unicode", "string_value": value}
-
-
-def load_flagsmith_api_defaults(path: Path) -> list[Flag]:
-    """Read a local export file or the committed export in a local checkout."""
-    try:
-        if path.is_dir():
-            content = subprocess.check_output(
-                ["git", "-C", str(path), "show", f"HEAD:{ENVIRONMENT_EXPORT}"],
-                stderr=subprocess.DEVNULL,
-                env={**os.environ, "GIT_NO_LAZY_FETCH": "1", "GIT_TERMINAL_PROMPT": "0"},
-            )
-        else:
-            content = path.read_bytes()
-        states = json.loads(content)["feature_states"]
-        flags = []
-        for state in states:
-            feature = state["feature"]
-            name, kind = feature["name"], feature["type"]
-            enabled, value = state["enabled"], state["feature_state_value"]
-            variants = tuple(
-                Variant(
-                    entry["multivariate_feature_option"]["value"],
-                    entry["percentage_allocation"],
-                    entry["multivariate_feature_option"].get("key"),
-                )
-                for entry in state.get("multivariate_feature_state_values", [])
-            )
-            if (
-                not re.fullmatch(r"[a-zA-Z0-9_.-]+", name)
-                or kind not in ("STANDARD", "MULTIVARIATE")
-                or type(enabled) is not bool
-                or type(value) not in (str, int, bool, type(None))
-                or any(
-                    type(variant.value) not in (str, int, bool, type(None)) for variant in variants
-                )
-                or any(
-                    type(variant.allocation) not in (float, int)
-                    or not 0 <= variant.allocation <= 100
-                    for variant in variants
-                )
-            ):
-                raise ValueError
-            if any(flag.name == name for flag in flags):
-                raise SetupError("The local Flagsmith environment export contains duplicate flags.")
-            if sum(variant.allocation for variant in variants) > 100:
-                raise ValueError
-            flags.append(Flag(name, enabled, value, kind, variants))
-        return flags
-    except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError):
-        raise SetupError(
-            "Could not load flag defaults from the local Flagsmith environment export."
-        ) from None
 
 
 def find_record(records: list[Record], field: str, value: str, resource: str) -> Record | None:
@@ -272,7 +218,7 @@ def create_flag(
     flag: Flag,
     tag_id: int,
     environment_defaults: list[tuple[Record, Flag]],
-) -> Record:
+) -> None:
     # Flagsmith creates a state in every environment.
     feature = client.request("POST", path, {"name": flag.name, "type": flag.kind, "tags": [tag_id]})
     feature_id = feature["id"]
@@ -294,7 +240,6 @@ def create_flag(
         apply_flag_defaults(
             client, environment, feature_id, defaults, weights if defaults.enabled else {}, state
         )
-    return feature
 
 
 def get_flag_state(client: AdminClient, environment: Record, feature_id: int) -> Record | None:
@@ -351,7 +296,7 @@ def apply_flag_defaults(
 
 
 def show_value(value: FlagValue) -> str:
-    # Remote strings and custom export values may contain credentials.
+    # Remote strings may contain credentials.
     if isinstance(value, str) and value not in (
         "",
         "side_by_side",
@@ -433,8 +378,7 @@ def configure_existing_flag(
     ):
         return
 
-    unconfigured = not live_enabled and live_value is None and not any(weights.values())
-    if simulation_environment and (restore_defaults or unconfigured):
+    if restore_defaults:
         expected_options = {
             (type(variant.value), variant.value, variant.key): variant.allocation
             for variant in flag.variants
@@ -457,8 +401,7 @@ def configure_existing_flag(
             verb = "Would set" if dry_run else "Set"
             print(f"{verb} {flag.name} to {show_state(flag.enabled, flag.value, flag.variants)}.")
             return
-        if restore_defaults:
-            raise SetupError(f"{flag.name} has project variants that differ from setup defaults.")
+        raise SetupError(f"{flag.name} has project variants that differ from setup defaults.")
 
     print(
         f"{flag.name} differs from defaults "
@@ -645,15 +588,21 @@ def update_env_file(path: Path, values: dict[str, str | None], dry_run: bool = F
 def write_scopes(
     path: Path,
     environment_name: str,
-    tag_names: dict[str, set[str]],
+    flag_names_by_tag: dict[str, set[str]],
     dry_run: bool,
 ) -> None:
+    repos: dict[str, set[str]] = {}
+    for label, names in flag_names_by_tag.items():
+        prefix, _, repo_name = label.partition(":")
+        if prefix == "repo" and repo_name and names:
+            repo_id = REPO_ID_BY_TAG.get(label, repo_name)
+            repos.setdefault(repo_id, set()).update(names)
     scopes = {
         "schema": "code-flow/flagsmith-scopes@1",
         "project": PROJECT_NAME,
         "environment": environment_name,
-        "repos": {repo_id: sorted(tag_names[tag]) for tag, repo_id in REPO_ID_BY_TAG.items()},
-        "code_flow_flags": sorted(tag_names[CODE_FLOW_TAG]),
+        "repos": {repo_id: sorted(repos[repo_id]) for repo_id in sorted(repos)},
+        "code_flow_flags": sorted(flag_names_by_tag[CODE_FLOW_TAG]),
     }
     content = (json.dumps(scopes, indent=2) + "\n").encode()
     if path.exists() and path.read_bytes() == content:
@@ -668,7 +617,6 @@ def write_scopes(
 
 def setup(
     client: AdminClient,
-    defaults: list[Flag],
     env_file: Path,
     dry_run: bool,
     *,
@@ -676,16 +624,13 @@ def setup(
     scope_file: Path = DEFAULT_SCOPE_FILE,
 ) -> None:
     app_environment = environment_name == PRODUCTION_ENVIRONMENT
-    groups = {
-        CODE_FLOW_TAG: [
-            FLOW_VIEW_FLAG,
-            FLOW_DIRECTION_FLAG,
-            Flag("flagsmith_mode", True),
-            Flag("ai_summary", False),
-            Flag(VARIANT_PREVIEW, not app_environment),
-        ],
-        "repo:flagsmith-api": defaults,
-    }
+    app_flags = [
+        FLOW_VIEW_FLAG,
+        FLOW_DIRECTION_FLAG,
+        Flag("flagsmith_mode", True),
+        Flag("ai_summary", False),
+        Flag(VARIANT_PREVIEW, not app_environment),
+    ]
     scope_file = scope_file.resolve()
     if scope_file == env_file.resolve():
         raise SetupError("Use different paths for the environment and scope files.")
@@ -715,42 +660,34 @@ def setup(
             for experiment in client.list(experiments_path)
             if experiment["status"] not in ("completed", "created", "draft")
         }
-    tag_ids = {}
-    for label, flags in groups.items():
-        tag_id = ensure_tag(client, tags_path, project_tags, label, dry_run)
-        tag_ids[label] = tag_id
-        for flag in flags:
-            name = flag.name.casefold()
-            if feature := features.get(name):
-                configure_existing_flag(
-                    client,
-                    environment,
-                    feature,
-                    flag,
-                    active_experiment=active_experiments.get(feature["id"]),
-                    simulation_environment=not app_environment,
-                    dry_run=dry_run,
-                )
-                add_tag_to_flag(client, feature_path, feature, label, tag_id, dry_run)
-            else:
-                verb = "Would create" if dry_run else "Created"
-                if tag_id is not None and not dry_run:
-                    environment_defaults = [(environment, flag)]
-                    if name == VARIANT_PREVIEW:
-                        environment_defaults = [
-                            (
-                                env,
-                                replace(flag, enabled=env["name"] != PRODUCTION_ENVIRONMENT),
-                            )
-                            for env in environments
-                        ]
-                    features[name] = create_flag(
-                        client, feature_path, flag, tag_id, environment_defaults
-                    )
-                print(
-                    f"{verb} flag {flag.name} with tag {label} "
-                    f"({show_state(flag.enabled, flag.value, flag.variants)})."
-                )
+    tag_id = ensure_tag(client, tags_path, project_tags, CODE_FLOW_TAG, dry_run)
+    for flag in app_flags:
+        name = flag.name.casefold()
+        if feature := features.get(name):
+            configure_existing_flag(
+                client,
+                environment,
+                feature,
+                flag,
+                active_experiment=active_experiments.get(feature["id"]),
+                simulation_environment=not app_environment,
+                dry_run=dry_run,
+            )
+            add_tag_to_flag(client, feature_path, feature, CODE_FLOW_TAG, tag_id, dry_run)
+        else:
+            verb = "Would create" if dry_run else "Created"
+            if tag_id is not None and not dry_run:
+                environment_defaults = [(environment, flag)]
+                if name == VARIANT_PREVIEW:
+                    environment_defaults = [
+                        (env, replace(flag, enabled=env["name"] != PRODUCTION_ENVIRONMENT))
+                        for env in environments
+                    ]
+                create_flag(client, feature_path, flag, tag_id, environment_defaults)
+            print(
+                f"{verb} flag {flag.name} with tag {CODE_FLOW_TAG} "
+                f"({show_state(flag.enabled, flag.value, flag.variants)})."
+            )
 
     if app_environment:
         keys = {
@@ -768,21 +705,24 @@ def setup(
     if app_environment:
         # Use the actual tag memberships, including planned attachments in a preview.
         tagged_features = features.values() if dry_run else client.list(feature_path)
-        tag_names = {
-            label: {feature["name"] for feature in tagged_features if tag_id in feature["tags"]}
-            for label, tag_id in tag_ids.items()
-        }
+        labels_by_id = {tag["id"]: tag["label"] for tag in project_tags}
+        if tag_id is not None:
+            labels_by_id[tag_id] = CODE_FLOW_TAG
+        flag_names_by_tag: dict[str, set[str]] = {CODE_FLOW_TAG: set()}
+        for feature in tagged_features:
+            for feature_tag in feature["tags"]:
+                if label := labels_by_id.get(feature_tag):
+                    flag_names_by_tag.setdefault(label, set()).add(feature["name"])
         if dry_run:
-            for label, flags in groups.items():
-                for flag in flags:
-                    feature = features.get(flag.name.casefold())
-                    tag_names[label].add(feature["name"] if feature else flag.name)
+            for flag in app_flags:
+                feature = features.get(flag.name.casefold())
+                flag_names_by_tag[CODE_FLOW_TAG].add(feature["name"] if feature else flag.name)
 
     for variable in update_env_file(env_file, keys, dry_run):
         verb = "Would write" if dry_run else "Wrote"
         print(f"{verb} {variable} to the environment file.")
     if app_environment:
-        write_scopes(scope_file, environment_name, tag_names, dry_run)
+        write_scopes(scope_file, environment_name, flag_names_by_tag, dry_run)
 
 
 def main() -> int:
@@ -805,30 +745,23 @@ def main() -> int:
         default=DEFAULT_SCOPE_FILE,
         help="Scope file to generate (default data/flagsmith_scopes.json).",
     )
-    parser.add_argument(
-        "--environment-json",
-        type=Path,
-        default=DEFAULT_CLONE,
-        help="Local environment export or Flagsmith Git checkout (default data/repos/Flagsmith__flagsmith).",
-    )
     args = parser.parse_args()
     try:
         settings = read_env(args.env_file)
         admin_key = settings.get("FLAGSMITH_ADMIN_API_KEY")
         if not admin_key:
             raise SetupError("Set FLAGSMITH_ADMIN_API_KEY in the environment file.")
-        defaults = load_flagsmith_api_defaults(args.environment_json)
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
         options = {"environment_name": args.environment, "scope_file": args.scope_file}
         if args.dry_run:
             print("Dry run.")
-            setup(client, defaults, args.env_file, dry_run=True, **options)
+            setup(client, args.env_file, dry_run=True, **options)
         else:
             # Serialise setup in this checkout. Flagsmith does not enforce unique key names.
             directory = os.open(Path(__file__).resolve().parent, os.O_RDONLY)
             try:
                 fcntl.flock(directory, fcntl.LOCK_EX)
-                setup(client, defaults, args.env_file, dry_run=False, **options)
+                setup(client, args.env_file, dry_run=False, **options)
             finally:
                 os.close(directory)
     except SetupError as error:

@@ -48,7 +48,7 @@ push. Times are IST.
 | M1 | Nov 26, 11 PM | Analyzer: Python parser, call resolution, graph JSON, first-parent Git history, diff, flag detection, Mermaid export, CLI | Analyze a temporary Git fixture and render a diff as Mermaid |
 | M2 | Nov 26, 2 PM (done) | Server and web viewer with a commit timeline, overlay, side-by-side diagrams, source, and ELK layout | Open the Flagsmith API analysis and step through the changes |
 | M2.5 | Nov 26, 11 PM (done 3 PM) | Landing page, "Analyze a GitHub repo" import with background analysis and progress, a self-explanatory viewer, OpenFeature flag detection, Flagsmith/flagsmith (`api/`, last ~50 commits) as the main demo | Paste `https://github.com/Flagsmith/flagsmith` + `api/` on the landing page, watch progress, open the repo and understand a real commit without being told what the screen means |
-| M3 | Nov 27, 6 PM (done Nov 26, 3:30 PM) | Flagsmith wiring: JS SDK + identity, `flow_view` picks the view, `overlay_summary` banner, `flagsmith_mode` gates the Flagsmith panel, live flag colouring, stale/orphan/unused findings; seed a `flagsmith-api` project from `api/integrations/flagsmith/data/environment.json` | Flip a flag in Flagsmith and the live path in the diagram moves; turn `flagsmith_mode` off and the panel disappears |
+| M3 | Nov 27, 6 PM (done Nov 26, 3:30 PM) | Flagsmith wiring, view assignment via `flow_view`, `flagsmith_mode` toggle, repo-scoped findings and guarded-path highlighting | Open the Flagsmith API analysis and see orphan checks. Add a matching flag with `repo:flagsmith-api` and rerun setup to show the flag state and highlight its guarded paths. |
 | M4 | Nov 28, 2 PM | Experiment: Flagsmith Experimentation enabled on the Docker instance, exposure + success events from web app and simulator, results, roll-out of the winner | Run 1,000+ simulated reviewers; Flagsmith's results page shows lift and win probability per variant; winner rolled out |
 | M5 | Nov 29, 2 PM | README polish, architecture diagram, demo video script and recording (on the Flagsmith repo) | Video recorded; README has setup steps and "How we use Flagsmith" |
 | — | Nov 29, 5 PM | Submit | |
@@ -94,7 +94,7 @@ Why: a first-time user opening the M2 app had "zero idea what this web app does"
 - [x] D2. Analyze Flagsmith/flagsmith `api/`, last ~50 commits, tests and migrations excluded; record analysis time and flag checks found
 
 ### M3 Flagsmith
-- [x] Flagsmith flags in the existing project `code-flow` (free org = one project), grouped by tags `code-flow` and `repo:flagsmith-api`; scripted as `make flagsmith-setup` (`scripts/flagsmith_setup.py`), run on Nov 26
+- [x] Set up app flags in the existing `code-flow` project (free org = one project) with `make flagsmith-setup`. Setup derives repo scopes from existing `repo:<id>` tags on flags. The demo project currently has no repo flags.
 - [x] `web/src/flags.ts`: init SDK with self-hosted `api` URL + client-side env key, `identify(reviewerId)`, expose `flowView`, `flagsmithMode`
 - [x] Server `flagsmith_client.py`: live flags for the analyzed app via server-side env key; cache 10 s
 - [x] `GET /api/repos/{repo}/flags?sha` returns detected flags + live state + findings (live/off/stale/orphan/unused)

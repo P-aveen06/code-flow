@@ -219,9 +219,16 @@ allows only the SDK endpoints used here. Allow `GET /api/v1/flags/`,
 `POST /api/v1/events/`, plus the browser's `OPTIONS` preflights. Configure
 Flagsmith CORS for the exact Pages origin and SDK request headers. Keep the
 dashboard and admin API private. Set the Production keys and both API URLs
-in the table, then redeploy the API and rebuild Pages. To enable repo-scoped
-live state, upload the generated scope JSON as a Render secret file named
+in the table, then redeploy the API and rebuild Pages. Preview switches depend
+on the selected environment's `variant_preview` flag, which is off in
+Production. [Flagsmith SDK API](https://docs.flagsmith.com/integrating-with-flagsmith/flagsmith-api-overview) · [Self-hosted events](https://docs.flagsmith.com/experimentation/self-hosting)
+
+The current Flagsmith project has no repo flags, so the Flagsmith/flagsmith
+checks appear as **orphan** once connected with `flagsmith_mode` on. To see
+live, off, or stale findings and live-path highlighting, create a flag with
+the exact name of a detected check and tag it `repo:flagsmith-api`. Rerun
+`make flagsmith-setup` to refresh the scope file.
+
+Upload the refreshed scope JSON as a Render secret file named
 `flagsmith_scopes.json` and set `CODEFLOW_FLAGSMITH_SCOPES_PATH` to
-`/etc/secrets/flagsmith_scopes.json`. Preview switches still depend on the
-selected environment's `variant_preview` flag, which is off in Production.
-[Flagsmith SDK API](https://docs.flagsmith.com/integrating-with-flagsmith/flagsmith-api-overview) · [Self-hosted events](https://docs.flagsmith.com/experimentation/self-hosting) · [Render Docker secret files](https://render.com/docs/docker-secrets)
+`/etc/secrets/flagsmith_scopes.json`. [Render Docker secret files](https://render.com/docs/docker-secrets)

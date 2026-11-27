@@ -3,7 +3,6 @@
 import copy
 import io
 import json
-import subprocess
 import sys
 from pathlib import Path
 from urllib.error import HTTPError
@@ -206,47 +205,6 @@ class FakeAdminClient:
 
 
 @pytest.fixture
-def export_file(tmp_path):
-    states = [
-        {
-            "feature": {"name": name, "type": "STANDARD"},
-            "enabled": enabled,
-            "feature_state_value": value,
-        }
-        for name, enabled, value in [
-            ("bool_value", False, False),
-            ("integer_value", True, 0),
-            ("numeric_string", False, "123"),
-            ("empty_string", True, ""),
-            ("no_value", False, None),
-            ("config_value", True, "test-nonpublic-config-value"),
-            ("feature_lifecycle", False, None),
-            ("experimental_flags", False, None),
-            ("experimentation_warehouse_connection", False, None),
-            ("api_usage_overage_charges", True, None),
-            ("compress_dynamo_documents", True, None),
-            ("segment_membership_inspection", False, None),
-        ]
-    ]
-    states.append(
-        {
-            "feature": {"name": "onboarding", "type": "MULTIVARIATE"},
-            "enabled": False,
-            "feature_state_value": "",
-            "multivariate_feature_state_values": [
-                {
-                    "multivariate_feature_option": {"key": "single_page", "value": ""},
-                    "percentage_allocation": 0,
-                }
-            ],
-        }
-    )
-    path = tmp_path / "environment.json"
-    path.write_text(json.dumps({"api_key": "test-export-secret", "feature_states": states}))
-    return path
-
-
-@pytest.fixture
 def env_file(tmp_path):
     path = tmp_path / ".env"
     path.write_bytes(b'FLAGSMITH_ADMIN_API_KEY="test-admin-secret" # admin credential\r\n')
@@ -263,7 +221,7 @@ def test_missing_project_explains_how_to_create_it(env_file, scope_file, dry_run
     client = FakeAdminClient()
     before = env_file.read_bytes()
     with pytest.raises(setup_script.SetupError) as error:
-        setup_script.setup(client, [], env_file, dry_run, scope_file=scope_file)
+        setup_script.setup(client, env_file, dry_run, scope_file=scope_file)
     assert str(error.value) == "Create a project named code-flow in the Flagsmith dashboard first."
     assert client.calls == [("GET", "organisations/"), ("GET", "projects/?organisation=8")]
     assert env_file.read_bytes() == before
@@ -287,7 +245,6 @@ def test_environment_selection_uses_one_environment(
     selected = next(env for env in environments if env["name"] == expected)
     setup_script.setup(
         client,
-        [],
         env_file,
         dry_run=False,
         scope_file=scope_file,
@@ -342,7 +299,6 @@ def test_environment_selection_errors_before_writes(
     with pytest.raises(setup_script.SetupError, match=message):
         setup_script.setup(
             client,
-            [],
             env_file,
             dry_run=False,
             scope_file=scope_file,
@@ -354,14 +310,13 @@ def test_environment_selection_errors_before_writes(
 
 @pytest.mark.parametrize("versioned", [False, True])
 def test_development_cli_restores_experiment_states_and_preserves_production(
-    versioned, export_file, env_file, scope_file, monkeypatch, capsys
+    versioned, env_file, scope_file, monkeypatch, capsys
 ):
     client = FakeAdminClient()
     project = client.add_project()
     production = client.add_environment(project, "Production")
     development = client.add_environment(project, "Development", versioned=versioned)
-    defaults = setup_script.load_flagsmith_api_defaults(export_file)
-    setup_script.setup(client, defaults, env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     for flag_name, winner in (
         ("flow_view", "overlay_summary"),
@@ -396,8 +351,6 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
         str(env_file),
         "--scope-file",
         str(scope_file),
-        "--environment-json",
-        str(export_file),
     ]
     monkeypatch.setattr(sys, "argv", [*args, "--dry-run"])
     assert setup_script.main() == 0
@@ -423,7 +376,7 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert scope_file.read_bytes() == before_scope
     assert {key: client.states[key] for key in before_production} == before_production
     assert all(production["api_key"] not in path for _, path in client.calls)
-    assert len(client.features) == len(defaults) + 5
+    assert len(client.features) == 5
     assert preview_state["enabled"] is True
     assert preview_state["feature_state_value"] is None
     assert set(client.keys) == {production["id"]}
@@ -468,7 +421,7 @@ def test_development_protects_active_experiment_states(
     production = client.add_environment(project, "Production")
     development = client.add_environment(project, "Development", versioned=True)
     options = {"environment_name": "Development", "scope_file": scope_file}
-    setup_script.setup(client, [], env_file, dry_run=False, **options)
+    setup_script.setup(client, env_file, dry_run=False, **options)
 
     feature, state = client.project_flag(development, "flow_view")
     for row in state["multivariate_feature_state_values"]:
@@ -482,7 +435,7 @@ def test_development_protects_active_experiment_states(
     client.calls.clear()
     capsys.readouterr()
 
-    setup_script.setup(client, [], env_file, dry_run=dry_run, **options)
+    setup_script.setup(client, env_file, dry_run=dry_run, **options)
 
     output = capsys.readouterr().out
     assert [path for _, path in client.calls if path.endswith("/experiments/")] == [
@@ -510,28 +463,24 @@ def test_development_protects_active_experiment_states(
         assert allocations == [33, 33]
 
 
-def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_file, capsys):
+def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys):
     client = FakeAdminClient()
     project = client.add_project()
     environment = client.add_environment(project, "Production", versioned=True)
-    defaults = setup_script.load_flagsmith_api_defaults(export_file)
 
-    setup_script.setup(client, defaults, env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     assert len(client.projects) == 2
     assert len(client.environments) == 1
-    assert {tag["label"] for tag in client.tags} == {
-        "code-flow",
-        "repo:flagsmith-api",
-    }
+    assert [tag["label"] for tag in client.tags] == ["code-flow"]
     assert all(tag["project"] == project for tag in client.tags)
-    assert (
-        sum(
-            (method, path) == ("POST", f"projects/{project}/tags/") for method, path in client.calls
-        )
-        == 2
-    )
-    assert len(client.features) == len(defaults) + 5
+    assert {feature["name"] for feature in client.features} == {
+        "ai_summary",
+        "flagsmith_mode",
+        "flow_direction",
+        "flow_view",
+        "variant_preview",
+    }
     assert len(client.keys[environment["id"]]) == 1
 
     feature, state = client.project_flag(environment, "flow_view")
@@ -569,20 +518,12 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
         _, state = client.project_flag(environment, name)
         assert state["enabled"] is enabled
         assert state["feature_state_value"] is None
-    for flag in defaults:
-        feature, state = client.project_flag(environment, flag.name)
-        assert feature["type"] == flag.kind
-        assert state["enabled"] is flag.enabled
-        assert type(state["feature_state_value"]) is type(flag.value)
-        assert state["feature_state_value"] == flag.value
 
     assert json.loads(scope_file.read_bytes()) == {
         "schema": "code-flow/flagsmith-scopes@1",
         "project": "code-flow",
         "environment": "Production",
-        "repos": {
-            "Flagsmith__flagsmith": sorted(flag.name for flag in defaults),
-        },
+        "repos": {},
         "code_flow_flags": [
             "ai_summary",
             "flagsmith_mode",
@@ -599,7 +540,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
     client.calls.clear()
     before = (env_file.stat().st_mtime_ns, scope_file.stat().st_mtime_ns)
 
-    setup_script.setup(client, defaults, env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     second = capsys.readouterr()
     assert client.calls and all(method == "GET" for method, _ in client.calls)
@@ -608,7 +549,7 @@ def test_setup_is_idempotent_and_hides_credentials(export_file, env_file, scope_
     assert (env_file.stat().st_mtime_ns, scope_file.stat().st_mtime_ns) == before
     settings = setup_script.read_env(env_file)
     scopes = scope_file.read_text()
-    for secret in [*settings.values(), "test-export-secret", "test-nonpublic-config-value"]:
+    for secret in settings.values():
         assert secret not in first.out + first.err + second.out + second.err + scopes
 
 
@@ -617,7 +558,7 @@ def test_production_preserves_existing_rollouts_and_preview_state(env_file, scop
     project = client.add_project()
     production = client.add_environment(project, "Production")
     client.add_environment(project, "Development")
-    setup_script.setup(client, [], env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     for name, winner in (
         ("flow_view", "overlay_summary"),
@@ -633,13 +574,57 @@ def test_production_preserves_existing_rollouts_and_preview_state(env_file, scop
     client.calls.clear()
     capsys.readouterr()
 
-    setup_script.setup(client, [], env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     assert client.states == before
     assert client.calls and all(method == "GET" for method, _ in client.calls)
     output = capsys.readouterr().out
     for name in ("flow_view", "flow_direction", "variant_preview"):
         assert f"{name} differs from defaults" in output
+
+
+def test_rerun_with_empty_repo_tags_and_retired_flag(env_file, scope_file, capsys):
+    client = FakeAdminClient()
+    project = client.add_project()
+    client.add_environment(project, "Production")
+    development = client.add_environment(project, "Development")
+    for name in ("Production", "Development"):
+        setup_script.setup(
+            client, env_file, dry_run=False, environment_name=name, scope_file=scope_file
+        )
+
+    for label in ("repo:flagsmith-api", "repo:shop-demo"):
+        client.request("POST", f"projects/{project}/tags/", {"label": label})
+    code_flow_tag = next(tag for tag in client.tags if tag["label"] == "code-flow")
+    retired = client.request(
+        "POST",
+        f"projects/{project}/features/",
+        {"name": "sync_mode", "tags": [code_flow_tag["id"]]},
+    )
+    client.experiments[development["id"]] = [
+        {"feature": {"id": retired["id"]}, "name": "Sync mode", "status": "completed"}
+    ]
+    _, mode = client.project_flag(development, "flagsmith_mode")
+    mode["enabled"] = False
+    old_scope = json.loads(scope_file.read_bytes())
+    old_scope["repos"] = {"Flagsmith__flagsmith": ["feature_lifecycle", "experimental_flags"]}
+    scope_file.write_text(json.dumps(old_scope))
+    previous_state = copy.deepcopy((client.tags, client.features, client.states))
+    client.calls.clear()
+    capsys.readouterr()
+
+    for name in ("Production", "Development"):
+        setup_script.setup(
+            client, env_file, dry_run=False, environment_name=name, scope_file=scope_file
+        )
+
+    assert client.calls and all(method == "GET" for method, _ in client.calls)
+    assert all(not path.endswith(f"?feature={retired['id']}") for _, path in client.calls)
+    assert (client.tags, client.features, client.states) == previous_state
+    assert json.loads(scope_file.read_bytes())["repos"] == {}
+    output = capsys.readouterr().out
+    assert "flagsmith_mode differs from defaults" in output
+    assert "sync_mode" not in output
 
 
 @pytest.mark.parametrize(("environment", "state"), [("Production", "off"), ("Development", "on")])
@@ -651,7 +636,6 @@ def test_dry_run_lists_preview_default(env_file, scope_file, capsys, environment
 
     setup_script.setup(
         client,
-        [],
         env_file,
         dry_run=True,
         scope_file=scope_file,
@@ -673,14 +657,14 @@ def test_existing_flag_only_gets_missing_tag_and_scope_uses_actual_tags(
     tags_path = f"projects/{project}/tags/"
     features_path = f"projects/{project}/features/"
     api_tag = client.request("POST", tags_path, {"label": "repo:flagsmith-api"})
-    unrelated_tag = client.request("POST", tags_path, {"label": "repo:legacy"})
-    unrelated = client.request(
-        "POST", features_path, {"name": "legacy_flag", "tags": [unrelated_tag["id"]]}
+    legacy_tag = client.request("POST", tags_path, {"label": "repo:owner__legacy"})
+    legacy = client.request(
+        "POST", features_path, {"name": "legacy_flag", "tags": [legacy_tag["id"]]}
     )
-    _, unrelated_state = client.project_flag(environment, "legacy_flag")
-    unrelated_state["enabled"] = True
+    _, legacy_state = client.project_flag(environment, "legacy_flag")
+    legacy_state["enabled"] = True
     other_tag = client.request("POST", tags_path, {"label": "other"})
-    client.request("POST", features_path, {"name": "extra_api_flag", "tags": [api_tag["id"]]})
+    client.request("POST", features_path, {"name": "feature_lifecycle", "tags": [api_tag["id"]]})
     client.request("POST", features_path, {"name": "untagged_flag"})
     existing = client.request(
         "POST",
@@ -710,17 +694,18 @@ def test_existing_flag_only_gets_missing_tag_and_scope_uses_actual_tags(
     old_state = copy.deepcopy(state)
     client.calls.clear()
 
-    setup_script.setup(client, [], env_file, dry_run=False, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=False, scope_file=scope_file)
 
     code_flow_tag = next(tag for tag in client.tags if tag["label"] == "code-flow")
     assert feature == {**old_feature, "tags": [other_tag["id"], code_flow_tag["id"]]}
     assert state == old_state
     assert ("PATCH", f"{features_path}{existing['id']}/") in client.calls
     assert json.loads(scope_file.read_bytes())["repos"] == {
-        "Flagsmith__flagsmith": ["extra_api_flag"]
+        "Flagsmith__flagsmith": ["feature_lifecycle"],
+        "owner__legacy": ["legacy_flag"],
     }
-    assert unrelated_state["enabled"] is True
-    assert all(f"{features_path}{unrelated['id']}/" not in path for _, path in client.calls)
+    assert legacy_state["enabled"] is True
+    assert all(f"{features_path}{legacy['id']}/" not in path for _, path in client.calls)
     output = capsys.readouterr()
     (drift_note,) = [line for line in output.out.splitlines() if "differs from defaults" in line]
     assert "flow_view" in drift_note
@@ -741,7 +726,7 @@ def test_dry_run_has_no_api_or_file_writes(env_file, scope_file, capsys, existin
         scope_file.parent.mkdir()
         scope_file.write_bytes(b'{"old": true}\n')
 
-    setup_script.setup(client, [], env_file, dry_run=True, scope_file=scope_file)
+    setup_script.setup(client, env_file, dry_run=True, scope_file=scope_file)
 
     assert client.calls and all(method == "GET" for method, _ in client.calls)
     assert env_file.read_bytes() == original_env
@@ -796,25 +781,6 @@ def test_env_update_preserves_other_bytes_and_inline_comments(tmp_path):
     assert setup_script.update_env_file(path, values) == []
 
 
-def test_load_defaults_from_git_head(export_file, tmp_path, monkeypatch):
-    def local_git_only(command, **kwargs):
-        assert command == [
-            "git",
-            "-C",
-            str(tmp_path),
-            "show",
-            f"HEAD:{setup_script.ENVIRONMENT_EXPORT}",
-        ]
-        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
-        assert kwargs["stderr"] == subprocess.DEVNULL
-        return export_file.read_bytes()
-
-    monkeypatch.setattr(setup_script.subprocess, "check_output", local_git_only)
-    assert setup_script.load_flagsmith_api_defaults(
-        tmp_path
-    ) == setup_script.load_flagsmith_api_defaults(export_file)
-
-
 def test_warehouse_manual_step_for_unavailable_endpoint(capsys):
     class NoWarehouseAPI:
         def list(self, path):
@@ -845,7 +811,7 @@ def test_existing_warehouse_connection_is_preserved(capsys):
     ("status", "expected_schemes"), [(403, ["Api-Key"]), (401, ["Api-Key", "Token"])]
 )
 def test_main_hides_http_error_url_and_body(
-    status, expected_schemes, export_file, env_file, monkeypatch, capsys
+    status, expected_schemes, env_file, monkeypatch, capsys
 ):
     authorizations = []
 
@@ -871,8 +837,6 @@ def test_main_hides_http_error_url_and_body(
             "--dry-run",
             "--env-file",
             str(env_file),
-            "--environment-json",
-            str(export_file),
         ],
     )
     assert setup_script.main() == 1

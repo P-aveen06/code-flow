@@ -284,12 +284,12 @@ Flags are defined in the `code-flow` project and have a state in each
 environment. The setup script selects Production by default and accepts
 `--environment` for Development or another simulation environment.
 On creation, `variant_preview` starts off in Production and on in the
-simulation environments. Later Production runs report any state differences.
-
-| Tag | Flags |
-|---|---|
-| `code-flow` | `flow_view`, `flow_direction`, `flagsmith_mode`, `ai_summary`, `variant_preview` |
-| `repo:flagsmith-api` | The 13 Flagsmith API flags seeded from `api/integrations/flagsmith/data/environment.json` in Flagsmith/flagsmith |
+simulation environments. Reruns report state differences for all five app
+flags in Production and for `flagsmith_mode` and `ai_summary` in simulation
+environments. Setup manages the five flags below under the `code-flow` tag.
+The retired `sync_mode` flag remains in the project after its Development
+experiment completed with the manual button as control and no rollout. The
+app uses the manual refresh button without reading that flag.
 
 The web app uses `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` and the API server uses
 `CODEFLOW_FLAGSMITH_SERVER_KEY`. Use Development keys for `develop` and
@@ -378,6 +378,12 @@ dry runs preview the new flag, both metrics, and the 50/50 experiment.
 Detects Flagsmith flag checks in the analyzed Python code and overlays live
 flag state from Flagsmith.
 
+The `code-flow` Flagsmith project currently has no repo flags, so detected
+checks in Flagsmith/flagsmith appear as **orphan** when the server is connected.
+To see live, off, or stale findings and live-path highlighting, create a flag
+with the exact name of a detected check in your Flagsmith project and tag it
+`repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.
+
 Detection (analyzer, `codeflow/flags.py`):
 - The configurable method list includes `is_feature_enabled`,
   `get_feature_value`, `has_feature`, `feature_enabled`, `get_value`, and the
@@ -402,10 +408,12 @@ The server reads live flag state from the shared environment.
   are cached for ten seconds across repositories.
 - `make flagsmith-setup` reads the project tags and writes
   `data/flagsmith_scopes.json` (`code-flow/flagsmith-scopes@1`). Its `repos`
-  object maps each analyzed repo ID to its flag names. The server reads the
-  file from the data directory by default, with `CODEFLOW_FLAGSMITH_SCOPES_PATH`
-  as an override. A repo's live state is limited to its scope and excludes
-  `code_flow_flags`. The admin key is used during setup only.
+  object maps each repo ID to the flag names assigned to its `repo:<id>` tag.
+  The `repo:flagsmith-api` tag maps to `Flagsmith__flagsmith`. Empty tags are
+  omitted, so `repos` can be empty. The server reads the file from the data
+  directory by default, with `CODEFLOW_FLAGSMITH_SCOPES_PATH` as an override.
+  A repo's live state is limited to its scope and excludes `code_flow_flags`.
+  The admin key is used during setup only.
 - With no server key or a failed lookup, the API returns `connected: false`
   with an error, a null `fetched_at`, and only checked flags, with `unknown`
   status, `in_flagsmith: false`, and null `enabled`, `value`, and guarded-edge

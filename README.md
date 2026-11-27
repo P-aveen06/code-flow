@@ -71,17 +71,19 @@ make flagsmith-setup-dry-run
 make flagsmith-setup
 ```
 
-Setup provisions the app flags under `code-flow`, seeds the analyzed API flags
-under `repo:flagsmith-api`, and writes the Production SDK keys and scope
-file. Restart `make dev` to load the keys. If setup requests warehouse
-configuration, enable **Flagsmith database** under **Environment Settings →
-Warehouse**. Development enables the view and direction previews. Preview
-reviews stay local.
+Setup provisions the app flags under `code-flow` and writes the Production SDK
+keys and a scope file based on existing project tags. Restart `make dev` to
+load the keys. If setup requests warehouse configuration, enable **Flagsmith
+database** under **Environment Settings → Warehouse**. Development enables
+the view and direction previews. Preview reviews stay local.
 
-The viewer finds Flagsmith and OpenFeature checks, shows live, off, orphan,
-unused, and stale findings, and marks the calls guarded by live flags.
-The Flagsmith API analysis found 13 checks across 10 flags, including the
-orphan `experimentation_warehouses`. [Flagsmith findings screenshot](docs/screenshots/m3-flagsmith-orphan-and-stale.png)
+The demo project has no repo flags, so the Flagsmith and OpenFeature checks in
+Flagsmith/flagsmith appear as **orphan** when connected with `flagsmith_mode`
+on. To see live, off, or stale findings and live-path highlighting, create a
+flag with the exact name of a detected check in your Flagsmith project and tag
+it `repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.
+
+[Earlier demo with repo flags configured](docs/screenshots/m3-flagsmith-orphan-and-stale.png)
 
 ### Replay the experiments in Development
 
