@@ -113,3 +113,49 @@ The time metric is the mean `diff_understood` value per exposure, with reviewers
 - Both replays reach the same conclusions as Production on the primary metrics: `overlay_summary` beats `side_by_side` on understanding, and `vertical` beats `horizontal` on long flows, with credible intervals above zero and win probabilities of 99.9–100 %.
 - The exact percentages differ because Flagsmith's per-environment hashing put some reviewers in different variants, which changes their sampled outcomes. The secondary time metrics are inconclusive in Development.
 - These are simulated reviewers whose behaviour encodes the hypotheses; agreement between the two runs shows that the pipeline and Flagsmith's analysis are consistent, not that real users behave this way.
+
+# sync_mode (Development)
+
+**Status** · Full benchmark and Flagsmith results pending.
+
+| Variant | Share | Refresh schedule |
+|---|---:|---|
+| A · `manual_button` | 34% | Manual check on each modeled reviewer visit |
+| B · `per_repo_toggle` | 33% | Auto-sync for the only repo or two of five. Manual checks for the rest |
+| C · `global_toggle` | 33% | Auto-sync for every repo |
+
+**Measured** · The [benchmark harness](../scripts/sync_benchmark.py) times
+the real importer, local Git fetches, snapshot analysis, API requests, and the
+production landing page in headless Chrome. It samples API process CPU and
+RSS, tracks disk growth, and polls for each upstream SHA to become visible in
+`/commits`. Chrome uses the Development client key with a benchmark-local
+preview endpoint, so the timing includes the SDK and UI work on loopback.
+GitHub network latency and Flagsmith service latency are outside the
+benchmark. The three sizes start with the shop demo's eight commits or 50 and
+200 first-parent commits touching Flagsmith's `api/` directory.
+
+**Modeled** · Each interval delivers one new commit per repo at a seeded
+phase. Manual checks follow a seeded visit schedule, defaulting to 12 visits
+per repo per hour at the five-minute interval. CPU per hour at 300 seconds
+is a projection from measured process samples and refresh counts. Freshness
+for Flagsmith combines measured time from refresh start to the SHA appearing
+with a seeded uniform wait until the next tick or visit. A value of at most
+300 seconds emits the conversion. The default panel gets a seeded workload
+per identity, with a 40/40/20 size mix and a 70/30 mix of one and five repos.
+Flagsmith assigns variants using those traits and the reviewer identity.
+
+## Full benchmark by variant, size, and repo count
+
+**[Pending]** Link the dated Markdown tables and raw JSON in
+`docs/benchmarks/` after completing the full 18-cell matrix.
+
+## Flagsmith results
+
+| Variant | Exposures | New commit within 5 min | Mean freshness (s) | Mean landing page (ms) | Mean server CPU (ms/hour) |
+|---|---:|---:|---:|---:|---:|
+| A · Manual button | Pending | Pending | Pending | Pending | Pending |
+| B · Per-repo toggle | Pending | Pending | Pending | Pending | Pending |
+| C · Global toggle | Pending | Pending | Pending | Pending | Pending |
+
+**[Pending]** Add the observed lift, credible intervals, and interpretation
+after replaying the full benchmark in Development.

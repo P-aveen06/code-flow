@@ -21,6 +21,13 @@ from config import (
 from diffs import load_diffs
 from experiments import Experiment, load_experiment
 from history import reserve_reviewers
+from measured import (
+    MeasuredExperiment,
+    MeasuredSummary,
+    load_benchmark,
+    require_workloads,
+    run_measured,
+)
 from model import MODELS
 from panels import EXPERIENCE_BANDS, Panel, generate_panel, load_panel, profile_counts, select_panel
 from personas import PersonaModel, load_personas
@@ -55,7 +62,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--rate", type=float, default=20, help="live reviewers per second (default 20)"
     )
     parser.add_argument("--seed", type=int, default=7, help="sampling seed (default 7)")
-    parser.add_argument("--model", choices=MODELS, default="hypothesis")
+    parser.add_argument(
+        "--model",
+        choices=(*MODELS, "measured"),
+        help="default hypothesis, or measured with --benchmark",
+    )
+    parser.add_argument("--benchmark", type=Path, help="sync_mode benchmark JSON")
     parser.add_argument("--dry-run", action="store_true", help="assign and record events offline")
     parser.add_argument(
         "--allow-repeat",
@@ -106,6 +118,21 @@ def _print_summary(
         print(f"{variant:<{width}} {stats.reviewers:>9} {success:>15} {elapsed:>12}")
 
 
+def _print_measured_summary(summary: dict[str, MeasuredSummary], path: Path, dry_run: bool) -> None:
+    mode = "dry run" if dry_run else "Flagsmith"
+    print(f"Measured sync_mode replay ({mode}) from {path}.")
+    print(
+        f"{'Variant':<18} {'Reviewers':>9} {'Within 5 min':>13} {'Page ms':>12} {'CPU ms/h':>12} {'Freshness s':>12}"
+    )
+    for variant, row in summary.items():
+        success = f"{row.success_rate:.1%}" if row.success_rate is not None else "-"
+        metrics = "".join(
+            f"{value:>12,.2f}" if value is not None else f"{'-':>12}"
+            for value in (row.median_ms, row.median_cpu_ms, row.median_freshness_s)
+        )
+        print(f"{variant:<18} {row.reviewers:>9} {success:>13}{metrics}")
+
+
 def _print_persona_summary(summary: dict[str, VariantSummary], personas: PersonaModel) -> None:
     print("\nSimulated persona counts")
     print(f"{'Attribute':<22} {'Value':<20}" + "".join(f" {variant:>16}" for variant in summary))
@@ -148,7 +175,9 @@ def _check_repeats(flag: str, count: int, *, confirmed: bool, allow_repeat: bool
     print(message, file=sys.stderr)
 
 
-def _simulation_target(requested: str | None, *, dry_run: bool) -> tuple[str, str, str]:
+def _simulation_target(
+    requested: str | None, *, dry_run: bool, development_only: bool = False
+) -> tuple[str, str, str]:
     production = requested == PRODUCTION_ENVIRONMENT
     key_name = PRODUCTION_KEY if production else SIMULATION_KEY
     names = ("CODEFLOW_SIM_ENVIRONMENT",)
@@ -159,6 +188,15 @@ def _simulation_target(requested: str | None, *, dry_run: bool) -> tuple[str, st
     environment = name_value(
         configured if requested is None else requested, "Flagsmith environment"
     )
+    if development_only:
+        if environment.casefold() != DEFAULT_SIM_ENVIRONMENT.casefold():
+            raise SimulationError("The sync_mode experiment is available only in Development.")
+        environment = DEFAULT_SIM_ENVIRONMENT
+        configured = (
+            DEFAULT_SIM_ENVIRONMENT
+            if configured.casefold() == environment.casefold()
+            else configured
+        )
     print(f"Using Flagsmith environment code-flow/{environment}.", flush=True)
     if environment.casefold() == PRODUCTION_ENVIRONMENT.casefold() and not production:
         raise SimulationError("Targeting Production requires an explicit --environment Production.")
@@ -225,10 +263,28 @@ def main(argv: list[str] | None = None) -> int:
             _print_profiles(args.panel, reviewers, personas)
             return 0
 
-        environment, api_url, key = _simulation_target(args.environment, dry_run=args.dry_run)
         experiment = load_experiment(
             named_path(EXPERIMENTS_DIR, args.experiment, ".yaml"), personas
         )
+        is_measured = isinstance(experiment, MeasuredExperiment)
+        if is_measured:
+            if args.benchmark is None or args.model not in (None, "measured"):
+                raise ValueError("sync_mode requires --benchmark PATH and uses the measured model.")
+        elif args.benchmark is not None or args.model == "measured":
+            raise ValueError("--benchmark and --model measured require --experiment sync_mode.")
+        environment, api_url, key = _simulation_target(
+            args.environment,
+            dry_run=args.dry_run,
+            development_only=experiment.flag == "sync_mode",
+        )
+        if is_measured:
+            benchmark = load_benchmark(args.benchmark)
+            require_workloads(benchmark, experiment, reviewers, args.seed)
+        else:
+            source, diffs = load_diffs(
+                REPO_ROOT / "data", long_flows_only=experiment.long_flows_only
+            )
+
         known_repeats = set()
         if (
             not args.dry_run
@@ -243,7 +299,6 @@ def main(argv: list[str] | None = None) -> int:
             _check_repeats(
                 experiment.flag, len(known_repeats), confirmed=True, allow_repeat=args.allow_repeat
             )
-        source, diffs = load_diffs(REPO_ROOT / "data", long_flows_only=experiment.long_flows_only)
         client = (
             DryRunClient(experiment.allocations)
             if args.dry_run
@@ -256,15 +311,24 @@ def main(argv: list[str] | None = None) -> int:
                 allow_repeat=args.allow_repeat,
             )
         )
-        summary = run_simulation(
-            client,
-            experiment,
-            diffs,
-            reviewers=reviewers,
-            model_name=args.model,
-            rate=None if args.dry_run else args.rate,
-            seed=args.seed,
-        )
+        rate = None if args.dry_run else args.rate
+        if is_measured:
+            summary = run_measured(
+                client, experiment, benchmark, reviewers=reviewers, rate=rate, seed=args.seed
+            )
+            _print_measured_summary(summary, args.benchmark, args.dry_run)
+        else:
+            model = args.model or "hypothesis"
+            summary = run_simulation(
+                client,
+                experiment,
+                diffs,
+                reviewers=reviewers,
+                model_name=model,
+                rate=rate,
+                seed=args.seed,
+            )
+            _print_summary(summary, model, source, len(diffs), args.dry_run, experiment)
     except FlagsmithFeatureDoesNotExistError:
         print(f"The selected Flagsmith environment has no {experiment.flag} flag.", file=sys.stderr)
         return 1
@@ -281,7 +345,6 @@ def main(argv: list[str] | None = None) -> int:
         print("Simulation interrupted.", file=sys.stderr)
         return 130
 
-    _print_summary(summary, args.model, source, len(diffs), args.dry_run, experiment)
     if args.persona_summary:
         _print_persona_summary(summary, personas)
     return 0

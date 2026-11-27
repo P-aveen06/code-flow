@@ -58,6 +58,14 @@ available in the viewer. The server saves the switches in the data directory.
 Set `CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS` to change the refresh interval
 (300 seconds by default, minimum 10).
 
+Run `make sync-benchmark WORKDIR=/path/to/benchmark` from the repo root to
+measure the three variants in isolation. Install dependencies first and set
+`CODEFLOW_CHROME_PATH` if Chrome is outside its standard macOS location. Use
+`make sync-benchmark-quick` with the same `WORKDIR` for the one-repo smoke
+run, and `BENCH_ARGS=--offline` to reuse a populated Git cache. Reports land
+in `docs/benchmarks/`. Rehearse a full report with
+`make simulate-sync BENCHMARK=docs/benchmarks/sync_mode-YYYY-MM-DD.json SIM_ARGS=--dry-run`.
+
 ## How we use Flagsmith
 
 ### Branches and environments

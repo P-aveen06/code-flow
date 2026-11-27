@@ -1,20 +1,24 @@
 """Run the reviewer simulation and calculate local experiment summaries."""
 
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from random import Random
 from statistics import median
 from time import monotonic, sleep
+from typing import TYPE_CHECKING
 
 from flagsmith.models import Flag
+from flagsmith.types import TraitMapping
 
 from clients import ExperimentClient
 from diffs import DiffSample
-from experiments import Experiment
 from model import Decision
 from panels import Panel
 from personas import Persona
+
+if TYPE_CHECKING:
+    from experiments import Experiment
 
 
 class SimulationError(Exception):
@@ -31,7 +35,7 @@ class VariantSummary:
 
 def run_simulation(
     client: ExperimentClient,
-    experiment: Experiment,
+    experiment: "Experiment",
     diffs: Sequence[DiffSample],
     *,
     reviewers: Panel,
@@ -53,22 +57,7 @@ def run_simulation(
             started_at = clock()
             diff = random.choice(diffs)
             traits = persona.traits()
-            flag = client.get_experiment_flag(experiment.flag, identifier=identifier, traits=traits)
-            if not (
-                isinstance(flag, Flag)
-                and flag.enabled
-                and flag.experiment
-                and flag.experiment.in_experiment
-                and flag.variant
-            ):
-                raise SimulationError(
-                    f"The {experiment.flag} flag must have an active experiment with variant keys."
-                )
-            variant = flag.value
-            if not isinstance(variant, str) or variant not in model.variants:
-                raise SimulationError(
-                    f"The {experiment.flag} flag returned an unknown variant value."
-                )
+            variant = assigned_variant(client, experiment.flag, model.variants, identifier, traits)
             decision = model.sample(variant, diff.size, random, persona=persona, depth=diff.depth)
             event = experiment.success_event if decision.succeeded else experiment.failure_event
             value = (
@@ -94,9 +83,36 @@ def _summarize(reviews: list[tuple[Persona, Decision]]) -> VariantSummary:
         reviewers=count,
         success_rate=sum(decision.succeeded for _, decision in reviews) / count if count else None,
         median_ms=median(decision.elapsed_ms for _, decision in reviews) if count else None,
-        persona_counts={
-            "role": Counter(persona.role for persona, _ in reviews),
-            "codebase_familiarity": Counter(persona.codebase_familiarity for persona, _ in reviews),
-            "reading_style": Counter(persona.reading_style for persona, _ in reviews),
-        },
+        persona_counts=persona_counts([persona for persona, _ in reviews]),
     )
+
+
+def persona_counts(personas: Sequence[Persona]) -> dict[str, Counter[str]]:
+    return {
+        "role": Counter(persona.role for persona in personas),
+        "codebase_familiarity": Counter(persona.codebase_familiarity for persona in personas),
+        "reading_style": Counter(persona.reading_style for persona in personas),
+    }
+
+
+def assigned_variant(
+    client: ExperimentClient,
+    feature: str,
+    variants: Collection[str],
+    identifier: str,
+    traits: TraitMapping,
+) -> str:
+    flag = client.get_experiment_flag(feature, identifier=identifier, traits=traits)
+    if not (
+        isinstance(flag, Flag)
+        and flag.enabled
+        and flag.experiment
+        and flag.experiment.in_experiment
+        and flag.variant
+    ):
+        raise SimulationError(
+            f"The {feature} flag must have an active experiment with variant keys."
+        )
+    if not isinstance(flag.value, str) or flag.value not in variants:
+        raise SimulationError(f"The {feature} flag returned an unknown variant value.")
+    return flag.value

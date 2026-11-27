@@ -1,7 +1,10 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim simulate-dry-run simulate panel-profiles
+.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim simulate-dry-run simulate panel-profiles sync-benchmark sync-benchmark-quick simulate-sync
+
+BENCH_ARGS ?=
+SIM_ARGS ?=
 
 help:
 	@echo "install  Install Python and web dependencies"
@@ -15,6 +18,10 @@ help:
 	@echo "simulate-dry-run         Rehearse flow_view offline with the default reviewer panel"
 	@echo "simulate                 Run flow_view in the simulation environment with the default panel"
 	@echo "panel-profiles          Show the default reviewer panel's traits offline"
+
+	@echo "sync-benchmark          Measure the full sync matrix (WORKDIR=path)"
+	@echo "sync-benchmark-quick    Smoke-test sync measurements (WORKDIR=path)"
+	@echo "simulate-sync           Replay benchmark data in Development (BENCHMARK=path)"
 
 analyze-flagsmith:
 	bash examples/analyze_flagsmith.sh
@@ -36,6 +43,14 @@ simulate:
 
 panel-profiles:
 	cd simulator && uv run python simulate.py --panel default --profiles
+
+sync-benchmark sync-benchmark-quick:
+	@test -n "$(WORKDIR)" || { echo "Set WORKDIR to a dedicated benchmark directory."; exit 2; }
+	python3 scripts/sync_benchmark.py --workdir "$(WORKDIR)" $(if $(filter sync-benchmark-quick,$@),--quick) $(BENCH_ARGS)
+
+simulate-sync:
+	@test -n "$(BENCHMARK)" || { echo "Set BENCHMARK to a sync benchmark JSON file."; exit 2; }
+	uv run --project simulator python simulator/simulate.py --experiment sync_mode --panel default --benchmark "$(BENCHMARK)" $(SIM_ARGS)
 
 install:
 	cd analyzer && uv sync

@@ -1,0 +1,15 @@
+# Workload assignment is independent of Flagsmith variant assignment.
+flag: sync_mode
+mode: measured
+variants:
+  manual_button: {control: true, allocation: 34}
+  per_repo_toggle: {allocation: 33}
+  global_toggle: {allocation: 33}
+events:
+  page_load: sync_page_load_ms
+  server_cpu: sync_server_cpu_ms
+  freshness: sync_freshness_s
+  conversion: new_commit_seen_within_5min
+workload:
+  repo_sizes: {small: 40, medium: 40, large: 20}
+  repo_counts: {1: 70, 5: 30}

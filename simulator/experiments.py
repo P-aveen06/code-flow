@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import name_value, number, read_yaml, section
+from measured import MeasuredExperiment, measured_experiment
 from model import BehaviourModel, PersonaInteractions, VariantBehaviour
 from personas import PersonaModel, read_effect
 
@@ -62,9 +63,12 @@ def _interactions(
     return interactions
 
 
-def load_experiment(path: Path, personas: PersonaModel) -> Experiment:
+def load_experiment(path: Path, personas: PersonaModel) -> Experiment | MeasuredExperiment:
+    data = read_yaml(path)
+    if isinstance(data, dict) and data.get("mode") == "measured":
+        return measured_experiment(data)
     config = section(
-        read_yaml(path),
+        data,
         path.name,
         "flag",
         "success_event",

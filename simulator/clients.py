@@ -19,7 +19,7 @@ class ExperimentClient(Protocol):
     ) -> Flag | DefaultFlag: ...
 
     def track_event(
-        self, event: str, *, identifier: str, value: int | None, traits: TraitMapping
+        self, event: str, *, identifier: str, value: float | None, traits: TraitMapping
     ) -> None: ...
 
     def close(self) -> None: ...
@@ -30,7 +30,7 @@ class DryRunClient:
 
     def __init__(self, allocations: Mapping[str, int]) -> None:
         self.allocations = allocations
-        self.events: list[tuple[str, str, str | int | None]] = []
+        self.events: list[tuple[str, str, str | int | float | None]] = []
         self.identity_traits: dict[str, TraitMapping] = {}
         self.closed = False
 
@@ -58,7 +58,7 @@ class DryRunClient:
         )
 
     def track_event(
-        self, event: str, *, identifier: str, value: int | None, traits: TraitMapping
+        self, event: str, *, identifier: str, value: float | None, traits: TraitMapping
     ) -> None:
         self.events.append((event, identifier, value))
 

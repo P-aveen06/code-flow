@@ -411,8 +411,16 @@ load. The landing page evaluates the assigned variant with
 
 The manual button is available in all three variants. The two auto-sync
 variants show each GitHub import's sync status on the landing page. The
-benchmark will compare the variants as the repository and commit counts
-grow, using these metrics in Flagsmith.
+[benchmark harness](../scripts/sync_benchmark.py) compares three history sizes
+at one and five repositories with isolated local upstreams and a real
+server and Chrome. Its dated reports in `docs/benchmarks/` include the raw
+samples, observed rates, and formulas for the 300-second projections.
+The [measured simulator config](../simulator/experiments/sync_mode.yaml)
+assigns seeded workload traits to the default panel. After Flagsmith assigns
+a variant, the simulator replays values from the matching benchmark cell.
+It adds a modeled wait to measured refresh-to-visible time for freshness.
+See the [results record](experiment-results.md#sync_mode-development) for
+the measurement and reviewer assumptions.
 
 | Metric | Event | Aggregation | Expected direction |
 |---|---|---|---|
