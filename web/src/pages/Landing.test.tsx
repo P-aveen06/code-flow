@@ -19,10 +19,7 @@ const mockFetch = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.stubEnv("DEV", false);
   vi.stubEnv("VITE_HOSTED_DEMO", "");
-  vi.stubEnv("VITE_FLAGSMITH_API_URL", "");
-  vi.stubEnv("VITE_CODEFLOW_FLAGSMITH_ENV_KEY", "");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", mockFetch);
   mockFetch.mockReset().mockImplementation(async () => Response.json([demo]));
@@ -39,109 +36,68 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function open(search = "") {
-  window.history.replaceState(null, "", `/${search}`);
+async function open() {
+  window.history.replaceState(null, "", "/");
   await act(async () => root.render(<App />));
 }
 
-describe("landing previews", () => {
-  function connectFlagsmith(response: () => Promise<Response>) {
-    vi.stubEnv("VITE_FLAGSMITH_API_URL", "https://flags.test/api/v1/");
-    vi.stubEnv("VITE_CODEFLOW_FLAGSMITH_ENV_KEY", "demo");
-    mockFetch.mockImplementation(async (url) => String(url).startsWith("https://flags.test/")
-      ? response() : Response.json([demo]));
-  }
+describe("landing", () => {
+  it("offers the Flagsmith demo link and repository import form", async () => {
+    await open();
 
-  function flag(enabled: boolean) {
-    return { enabled, feature_state_value: null, feature: { id: 1, name: "variant_preview" } };
-  }
+    const demoLink = container.querySelector('a[href="/repo/Flagsmith__flagsmith"]');
+    expect(demoLink?.textContent).toBe("Open the Flagsmith demo");
+    expect(container.querySelector('a[href="#import"]')?.textContent).toBe("Analyze your own repo");
+    const form = container.querySelector<HTMLFormElement>("#import form");
+    expect(form?.querySelector('label[for="import-url"]')?.textContent).toBe("GitHub repository URL");
+    expect(form?.querySelector('label[for="import-subdir"]')?.textContent).toBe("Subfolder (optional)");
+    expect(form?.querySelector('label[for="import-maxCommits"]')?.textContent).toBe("Number of recent commits");
 
-  it.each(["a", "b", "c"])("offers the shared import form and demo link in local preview %s", async (variant) => {
-    vi.stubEnv("DEV", true);
-    await open(`?landing=${variant}`);
-
-    const preview = container.querySelector(`.landing-preview--${variant}`);
-    expect(preview?.querySelector('label[for="import-url"]')?.textContent).toBe("GitHub repository URL");
-    expect(preview?.querySelector('label[for="import-subdir"]')).not.toBeNull();
-    expect(preview?.querySelector('label[for="import-maxCommits"]')).not.toBeNull();
-    const demoLink = preview?.querySelector(".landing-preview__actions a, .import-examples a");
-    expect(demoLink?.getAttribute("href")).toBe("/repo/Flagsmith__flagsmith");
-
-    await act(async () => preview?.querySelector<HTMLFormElement>("form")?.requestSubmit());
-    expect(preview?.querySelector('[role="alert"]')?.textContent).toContain("Enter a public GitHub repository URL");
+    await act(async () => form?.requestSubmit());
+    expect(form?.querySelector('[role="alert"]')?.textContent).toContain("Enter a public GitHub repository URL");
     expect(document.activeElement?.id).toBe("import-url");
   });
 
-  it.each(["", "?landing=unknown"])("keeps the default in development without a valid override (%s)", async (search) => {
-    vi.stubEnv("DEV", true);
-    await open(search);
-    expect(container.querySelector("main.landing")).not.toBeNull();
-  });
-
-  it("keeps the production default with no Flagsmith connection", async () => {
-    await open("?landing=a");
-    expect(container.querySelector("main.landing")).not.toBeNull();
-    expect(container.querySelector("main.landing-preview")).toBeNull();
-  });
-
-  it.each(["enabled", "disabled", "missing", "unavailable"])(
-    "gates the production override when variant_preview is %s", async (state) => {
-      connectFlagsmith(async () => state === "unavailable"
-        ? Response.json({}, { status: 503 })
-        : Response.json({ flags: state === "missing" ? [] : [flag(state === "enabled")] }));
-      await open("?landing=b&reviewer=landing-test");
-
-      expect(mockFetch).toHaveBeenCalledWith("https://flags.test/api/v1/identities/?identifier=landing-test", expect.anything());
-      expect(Boolean(container.querySelector("main.landing-preview--b"))).toBe(state === "enabled");
-      expect(Boolean(container.querySelector("main.landing"))).toBe(state !== "enabled");
-    },
-  );
-
-  it("keeps the default and skips the flag request without a query override", async () => {
-    connectFlagsmith(async () => Response.json({ flags: [flag(true)] }));
+  it("explains the Production rollout, code flag checks, and Development previews", async () => {
     await open();
-    expect(container.querySelector("main.landing")).not.toBeNull();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const strip = container.querySelector('section[aria-labelledby="flags-use-title"]');
+    expect(strip?.querySelector("h2")?.textContent).toBe("How Flagsmith is used");
+    const cards = Array.from(strip?.querySelectorAll("article") ?? [], (card) => card.textContent);
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toContain("flow_view experiment");
+    expect(cards[0]).toContain("Overlay + summary won with a 30.6% relative lift in understanding");
+    expect(cards[0]).toContain("1,300 simulated reviewers. It rolled out in Production.");
+    expect(cards[1]).toContain("Flagsmith and OpenFeature flag checks in the code and shows which calls they guard");
+    expect(cards[2]).toContain("variant_preview");
+    expect(cards[2]).toContain("Development only");
   });
 
-  it.each(["a", "b", "c"])("shows and clears the startup status and skeleton in preview %s", async (variant) => {
-    vi.stubEnv("DEV", true);
-    vi.stubEnv("VITE_HOSTED_DEMO", "1");
-    mockFetch.mockRejectedValueOnce(new Error("offline")).mockRejectedValueOnce(new Error("offline"));
-    await open(`?landing=${variant}`);
-
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading repositories…");
-    expect(container.querySelector('.repo-list[aria-hidden="true"]')).not.toBeNull();
-    expect(container.querySelector("progress")).toBeNull();
-    await act(async () => vi.advanceTimersByTimeAsync(3000));
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("Waking up the demo server (about 30 s)…");
-    expect(container.querySelector('progress[aria-label="Demo server startup"]')?.hasAttribute("value")).toBe(false);
-    await act(async () => vi.advanceTimersByTimeAsync(4000));
-    expect(container.querySelector('.repo-list[aria-hidden="true"]')).toBeNull();
-    expect(container.querySelector("progress")).toBeNull();
-    expect(container.querySelector('a[aria-label="Open Flagsmith/flagsmith"]')).not.toBeNull();
+  it("keeps the hosted-demo notice off by default", async () => {
+    await open();
+    expect(container.textContent).not.toContain("Imports and new commits on this demo are temporary");
   });
 });
 
 describe("hosted landing", () => {
-  it("shows the wake-up message after three seconds and clears it when the list arrives", async () => {
+  it("shows the startup progress after three seconds and clears it when the list arrives", async () => {
     vi.stubEnv("VITE_HOSTED_DEMO", "1");
     let finish!: (response: Response) => void;
     mockFetch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     await open();
 
-    expect(container.textContent).toContain("Loading repositories…");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading repositories…");
+    expect(container.querySelector('.repo-list[aria-hidden="true"]')).not.toBeNull();
     expect(container.textContent).toContain("Imports and new commits on this demo are temporary");
-    const examples = container.querySelectorAll(".import-examples__actions > *");
-    expect(examples).toHaveLength(1);
-    expect(examples[0].getAttribute("href")).toBe("/repo/Flagsmith__flagsmith");
-    expect(examples[0].textContent).toContain("Flagsmith/flagsmith (api/)");
     await act(async () => vi.advanceTimersByTimeAsync(2999));
-    expect(container.textContent).not.toContain("Waking up the demo server…");
+    expect(container.querySelector("progress")).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("Waking up the demo server…");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Waking up the demo server (about 30 s)…");
+    expect(container.querySelector('progress[aria-label="Demo server startup"]')?.hasAttribute("value")).toBe(false);
     await act(async () => finish(Response.json([demo])));
-    expect(container.textContent).not.toContain("Waking up the demo server…");
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.querySelector("progress")).toBeNull();
+    expect(container.querySelector('.repo-list[aria-hidden="true"]')).toBeNull();
     expect(container.querySelector('a[aria-label="Open Flagsmith/flagsmith"]')).not.toBeNull();
   });
 
@@ -156,14 +112,9 @@ describe("hosted landing", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
     await act(async () => vi.advanceTimersByTimeAsync(4999));
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(container.textContent).toContain("Waking up the demo server…");
+    expect(container.textContent).toContain("Waking up the demo server (about 30 s)…");
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(mockFetch).toHaveBeenCalledTimes(3);
     expect(container.querySelector('a[aria-label="Open Flagsmith/flagsmith"]')).not.toBeNull();
-  });
-
-  it("keeps the notice off by default", async () => {
-    await open();
-    expect(container.textContent).not.toContain("Imports and new commits on this demo are temporary");
   });
 });

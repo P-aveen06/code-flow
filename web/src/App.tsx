@@ -22,7 +22,7 @@ export default function App() {
         </AppLink>
       </header>
       {route.page === "viewer" && <Viewer key={route.id} id={route.id} search={search} />}
-      {route.page === "landing" && !redirect && <Landing search={search} />}
+      {route.page === "landing" && !redirect && <Landing />}
       {route.page === "not-found" && (
         <main className="app-message">
           <div className="message-stack">

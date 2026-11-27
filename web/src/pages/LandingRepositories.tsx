@@ -2,24 +2,21 @@ import { AppLink } from "../AppLink";
 import { repoPath } from "../router";
 import type { Repo, RepoStatus } from "../types";
 import type { RequestState } from "../useRequest";
-import type { LandingVariant } from "../view";
 import { displaySubdir } from "./importHelpers";
 
 const repoStatusLabels: Record<RepoStatus, string> = {
   queued: "Queued", cloning: "Cloning…", analyzing: "Analyzing…", ready: "Ready", error: "Error",
 };
 
-function RepositoryLoading({ preview, waking }: { preview: boolean; waking: boolean }) {
-  if (!preview) return <p role="status">{waking ? "Waking up the demo server…" : "Loading repositories…"}</p>;
-
+function RepositoryLoading({ waking }: { waking: boolean }) {
   return (
     <>
-      <div className="landing-preview__loading">
+      <div className="repositories__loading">
         <p role="status">{waking ? "Waking up the demo server (about 30 s)…" : "Loading repositories…"}</p>
         {waking && <progress aria-label="Demo server startup" />}
       </div>
       <ul className="repo-list" aria-hidden="true">
-        <li className="landing-preview__skeleton">
+        <li className="repo-list__skeleton">
           <div className="repo-list__details"><span /><span /></div>
           <span />
           <span />
@@ -29,17 +26,14 @@ function RepositoryLoading({ preview, waking }: { preview: boolean; waking: bool
   );
 }
 
-export function LandingRepositories({ variant, repos, waking }: {
-  variant: LandingVariant | null;
+export function LandingRepositories({ repos, waking }: {
   repos: RequestState<Repo[]>;
   waking: boolean;
 }) {
-  const sectionClass = variant === "b" || variant === "c" ? "repositories" : "card repositories";
-
   return (
-    <section className={sectionClass} aria-labelledby="repositories-title">
+    <section className="card repositories" aria-labelledby="repositories-title">
       <h2 id="repositories-title">Analyzed repositories</h2>
-      {repos.status === "loading" && <RepositoryLoading preview={variant !== null} waking={waking} />}
+      {repos.status === "loading" && <RepositoryLoading waking={waking} />}
       {repos.status === "error" && <p role="alert">{repos.message}</p>}
       {repos.status === "ready" && (repos.data.length ? (
         <ul className="repo-list">
@@ -61,7 +55,7 @@ export function LandingRepositories({ variant, repos, waking }: {
             </li>
           ))}
         </ul>
-      ) : <p className="empty-state">No repositories analyzed yet. Add a GitHub repo{variant === "a" ? "" : " above"} to get started.</p>)}
+      ) : <p className="empty-state">No repositories analyzed yet. Add a GitHub repo to get started.</p>)}
     </section>
   );
 }

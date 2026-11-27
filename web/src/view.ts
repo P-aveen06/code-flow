@@ -2,7 +2,6 @@ import { navigate } from "./router";
 
 export type FlowView = "side_by_side" | "overlay" | "overlay_summary";
 export type FlowDirection = "horizontal" | "vertical";
-export type LandingVariant = "a" | "b" | "c";
 
 export const FLOW_VIEWS: readonly FlowView[] = ["side_by_side", "overlay", "overlay_summary"];
 export const FLOW_DIRECTIONS: readonly FlowDirection[] = ["horizontal", "vertical"];
@@ -12,11 +11,6 @@ export function readPreviewOverrides(search: string, previewEnabled: boolean) {
   return {
     viewOverride: params.get("view"), directionOverride: params.get("direction"),
   };
-}
-
-export function readLandingVariant(search: string): LandingVariant | null {
-  const variant = new URLSearchParams(search).get("landing");
-  return variant === "a" || variant === "b" || variant === "c" ? variant : null;
 }
 
 export function chooseFlowView(override: string | null, readExperimentValue: () => unknown): FlowView {

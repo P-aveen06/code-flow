@@ -1,26 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
-import { useVariantPreview } from "../flags";
 import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
 import type { ImportRequest, ImportResponse, ImportStatus } from "../types";
 import { useRequest } from "../useRequest";
-import { readLandingVariant } from "../view";
 import { validateImport } from "./importHelpers";
 import type { ImportFields } from "./importHelpers";
 import { ImportProgress } from "./ImportProgress";
+import { LandingFlags } from "./LandingFlags";
+import { LandingHero } from "./LandingHero";
 import { LandingImport, type FormError } from "./LandingImport";
-import { LandingPreview } from "./LandingPreview";
 import { LandingRepositories } from "./LandingRepositories";
-
-const example: ImportFields = { url: "https://github.com/Flagsmith/flagsmith", subdir: "api", maxCommits: "50" };
 
 type Job = ImportResponse & { body: ImportRequest };
 
-export function Landing({ search }: { search: string }) {
-  const requestedVariant = readLandingVariant(search);
-  const previewEnabled = useVariantPreview(!import.meta.env.DEV && requestedVariant ? search : undefined);
-  const variant = import.meta.env.DEV || previewEnabled ? requestedVariant : null;
+export function Landing() {
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
   const [fields, setFields] = useState<ImportFields>({ url: "", subdir: "", maxCommits: "30" });
   const [formError, setFormError] = useState<FormError | null>(null);
@@ -110,8 +104,8 @@ export function Landing({ search }: { search: string }) {
     }
   }
 
-  function submit(values: ImportFields) {
-    const result = validateImport(values);
+  function submit() {
+    const result = validateImport(fields);
     if ("body" in result) void startImport(result.body);
     else {
       setFormError(result);
@@ -119,49 +113,28 @@ export function Landing({ search }: { search: string }) {
     }
   }
 
-  const importForm = (
-    <>
-      <LandingImport
-        variant={variant} hosted={hosted} fields={fields} formError={formError} busy={busy} submitting={submitting}
-        onEdit={edit} onSubmit={() => submit(fields)} onExample={() => { setFields(example); submit(example); }}
-      />
-      {job && (
-        <ImportProgress
-          job={job} update={update} pollError={pollError}
-          onRetry={() => {
-            if (pollError) {
-              setPollError(null);
-              setJob({ ...job });
-            } else void startImport(job.body);
-          }}
-        />
-      )}
-    </>
-  );
-  const repositories = <LandingRepositories variant={variant} repos={repos} waking={waking} />;
-
-  if (variant) return <LandingPreview variant={variant} importForm={importForm} repositories={repositories} />;
-
   return (
     <main className="landing">
-      <div className="landing__intro">
-        <section aria-labelledby="product-title">
-          <h1 id="product-title">code-flow</h1>
-          <p className="landing__pitch">See how your code's flow changes, commit by commit, as a diagram instead of a 1,000-line diff.</p>
-          <p className="landing__support">For Python repositories. Built for the Flagsmith Toggle Wars hackathon.</p>
-        </section>
-        <section className="landing__how" aria-labelledby="how-title">
-          <h2 id="how-title">How it works</h2>
-          <ol>
-            <li>Paste a GitHub repo.</li>
-            <li>code-flow maps the functions and the calls between them for each commit.</li>
-            <li>Click a commit to see what it changed. Green means added, red means removed, and amber means changed.</li>
-          </ol>
-        </section>
+      <LandingHero />
+      <LandingFlags />
+      <LandingRepositories repos={repos} waking={waking} />
+      <div className="landing__import" id="import" tabIndex={-1}>
+        <LandingImport
+          hosted={hosted} fields={fields} formError={formError} busy={busy} submitting={submitting}
+          onEdit={edit} onSubmit={submit}
+        />
+        {job && (
+          <ImportProgress
+            job={job} update={update} pollError={pollError}
+            onRetry={() => {
+              if (pollError) {
+                setPollError(null);
+                setJob({ ...job });
+              } else void startImport(job.body);
+            }}
+          />
+        )}
       </div>
-
-      <div className="landing__import">{importForm}</div>
-      {repositories}
     </main>
   );
 }

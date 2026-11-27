@@ -17,7 +17,7 @@ Cloudflare Pages serves the Vite build. One free Render Docker web service serve
 the FastAPI API. A single background thread handles Git imports and manual
 refreshes. The free service has 512 MB of RAM and an ephemeral filesystem. After 15 minutes without
 inbound traffic, the service can spin down. The next request can take 30–60
-seconds. The hosted landing page shows **Waking up the demo server…** after three seconds and retries the repo list
+seconds. The hosted landing page shows **Waking up the demo server (about 30 s)…** after three seconds and retries the repo list
 up to four times within a 75-second window. [Render free service behavior](https://render.com/docs/free)
 
 The Docker build analyzes the most recent 50 first-parent commits touching

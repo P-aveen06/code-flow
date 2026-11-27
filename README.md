@@ -3,13 +3,15 @@
 code-flow turns Python commits into diagrams of the functions and calls that
 changed. Import a public GitHub repository, pick a commit in the timeline, and
 click a function to read its source diff. The demo uses the `api/` folder of
-Flagsmith/flagsmith. It also shows where the code checks feature flags and which
-guarded calls are live when Flagsmith is connected.
+Flagsmith/flagsmith. The viewer also shows where the code checks feature flags
+and which calls those checks guard.
 
 **Live demo** [code-flow.pages.dev](https://code-flow.pages.dev) (the API can take up to a minute to wake) · [Deploy guide](docs/DEPLOY.md)
 
 Built for the WeMakeDevs × Flagsmith Toggle Wars hackathon, Track 01
 (**Test Something Real**).
+
+![code-flow landing page with a Flagsmith demo preview and the How Flagsmith is used section](docs/screenshots/landing.png)
 
 ## Main experiment · `flow_view`
 
@@ -51,10 +53,10 @@ make analyze-flagsmith
 make dev
 ```
 
-Open <http://localhost:5173/> and choose **Flagsmith/flagsmith**.
+Open <http://localhost:5173/> and choose **Open the Flagsmith demo**.
 The analysis script selects 50 recent first-parent commits that touch `api/`.
-You can also click **Flagsmith/flagsmith (api/)** to import the repo through
-the web app. For GitHub imports, **Check for new commits** fetches the default
+To import another repo, choose **Analyze your own repo**.
+For GitHub imports, **Check for new commits** fetches the default
 branch and keeps existing history up to the configured cap. The viewer keeps
 your selected commit while it remains in that history. [Refresh screenshot](docs/screenshots/check-for-new-commits.png)
 

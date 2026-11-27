@@ -120,13 +120,13 @@ export function exposeFlowAssignment(
   };
 }
 
-function useFlagSnapshot(reviewerId?: string) {
+function useFlagSnapshot(reviewerId: string) {
   const api = import.meta.env.VITE_FLAGSMITH_API_URL?.trim();
   const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
   const [result, setResult] = useState<FlagSnapshot & { reviewerId: string }>();
 
   useEffect(() => {
-    if (!api || !key || reviewerId === undefined) return;
+    if (!api || !key) return;
     const id = reviewerId;
     let active = true;
     let timer: number | undefined;
@@ -152,11 +152,6 @@ function useFlagSnapshot(reviewerId?: string) {
   }, [api, key, reviewerId]);
 
   return !api || !key ? unavailableFlags : result?.reviewerId === reviewerId ? result : undefined;
-}
-
-export function useVariantPreview(search?: string) {
-  const flags = useFlagSnapshot(search === undefined ? undefined : readReviewerId(search));
-  return flags?.variantPreview ?? false;
 }
 
 export function useCodeFlowFlags(search: string) {
