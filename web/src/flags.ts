@@ -8,6 +8,7 @@ import type { FlowView } from "./view";
 
 const reviewerKey = "code-flow:reviewer";
 const pollInterval = 10_000;
+const requestTimeout = 2_500;
 let tabReviewerId: string | undefined;
 let initialization: Promise<void> | undefined;
 const directionExposures = new Set<string>();
@@ -41,8 +42,7 @@ export function readReviewerId(
   return id ?? createId();
 }
 
-function initFlagsmith(environmentID: string) {
-  const api = import.meta.env.VITE_FLAGSMITH_API_URL || "http://localhost:8000/api/v1/";
+function initFlagsmith(api: string, environmentID: string) {
   return (initialization ??= flagsmith.init({
     api,
     environmentID,
@@ -58,7 +58,9 @@ function initFlagsmith(environmentID: string) {
         const keepalive = typeof options.body === "string" && new Blob([options.body]).size <= 64 * 1024;
         return fetch(`${url}/`, { ...options, keepalive });
       }
-      return fetch(url, { ...options, signal: options.signal ?? AbortSignal.timeout(5_000) });
+      const timeout = AbortSignal.timeout(requestTimeout);
+      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+      return fetch(url, { ...options, signal });
     },
   }).then(() => {
     // The SDK outlives the viewer, so keep flushing across route changes.
@@ -141,25 +143,23 @@ export function syncExposureKey(
 
 export function useCodeFlowFlags(search: string, surface: "viewer" | "landing" = "viewer") {
   const reviewerId = readReviewerId(search);
+  const api = import.meta.env.VITE_FLAGSMITH_API_URL?.trim();
+  const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
   const [result, setResult] = useState<FlagSnapshot & { reviewerId: string }>();
   const [assignment, setAssignment] = useState<FlowAssignment>();
 
   useEffect(() => {
-    const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
+    if (!api || !key) return;
     let active = true;
     let timer: number | undefined;
     const fallback = () => setResult({ reviewerId, ...unavailableFlags });
+    const initialize = () => initFlagsmith(api, key);
 
-    if (!key) {
-      fallback();
-      return;
-    }
-
-    async function refresh(initialKey?: string) {
+    async function refresh(initial = false) {
       try {
-        if (initialKey) await initFlagsmith(initialKey);
+        if (initial) await initialize();
         if (!active) return;
-        await (initialKey ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
+        await (initial ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
         if (!active) return;
         setResult({ reviewerId, ...readFlagSnapshot(flagsmith) });
       } catch {
@@ -169,11 +169,11 @@ export function useCodeFlowFlags(search: string, surface: "viewer" | "landing" =
       }
     }
 
-    void refresh(key);
+    void refresh(true);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [reviewerId]);
+  }, [api, key, reviewerId]);
 
-  const flags = result?.reviewerId === reviewerId ? result : undefined;
+  const flags = !api || !key ? unavailableFlags : result?.reviewerId === reviewerId ? result : undefined;
   const variantPreview = flags?.variantPreview ?? false;
   const { viewOverride, directionOverride, syncOverride } = readPreviewOverrides(search, variantPreview);
   const previewOverride = viewOverride ?? directionOverride ?? syncOverride;
@@ -241,8 +241,10 @@ export function readFlowDirection(
   flag: IFlagsmithFeature | null | undefined,
 ) {
   const assignedDirection = longFlow === true ? flagDirection(flag) : null;
+  // Production rollout for long flows from docs/experiment-results.md.
+  const fallback = longFlow === true ? "vertical" : "horizontal";
   return {
-    direction: parseFlowDirection(directionOverride ?? assignedDirection) ?? "horizontal",
+    direction: parseFlowDirection(directionOverride ?? assignedDirection) ?? fallback,
     assignedDirection,
     ready: directionOverride !== null || longFlow === false || (longFlow === true && flag !== undefined),
   };

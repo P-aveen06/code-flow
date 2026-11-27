@@ -18,12 +18,12 @@ from codeflow.analyze import BlobParseCache, analyze_repo, load_index
 from codeflow.git_history import list_commits
 from codeflow.graph import Commit
 
+from app.config import MAX_IMPORT_COMMITS
 from app.store import BadRequest, Store, python_warning
 
 GITHUB_URL = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?")
 ACTIVE_STATUSES = ("queued", "cloning", "analyzing")
 UNAVAILABLE = "Repository not found or not public"
-MAX_COMMITS = 200
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class ImportSource:
     max_commits: int
 
 
-def validate_import(payload: object) -> ImportSource:
+def validate_import(payload: object, *, limit: int = MAX_IMPORT_COMMITS) -> ImportSource:
     """Validate an import request and normalize its GitHub URL and subfolder."""
     if not isinstance(payload, dict):
         raise BadRequest("Import request must be a JSON object")
@@ -62,9 +62,9 @@ def validate_import(payload: object) -> ImportSource:
         or "\0" in subdir
     ):
         raise BadRequest("Subfolder must be a relative path without '..'")
-    max_commits = payload.get("max_commits", 30)
-    if type(max_commits) is not int or not 1 <= max_commits <= MAX_COMMITS:
-        raise BadRequest(f"max_commits must be an integer from 1 to {MAX_COMMITS}")
+    max_commits = payload.get("max_commits", min(30, limit))
+    if type(max_commits) is not int or not 1 <= max_commits <= limit:
+        raise BadRequest(f"max_commits must be an integer from 1 to {limit}")
 
     display_name = f"{owner}/{name}"
     return ImportSource(
@@ -181,9 +181,10 @@ def _refresh_limit(
     source: ImportSource,
     previous_head: str,
     fetch: Callable[..., None],
+    max_commits: int,
 ) -> int:
-    if source.max_commits == MAX_COMMITS:
-        return MAX_COMMITS
+    if source.max_commits == max_commits:
+        return max_commits
     git = ("-C", str(clone))
     history = _git(*git, "rev-list", "--first-parent", branch, error=UNAVAILABLE).splitlines()
     if previous_head not in history:
@@ -196,7 +197,7 @@ def _refresh_limit(
             return source.max_commits
 
     if not source.subdir:
-        return min(MAX_COMMITS, source.max_commits + history.index(previous_head))
+        return min(max_commits, source.max_commits + history.index(previous_head))
     count = _git(
         *git,
         "--literal-pathspecs",
@@ -208,7 +209,7 @@ def _refresh_limit(
         source.subdir,
         error=UNAVAILABLE,
     )
-    return min(MAX_COMMITS, source.max_commits + int(count))
+    return min(max_commits, source.max_commits + int(count))
 
 
 def _prepare_clone(
@@ -217,6 +218,7 @@ def _prepare_clone(
     source: ImportSource,
     previous_head: str | None,
     on_fetch: Callable[[], None],
+    max_commits: int,
 ) -> tuple[str, int]:
     depth = max(4 * source.max_commits, 100)
     git = ("-C", str(clone))
@@ -270,7 +272,7 @@ def _prepare_clone(
             raise ImportFailure(missing)
 
     limit = (
-        _refresh_limit(clone, branch, source, previous_head, fetch)
+        _refresh_limit(clone, branch, source, previous_head, fetch, max_commits)
         if previous_head
         else source.max_commits
     )
@@ -292,11 +294,14 @@ class RepoImporter:
         store: Store,
         git_url_builder: Callable[[str], str] | None = None,
         executor: Executor | None = None,
+        *,
+        max_commits: int = MAX_IMPORT_COMMITS,
     ) -> None:
         self.store = store
         self.git_url_builder = git_url_builder or (lambda url: url)
         self.executor = executor if executor is not None else ThreadPoolExecutor(max_workers=1)
         self._owns_executor = executor is None
+        self._max_commits = max_commits
         self._parse_cache = BlobParseCache(max_entries=5000)
         self._lock = Lock()
         self._jobs: dict[str, ImportJob] = {}
@@ -339,7 +344,7 @@ class RepoImporter:
         source = validate_import(metadata)
         if source.id != repo_id:
             raise BadRequest("The stored GitHub URL does not match the repository ID")
-        return source
+        return replace(source, max_commits=min(source.max_commits, self._max_commits))
 
     def _start(
         self, repo_id: str, source: ImportSource | None, *, automatic: bool = False
@@ -406,7 +411,12 @@ class RepoImporter:
             previous_commits = [entry["sha"] for entry in index["commits"]] if refresh else []
             previous_head = previous_commits[-1] if previous_commits else None
             branch, limit = _prepare_clone(
-                clone, self.git_url_builder(source.url), source, previous_head, count_fetch
+                clone,
+                self.git_url_builder(source.url),
+                source,
+                previous_head,
+                count_fetch,
+                self._max_commits,
             )
             self._update(
                 source.id,

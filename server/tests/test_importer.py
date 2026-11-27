@@ -183,6 +183,32 @@ def test_import_validation_and_cors(tmp_path: Path):
         assert "Content-Type" in response.headers["Access-Control-Allow-Headers"]
 
 
+def test_configured_cap_rejects_imports_and_bounds_refreshes(tmp_path: Path, local_repo: Path):
+    settings = Settings(tmp_path / "data", ORIGIN, max_import_commits=2)
+    app = create_app(
+        settings, git_url_builder=lambda _: local_repo.as_uri(), executor=InlineExecutor()
+    )
+    url = {"url": URL, "subdir": "shop"}
+
+    with TestClient(app) as client:
+        response = client.post(REPOS, json={**url, "max_commits": 3})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "max_commits must be an integer from 1 to 2"
+        assert client.get(REPOS).json() == []
+
+        # An omitted count defaults to the service limit when it is below 30.
+        assert client.post(REPOS, json=url).status_code == 202
+        old = client.get(f"{REPO}/commits").json()["commits"]
+        assert len(old) == 2
+        fresh = commit(local_repo, "shop/new.py", "def new(): pass\n", "Add new function")
+        assert client.post(f"{REPO}/refresh").status_code == 202
+        assert client.get(f"{REPO}/status").json()["new_commits"] == 1
+        assert [entry["sha"] for entry in client.get(f"{REPO}/commits").json()["commits"]] == [
+            old[-1]["sha"],
+            fresh,
+        ]
+
+
 def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch):
     settings = Settings(tmp_path / "data", ORIGIN)
     executor = InlineExecutor()

@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from collections import OrderedDict
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from threading import Lock
@@ -25,6 +26,8 @@ from codeflow.diff import (
 from codeflow.graph import FlagCheck, Graph, Node
 from codeflow.line_changes import LineDiff, LineRow, line_changes
 from codeflow.summary import summarize
+
+from app.config import DEFAULT_SNAPSHOT_CACHE_SIZE
 
 
 class NotFound(LookupError):
@@ -50,11 +53,18 @@ def python_warning(subdir: str) -> str:
 
 
 class Store:
-    def __init__(self, data_dir: Path, *, long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        *,
+        long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH,
+        snapshot_cache_size: int = DEFAULT_SNAPSHOT_CACHE_SIZE,
+    ) -> None:
         self.data_dir = data_dir.resolve()
         self.long_flow_min_depth = long_flow_min_depth
         self.lock = Lock()
-        self._snapshots: dict[tuple[Path, str], Graph] = {}
+        self._snapshot_cache_size = snapshot_cache_size
+        self._snapshots: OrderedDict[tuple[Path, str], Graph] = OrderedDict()
         self._commit_lists: dict[str, tuple[dict, dict]] = {}
         self._flag_checks: dict[tuple[Path, str], list[FlagCheck]] = {}
         self._files: dict[tuple[str, str, str], list[str]] = {}
@@ -86,15 +96,17 @@ class Store:
 
     def _snapshot(self, directory: Path, sha: str) -> Graph:
         key = (directory, sha)
-        if key not in self._snapshots:
-            try:
-                graph = load_snapshot(directory, sha)
-            except FileNotFoundError as exc:
-                raise NotFound(f"No snapshot for commit {sha}") from exc
-            if len(self._snapshots) == 64:
-                del self._snapshots[next(iter(self._snapshots))]
-            self._snapshots[key] = graph
-        return self._snapshots[key]
+        if key in self._snapshots:
+            self._snapshots.move_to_end(key)
+            return self._snapshots[key]
+        try:
+            graph = load_snapshot(directory, sha)
+        except FileNotFoundError as exc:
+            raise NotFound(f"No snapshot for commit {sha}") from exc
+        self._snapshots[key] = graph
+        if len(self._snapshots) > self._snapshot_cache_size:
+            self._snapshots.popitem(last=False)
+        return graph
 
     def _default_base(self, directory: Path, head: Graph, entry: dict) -> Graph:
         sha = diff_base(entry)
@@ -114,9 +126,9 @@ class Store:
                     previous.rename(directory)
                 raise
             self._commit_lists.pop(repo_id, None)
-            self._snapshots = {
-                key: graph for key, graph in self._snapshots.items() if key[0] != directory
-            }
+            self._snapshots = OrderedDict(
+                (key, graph) for key, graph in self._snapshots.items() if key[0] != directory
+            )
             self._flag_checks = {
                 key: checks for key, checks in self._flag_checks.items() if key[0] != directory
             }

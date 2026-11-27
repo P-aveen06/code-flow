@@ -159,7 +159,8 @@ refits after resizing settles. Full screen expands the Flow panel.
 
 ## HTTP API
 
-The server listens on port 8787 and serves JSON under `/api`. The
+The server listens on port 8787 by default and serves JSON under `/api`.
+The Docker image listens on `PORT` when supplied. The
 `CODEFLOW_DATA_DIR` default is `data/` at the code-flow repo root. Relative
 paths from the repo-root `.env` resolve against the repo root. Paths from
 process environment variables resolve against the working directory.
@@ -173,8 +174,9 @@ and responses use full SHAs.
   `status`, `message`, and `warning`. Local analyzer output has `url: null`
   and `subdir: ""`.
 - `POST /api/repos` accepts a JSON object with `url`, optional `subdir`
-  (default `""` for the repo root), and optional `max_commits` (integer 1–200,
-  default 30). Use a public `https://github.com/<owner>/<repo>` URL with an
+  (default `""` for the repo root), and optional `max_commits` (integer from 1 to
+  `CODEFLOW_MAX_IMPORT_COMMITS`, which defaults to 200). An omitted count uses
+  30 or the server limit if lower. Use a public `https://github.com/<owner>/<repo>` URL with an
   optional `.git` suffix and trailing slash. Owner and repo names use ASCII
   letters, digits, `.`, `_`, or `-`, with `.` and names containing `..` rejected.
   Use a repo-relative POSIX subfolder path without `..` components, a drive
@@ -189,8 +191,9 @@ and responses use full SHAs.
   limit from `source.json` and fetches the default branch into the existing
   clone. A repository without a GitHub source returns 409. An unknown ID
   returns 404. The saved limit grows by the number of new first-parent commits
-  that touch the subfolder, up to 200. If the previous newest commit is absent
-  from the default branch's first-parent history, the saved limit applies.
+  that touch the subfolder, up to the same server limit. If the previous newest
+  commit is absent from the default branch's first-parent history, refresh uses
+  the saved limit capped at the server limit.
   Refresh reuses cached parses and snapshots and publishes the refreshed
   output and limit together. The previous output remains readable during a
   refresh and after a failure.
@@ -226,6 +229,8 @@ and responses use full SHAs.
   (the five diff counts) and `summary`. Legacy indexes without `base` use the
   first parent or an empty graph for a root commit.
 - `GET /api/repos/{repo}/snapshots/{sha}` returns that commit's `code-flow/graph@1` JSON.
+  The API keeps the most recently used decoded graphs in memory.
+  `CODEFLOW_SNAPSHOT_CACHE_SIZE` defaults to 16 graphs.
 - `GET /api/repos/{repo}/flags?sha=SHA` returns `repo`, full `sha`,
   `flagsmith` (`connected`, `environment`, UTC `fetched_at`, `error`), and
   `flags`. Omit `sha` to use the newest listed commit. Each flag includes

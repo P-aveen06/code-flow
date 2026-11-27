@@ -54,6 +54,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-26T10:03:10Z"));
   vi.stubEnv("VITE_CODEFLOW_FLAGSMITH_ENV_KEY", "test-key");
+  vi.stubEnv("VITE_FLAGSMITH_API_URL", "https://flags.test/api/v1/");
+  vi.stubEnv("VITE_HOSTED_DEMO", "");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", mockFetch);
   reviewer = `sync-reviewer-${++sequence}`;
@@ -173,5 +175,49 @@ describe("landing sync variants", () => {
     expect(put).toHaveBeenLastCalledWith(body);
     expect(button.getAttribute("aria-checked")).toBe("true");
     expect(button.parentElement?.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+describe("hosted landing", () => {
+  beforeEach(() => vi.stubEnv("VITE_CODEFLOW_FLAGSMITH_ENV_KEY", ""));
+
+  it("shows the wake-up message after three seconds and clears it when the list arrives", async () => {
+    vi.stubEnv("VITE_HOSTED_DEMO", "1");
+    let finish!: (response: Response) => void;
+    mockFetch.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await open();
+
+    expect(container.textContent).toContain("Loading repositories…");
+    expect(container.textContent).toContain("Imports and new commits on this demo are temporary");
+    expect(container.querySelector('a[href="/repo/Flagsmith__flagsmith"]')?.textContent).toContain("Flagsmith/flagsmith (api/)");
+    await act(async () => vi.advanceTimersByTimeAsync(2999));
+    expect(container.textContent).not.toContain("Waking up the demo server…");
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Waking up the demo server…");
+    await act(async () => finish(Response.json([local])));
+    expect(container.textContent).not.toContain("Waking up the demo server…");
+    expect(container.querySelector('a[aria-label="Open shop-demo"]')).not.toBeNull();
+  });
+
+  it("retries network and server failures with backoff", async () => {
+    vi.stubEnv("VITE_HOSTED_DEMO", "1");
+    mockFetch.mockRejectedValueOnce(new Error("offline"));
+    mockFetch.mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    await open();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    await act(async () => vi.advanceTimersByTimeAsync(2000));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(4999));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Waking up the demo server…");
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('a[aria-label="Open shop-demo"]')).not.toBeNull();
+  });
+
+  it("keeps the notice off by default", async () => {
+    await open();
+    expect(container.textContent).not.toContain("Imports and new commits on this demo are temporary");
   });
 });

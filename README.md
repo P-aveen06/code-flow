@@ -2,6 +2,8 @@
 
 **See how your code's flow changes, commit by commit, as a diagram instead of a 1,000-line diff.**
 
+**Live demo** <LIVE_URL> · [Deploy guide](docs/DEPLOY.md)
+
 AI-generated code still needs review. A diagram of the calls that changed
 helps reviewers see what moved and decide where to read the source.
 
@@ -46,10 +48,10 @@ Built for the WeMakeDevs × Flagsmith **Toggle Wars** hackathon, Track 01
 - Find feature flag checks and highlight the guarded calls that are live.
 
 For GitHub imports, click **Check for new commits** in the viewer to fetch
-updates to the default branch for your imported folder (screenshot:
-[docs/screenshots/check-for-new-commits.png](docs/screenshots/check-for-new-commits.png)). New commits appear
-in **Commits** alongside existing history, up to 200 commits, and the viewer
-stays on your selected commit while it remains in that history.
+updates to the default branch for your imported folder. New commits appear
+in **Commits** alongside existing history, up to the server's configured limit
+(200 locally by default, 50 on the hosted demo). The viewer stays on your
+selected commit while it remains in that history. [Refresh screenshot](docs/screenshots/check-for-new-commits.png)
 
 The Development-only `sync_mode` experiment adds an **Auto-sync** switch
 for each GitHub import or an **Auto-sync all repos** switch on the landing

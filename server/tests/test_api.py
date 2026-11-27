@@ -10,7 +10,7 @@ from codeflow.analyze import load_commits, load_snapshot
 from codeflow.graph import Commit
 from fastapi.testclient import TestClient
 
-from app import config
+from app import config, store
 from app.config import Settings
 from app.main import create_app
 from app.store import NotFound, Store
@@ -343,6 +343,52 @@ def test_auto_sync_interval_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(name, invalid)
         with pytest.raises(ValueError, match=name):
             Settings.from_env()
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "default", "valid", "invalid"),
+    [
+        ("CODEFLOW_MAX_IMPORT_COMMITS", "max_import_commits", 200, "50", ("0", "201", "many")),
+        ("CODEFLOW_SNAPSHOT_CACHE_SIZE", "snapshot_cache_size", 16, "8", ("0", "-1", "many")),
+    ],
+)
+def test_deploy_limit_settings(
+    name: str,
+    field: str,
+    default: int,
+    valid: str,
+    invalid: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "_read_dotenv", lambda _: {})
+    monkeypatch.delenv(name, raising=False)
+    assert getattr(Settings.from_env(), field) == default
+    monkeypatch.setenv(name, valid)
+    assert getattr(Settings.from_env(), field) == int(valid)
+    for value in invalid:
+        monkeypatch.setenv(name, value)
+        with pytest.raises(ValueError, match=name):
+            Settings.from_env()
+
+
+def test_snapshot_cache_evicts_the_least_recently_used_commit(
+    demo_data: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commits = load_commits(demo_data / "shop-demo")
+    first, second, third = (commit.sha for commit in commits[:3])
+    loads = []
+
+    def record_load(directory: Path, sha: str):
+        loads.append(sha)
+        return load_snapshot(directory, sha)
+
+    monkeypatch.setattr(store, "load_snapshot", record_load)
+    monkeypatch.setenv("CODEFLOW_DATA_DIR", str(demo_data))
+    monkeypatch.setenv("CODEFLOW_SNAPSHOT_CACHE_SIZE", "2")
+    with TestClient(create_app()) as client:
+        for sha in (first, second, first, third, first, second):
+            assert client.get(f"{REPO_URL}/snapshots/{sha}").json()["commit"]["sha"] == sha
+    assert loads == [first, second, third, second]
 
 
 def test_code(client: TestClient, checkout_commit: Commit) -> None:

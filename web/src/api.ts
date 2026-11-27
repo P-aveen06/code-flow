@@ -1,4 +1,5 @@
 import { apiUrl } from "./config";
+import { waitFor } from "./waitFor";
 import type {
   AutoSyncResponse, AutoSyncSettings, CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GraphSnapshot, ImportRequest, ImportResponse,
   ImportStatus, Repo, RepoFlags,
@@ -47,6 +48,26 @@ export async function fetchRepos(signal?: AbortSignal): Promise<Repo[]> {
   return repos.map((repo) => "id" in repo ? repo : {
     ...repo, id: repo.name, url: null, subdir: null, status: "ready", message: "Ready", warning: null,
   });
+}
+
+export async function fetchHostedRepos(signal: AbortSignal): Promise<Repo[]> {
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(75_000)]);
+  try {
+    for (const delay of [2_000, 5_000, 15_000, 38_000]) {
+      try {
+        return await fetchRepos(requestSignal);
+      } catch (error) {
+        if (error instanceof HttpError && error.status < 500) throw error;
+      }
+      await waitFor(delay, requestSignal);
+    }
+    return await fetchRepos(requestSignal);
+  } catch (error) {
+    if (requestSignal.aborted && !signal.aborted) {
+      throw new Error("The demo server took too long to wake up. Reload the page to try again.");
+    }
+    throw error;
+  }
 }
 
 export function importRepo(body: ImportRequest, signal?: AbortSignal) {

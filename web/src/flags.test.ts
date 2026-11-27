@@ -175,8 +175,9 @@ describe("flow direction assignment", () => {
 
   it.each([
     undefined, null, { ...flag, value: null }, { ...flag, value: "other" }, { ...flag, enabled: false },
-  ])("falls back to horizontal without exposure for unavailable assignments", (assignment) => {
-    expect(readFlowDirection(null, true, assignment).direction).toBe("horizontal");
+  ])("falls back to vertical on long flows without exposure for unavailable assignments", (assignment) => {
+    expect(readFlowDirection(null, true, assignment).direction).toBe("vertical");
+    expect(readFlowDirection(null, false, assignment).direction).toBe("horizontal");
     expect(directionExposureKey("demo", true, null, assignment)).toBeNull();
   });
 
@@ -190,7 +191,7 @@ describe("flow direction assignment", () => {
     expect(readFlowDirection(null, false, flag).direction).toBe("horizontal");
     expect(readFlowDirection("vertical", false, flag).direction).toBe("vertical");
     expect(readFlowDirection("horizontal", true, flag).direction).toBe("horizontal");
-    expect(readFlowDirection("unknown", true, flag).direction).toBe("horizontal");
+    expect(readFlowDirection("unknown", true, flag).direction).toBe("vertical");
     expect(readFlowDirection(null, true, flag).direction).toBe("vertical");
   });
 

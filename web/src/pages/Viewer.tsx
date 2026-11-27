@@ -174,7 +174,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
     directionOverride, longFlow, directionFlag,
   );
   const { layout, hasCollapsedContext } = useDiffLayout(
-    diff, context.expanded, view === "side_by_side", flagsReady && directionReady ? direction : null, checkIds,
+    diff, context.expanded, view === "side_by_side", direction, checkIds,
   );
   const currentLayout = layout.status === "ready" ? layout.data : null;
   const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view, direction));
@@ -383,12 +383,11 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
               <p>No Python code found in {subdir ? displaySubdir(subdir) : "this repository"}. code-flow analyzes Python only for now.</p>
             </div>
           )}
-          {hasNodes && (!flagsReady || request.status === "loading") && (
+          {hasNodes && request.status === "loading" && (
             <p className="panel-message" role="status">Loading flow diff…</p>
           )}
           {request.status === "error" && <p className="panel-message" role="alert">{request.message}</p>}
-          {diff && flagsReady && !directionReady && <p className="panel-message" role="status">Loading flow direction…</p>}
-          {diff && flagsReady && directionReady && layout.status === "loading" && (
+          {diff && layout.status === "loading" && (
             <p className="panel-message" role="status">Laying out the flow…</p>
           )}
           {diff && layout.status === "error" && (

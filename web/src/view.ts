@@ -16,7 +16,8 @@ export function readPreviewOverrides(search: string, previewEnabled: boolean) {
 }
 
 export function chooseFlowView(override: string | null, readExperimentValue: () => unknown): FlowView {
-  return parseFlowView(override ?? readExperimentValue()) ?? "side_by_side";
+  // Production rollout from docs/experiment-results.md.
+  return parseFlowView(override ?? readExperimentValue()) ?? "overlay_summary";
 }
 
 export function parseFlowView(value: unknown): FlowView | null {

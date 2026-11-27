@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: code-flow-api
+    runtime: docker
+    plan: free
+    branch: main
+    autoDeployTrigger: "off"
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: CODEFLOW_WEB_ORIGIN
+        sync: false
+      - key: CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS
+        value: "3600"
+      - key: CODEFLOW_MAX_IMPORT_COMMITS
+        value: "50"
+      - key: CODEFLOW_SNAPSHOT_CACHE_SIZE
+        value: "8"
+      # Leave FLAGSMITH_API_URL unset until the public SDK endpoint is available.
+      - key: CODEFLOW_FLAGSMITH_SERVER_KEY
+        sync: false

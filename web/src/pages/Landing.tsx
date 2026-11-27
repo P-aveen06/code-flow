@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchRepos, importRepo } from "../api";
+import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
 import { AppLink } from "../AppLink";
 import { useCodeFlowFlags } from "../flags";
 import { pollRepoStatus } from "../pollRepoStatus";
@@ -23,6 +23,7 @@ type Job = ImportResponse & { body: ImportRequest };
 type FormError = { field?: keyof ImportFields; message: string };
 
 export function Landing({ search }: { search: string }) {
+  const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
   const { syncMode, syncOverride, assignedSyncMode, variantPreview } = useCodeFlowFlags(search, "landing");
   const autoSyncEnabled = syncMode !== "manual_button";
   const autoSync = useAutoSync(autoSyncEnabled);
@@ -33,12 +34,22 @@ export function Landing({ search }: { search: string }) {
   const [pollError, setPollError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [repoRevision, setRepoRevision] = useState(0);
+  const [waking, setWaking] = useState(false);
   const submission = useRef<AbortController | null>(null);
-  const loadRepos = useCallback((signal: AbortSignal) => fetchRepos(signal), [repoRevision]);
+  const loadRepos = useCallback((signal: AbortSignal) => (
+    hosted ? fetchHostedRepos(signal) : fetchRepos(signal)
+  ), [hosted, repoRevision]);
   const repos = useRequest(loadRepos);
   const busy = submitting || Boolean(job && !pollError && update?.status !== "error");
 
   useEffect(() => () => submission.current?.abort(), []);
+
+  useEffect(() => {
+    setWaking(false);
+    if (!hosted || repos.status !== "loading") return;
+    const timer = window.setTimeout(() => setWaking(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [hosted, loadRepos, repos.status]);
 
   useEffect(() => {
     if (!job) return;
@@ -173,15 +184,25 @@ export function Landing({ search }: { search: string }) {
               <button type="submit" className="btn btn--primary">{submitting ? "Starting analysis…" : "Analyze repository"}</button>
             </fieldset>
           </form>
+          {hosted && (
+            <p className="muted field__hint">
+              Imports and new commits on this demo are temporary and reset when the server restarts.
+              The Flagsmith/flagsmith and shop-demo examples are always available.
+            </p>
+          )}
           <div className="import-examples">
             <h3>Try an example</h3>
             <div className="import-examples__actions">
-              <button
+              {hosted ? (
+                <AppLink href={syncPreviewPath(repoPath("Flagsmith__flagsmith"), syncOverride)} className="btn btn--sm">
+                  Flagsmith/flagsmith (api/)
+                </AppLink>
+              ) : <button
                 type="button" className="btn btn--sm" disabled={busy}
                 onClick={() => { setFields(example); submit(example); }}
               >
                 Flagsmith/flagsmith (api/)
-              </button>
+              </button>}
               <AppLink href={syncPreviewPath(repoPath("shop-demo"), syncOverride)} className="btn btn--sm">shop-demo (tutorial)</AppLink>
             </div>
           </div>
@@ -214,7 +235,7 @@ export function Landing({ search }: { search: string }) {
         {autoSyncEnabled && autoSync.loadError && (
           <p className="muted" role="alert">Could not load auto-sync settings. {autoSync.loadError}</p>
         )}
-        {repos.status === "loading" && <p role="status">Loading repositories…</p>}
+        {repos.status === "loading" && <p role="status">{waking ? "Waking up the demo server…" : "Loading repositories…"}</p>}
         {repos.status === "error" && <p role="alert">{repos.message}</p>}
         {repos.status === "ready" && (repos.data.length ? (
           <ul className="repo-list">

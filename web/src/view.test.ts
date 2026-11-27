@@ -9,14 +9,14 @@ describe("chooseFlowView", () => {
     expect(chooseFlowView(null, () => view)).toBe(view);
   });
 
-  it.each([null, undefined, "other", false])("defaults to control for %s", (value) => {
-    expect(chooseFlowView(null, () => value)).toBe("side_by_side");
+  it.each([null, undefined, "other", false])("defaults to the rollout for %s", (value) => {
+    expect(chooseFlowView(null, () => value)).toBe("overlay_summary");
   });
 
   it.each([
     ["?view=overlay_summary&reviewer=demo-1", "overlay_summary"],
-    ["?view=other", "side_by_side"],
-    ["?view=", "side_by_side"],
+    ["?view=other", "overlay_summary"],
+    ["?view=", "overlay_summary"],
   ])("skips experiment exposure for %s", (search, expected) => {
     const readExperimentValue = vi.fn(() => "overlay");
     expect(chooseFlowView(readPreviewOverrides(search, true).viewOverride, readExperimentValue)).toBe(expected);

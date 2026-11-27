@@ -10,6 +10,8 @@ from codeflow.diff import LONG_FLOW_MIN_DEPTH
 DEFAULT_FLAGSMITH_API_URL = "http://localhost:8000/api/v1/"
 DEFAULT_AUTO_SYNC_INTERVAL = 300
 MIN_AUTO_SYNC_INTERVAL = 10
+MAX_IMPORT_COMMITS = 200
+DEFAULT_SNAPSHOT_CACHE_SIZE = 16
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -43,6 +45,8 @@ class Settings:
     scopes_path: Path | None = None
     long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH
     auto_sync_interval: int = DEFAULT_AUTO_SYNC_INTERVAL
+    max_import_commits: int = MAX_IMPORT_COMMITS
+    snapshot_cache_size: int = DEFAULT_SNAPSHOT_CACHE_SIZE
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -73,6 +77,22 @@ class Settings:
             raise ValueError(
                 f"CODEFLOW_AUTO_SYNC_INTERVAL_SECONDS must be an integer of at least {MIN_AUTO_SYNC_INTERVAL}."
             ) from None
+        try:
+            max_commits = int(values.get("CODEFLOW_MAX_IMPORT_COMMITS") or MAX_IMPORT_COMMITS)
+            if not 1 <= max_commits <= MAX_IMPORT_COMMITS:
+                raise ValueError
+        except ValueError:
+            raise ValueError(
+                f"CODEFLOW_MAX_IMPORT_COMMITS must be an integer from 1 to {MAX_IMPORT_COMMITS}."
+            ) from None
+        try:
+            cache_size = int(
+                values.get("CODEFLOW_SNAPSHOT_CACHE_SIZE") or DEFAULT_SNAPSHOT_CACHE_SIZE
+            )
+            if cache_size < 1:
+                raise ValueError
+        except ValueError:
+            raise ValueError("CODEFLOW_SNAPSHOT_CACHE_SIZE must be a positive integer.") from None
         return cls(
             data_dir=data_dir,
             web_origin=values.get("CODEFLOW_WEB_ORIGIN", "http://localhost:5173"),
@@ -83,6 +103,8 @@ class Settings:
             ),
             long_flow_min_depth=min_depth,
             auto_sync_interval=interval,
+            max_import_commits=max_commits,
+            snapshot_cache_size=cache_size,
         )
 
     def flag_scope(self, repo: str) -> tuple[str, set[str]]:

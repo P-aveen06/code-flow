@@ -29,8 +29,14 @@ def create_app(
     auto_sync_interval: float | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    store = Store(settings.data_dir, long_flow_min_depth=settings.long_flow_min_depth)
-    importer = RepoImporter(store, git_url_builder, executor)
+    store = Store(
+        settings.data_dir,
+        long_flow_min_depth=settings.long_flow_min_depth,
+        snapshot_cache_size=settings.snapshot_cache_size,
+    )
+    importer = RepoImporter(
+        store, git_url_builder, executor, max_commits=settings.max_import_commits
+    )
     auto_sync = AutoSync(
         importer, settings.auto_sync_interval if auto_sync_interval is None else auto_sync_interval
     )
@@ -105,7 +111,7 @@ def create_app(
 
     @app.post("/api/repos", status_code=202)
     def import_repo(payload: Annotated[Any, Body()] = None) -> dict[str, str]:
-        return importer.start(validate_import(payload))
+        return importer.start(validate_import(payload, limit=settings.max_import_commits))
 
     @app.post("/api/repos/{repo}/refresh", status_code=202)
     def refresh_repo(repo: str) -> dict[str, str]:
