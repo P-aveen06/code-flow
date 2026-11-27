@@ -301,6 +301,8 @@ also the web client key for Development. See `.env.example` for configuration.
 |---|---|---|
 | `flow_view` | multivariate string | The Track 01 experiment. Control `side_by_side`; variants `overlay` and `overlay_summary`. Allocation 34/33/33 while the test runs; roll out the winner by setting it to 100%. |
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
+| `branch_commit_count` | standard, integer value | Remote config for how many recent commits of a branch the GitHub repo details page lists and analyzes. Default 20. See [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md). |
+| `github_signin` | multivariate string | The import experiment. Control `url_import` (public URL form) and variant `github_signin` (Sign in with GitHub and a repo picker), split 50/50. See [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md). |
 | `flagsmith_mode` | boolean | Toggles flag findings and live colouring. The Flagsmith section always shows the active flow settings. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
 | `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |

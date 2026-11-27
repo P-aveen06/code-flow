@@ -376,7 +376,7 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert scope_file.read_bytes() == before_scope
     assert {key: client.states[key] for key in before_production} == before_production
     assert all(production["api_key"] not in path for _, path in client.calls)
-    assert len(client.features) == 5
+    assert len(client.features) == 7
     assert preview_state["enabled"] is True
     assert preview_state["feature_state_value"] is None
     assert set(client.keys) == {production["id"]}
@@ -384,6 +384,7 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     for flag_name, control, expected in (
         ("flow_view", "side_by_side", {"overlay": 33, "overlay_summary": 33}),
         ("flow_direction", "horizontal", {"vertical": 50}),
+        ("github_signin", "url_import", {"github_signin": 50}),
     ):
         flag, state = client.project_flag(development, flag_name)
         assert state["enabled"] is True
@@ -476,9 +477,11 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
     assert all(tag["project"] == project for tag in client.tags)
     assert {feature["name"] for feature in client.features} == {
         "ai_summary",
+        "branch_commit_count",
         "flagsmith_mode",
         "flow_direction",
         "flow_view",
+        "github_signin",
         "variant_preview",
     }
     assert len(client.keys[environment["id"]]) == 1
@@ -510,6 +513,17 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
     (weight,) = state["multivariate_feature_state_values"]
     assert weight["multivariate_feature_option"] == vertical["id"]
     assert weight["percentage_allocation"] == 50
+
+    signin, state = client.project_flag(environment, "github_signin")
+    assert signin["type"] == "MULTIVARIATE"
+    assert state["enabled"] is True
+    assert state["feature_state_value"] == "url_import"
+    (variant,) = signin["multivariate_options"]
+    assert variant["key"] == variant["string_value"] == "github_signin"
+    assert state["multivariate_feature_state_values"][0]["percentage_allocation"] == 50
+    _, state = client.project_flag(environment, "branch_commit_count")
+    assert state["enabled"] is True
+    assert state["feature_state_value"] == 20
     for name, enabled in [
         ("flagsmith_mode", True),
         ("ai_summary", False),
@@ -526,9 +540,11 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
         "repos": {},
         "code_flow_flags": [
             "ai_summary",
+            "branch_commit_count",
             "flagsmith_mode",
             "flow_direction",
             "flow_view",
+            "github_signin",
             "variant_preview",
         ],
     }

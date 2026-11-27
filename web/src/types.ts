@@ -10,12 +10,56 @@ export interface Repo {
   status: RepoStatus;
   message: string;
   warning: string | null;
+  // Private repos are visible only to the GitHub user who imported them.
+  visibility?: "public" | "private";
 }
 
 export interface ImportRequest {
   url: string;
   subdir: string;
   max_commits: number;
+}
+
+export interface PickedImportRequest {
+  github_repo_id: number;
+  installation_id: number;
+  // The default branch when left out.
+  branch?: string;
+  subdir: string;
+  max_commits: number;
+}
+
+export type Me =
+  | { configured: boolean; signed_in: false }
+  | { configured: true; signed_in: true; login: string; avatar_url: string; install_url: string };
+
+export interface GitHubRepoChoice {
+  id: number;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  installation_id: number;
+}
+
+export interface GitHubBranches {
+  repo: GitHubRepoChoice;
+  // The default branch comes first.
+  branches: string[];
+}
+
+export interface GitHubCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
+export interface GitHubCommitList {
+  branch: string;
+  // The count actually used: the server's import cap can lower the requested one.
+  limit: number;
+  commits: GitHubCommit[];
 }
 
 export interface ImportResponse {

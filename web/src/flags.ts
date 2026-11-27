@@ -77,10 +77,13 @@ interface FlagSnapshot {
   directionFlag: IFlagsmithFeature | null;
   flagsmithMode: boolean;
   variantPreview: boolean;
+  signinFlag: IFlagsmithFeature | null;
+  commitCountFlag: IFlagsmithFeature | null;
 }
 
 const unavailableFlags: FlagSnapshot = {
-  assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false,
+  assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false, signinFlag: null,
+  commitCountFlag: null,
 };
 
 function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
@@ -89,13 +92,18 @@ function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
 
 export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getAllFlags" | "hasFeature">): FlagSnapshot {
   if (!hasServerFlags(client)) return unavailableFlags;
-  const { flow_view: viewFlag, flow_direction: directionFlag } = client.getAllFlags();
+  const {
+    flow_view: viewFlag, flow_direction: directionFlag, github_signin: signinFlag,
+    branch_commit_count: commitCountFlag,
+  } = client.getAllFlags();
   return {
     assignmentKey: JSON.stringify([viewFlag?.value, viewFlag?.variant, viewFlag?.enabled, viewFlag?.experiment]),
     assignedView: parseFlowView(viewFlag?.value),
     directionFlag: directionFlag ?? null,
     flagsmithMode: client.hasFeature("flagsmith_mode"),
     variantPreview: client.hasFeature("variant_preview"),
+    signinFlag: signinFlag ?? null,
+    commitCountFlag: commitCountFlag ?? null,
   };
 }
 
@@ -246,4 +254,76 @@ export function useDirectionExposure(
     exposed: rendered && key !== null && exposure?.key === key && exposure.recorded,
     ready: key === null || exposure?.key === key,
   };
+}
+
+export const SIGNIN_VARIANTS = ["url_import", "github_signin"] as const;
+export type SigninVariant = (typeof SIGNIN_VARIANTS)[number];
+
+export function parseSigninVariant(value: unknown): SigninVariant | null {
+  return SIGNIN_VARIANTS.find((variant) => variant === value) ?? null;
+}
+
+// Used when Flagsmith is unreachable. The control keeps today's URL form.
+export function signinFallback(env: { readonly VITE_GITHUB_SIGNIN_FALLBACK?: string }): SigninVariant {
+  return parseSigninVariant(env.VITE_GITHUB_SIGNIN_FALLBACK) ?? "url_import";
+}
+
+export interface SigninAssignment {
+  reviewerId: string;
+  variant: SigninVariant;
+  // True only for a visitor Flagsmith placed in the github_signin experiment.
+  exposed: boolean;
+  preview: boolean;
+  // False while Flagsmith is still deciding, so the page does not flash the wrong variant.
+  ready: boolean;
+}
+
+export function useSigninVariant(search: string): SigninAssignment {
+  const reviewerId = readReviewerId(search);
+  const flags = useFlagSnapshot(reviewerId);
+  const override = flags?.variantPreview
+    ? parseSigninVariant(new URLSearchParams(search).get("signin"))
+    : null;
+  const flag = flags?.signinFlag;
+  const flagVariant = flag?.enabled ? parseSigninVariant(flag.value) : null;
+  const [exposure, setExposure] = useState<{ reviewerId: string; variant: SigninVariant | null; exposed: boolean }>();
+
+  useEffect(() => {
+    if (override !== null || flagVariant === null || exposure?.reviewerId === reviewerId) return;
+    // getExperimentFlag records the exposure, so call it once per visitor.
+    const experiment = flagsmith.getExperimentFlag("github_signin");
+    setExposure({
+      reviewerId,
+      variant: parseSigninVariant(experiment?.value),
+      exposed: experiment?.enabled === true && experiment.experiment?.inExperiment === true,
+    });
+  }, [override, flagVariant, reviewerId, exposure]);
+
+  const current = exposure?.reviewerId === reviewerId ? exposure : undefined;
+  return {
+    reviewerId,
+    variant: override ?? current?.variant ?? flagVariant ?? signinFallback(import.meta.env),
+    exposed: override === null && current?.exposed === true,
+    preview: override !== null,
+    ready: flags !== undefined && (override !== null || flagVariant === null || current !== undefined),
+  };
+}
+
+// The repo details page lists and analyzes this many recent commits of a branch.
+export const DEFAULT_BRANCH_COMMIT_COUNT = 20;
+const MAX_BRANCH_COMMIT_COUNT = 200;
+
+export function parseCommitCount(flag: IFlagsmithFeature | null | undefined): number {
+  if (!flag?.enabled) return DEFAULT_BRANCH_COMMIT_COUNT;
+  const { value } = flag;
+  const count = typeof value === "number" ? value
+    : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN;
+  return Number.isInteger(count) && count >= 1 && count <= MAX_BRANCH_COMMIT_COUNT
+    ? count : DEFAULT_BRANCH_COMMIT_COUNT;
+}
+
+// Remote config from the branch_commit_count flag. Not ready until Flagsmith answers or fails.
+export function useBranchCommitCount(search: string) {
+  const flags = useFlagSnapshot(readReviewerId(search));
+  return { count: parseCommitCount(flags?.commitCountFlag), ready: flags !== undefined };
 }

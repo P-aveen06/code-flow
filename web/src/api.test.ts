@@ -54,7 +54,8 @@ describe("API client", () => {
 
     await expect(importRepo(body)).resolves.toEqual(accepted);
     expect(mockFetch).toHaveBeenCalledWith("https://flow.test/gateway/api/repos", expect.objectContaining({
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      method: "POST", headers: { "X-Requested-With": "code-flow", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }));
     await expect(importRepo(body)).rejects.toEqual(new Error(detail));
   });

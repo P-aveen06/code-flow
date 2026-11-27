@@ -14,6 +14,7 @@ dependencies = [
     "code-flow-analyzer",
     "flagsmith>=6.7.0",
     "urllib3",
+    "pyjwt[crypto]>=2.8",
 ]
 
 [dependency-groups]

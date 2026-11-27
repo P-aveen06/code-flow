@@ -1,9 +1,17 @@
 import { apiUrl } from "./config";
 import { waitFor } from "./waitFor";
 import type {
-  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GraphSnapshot, ImportRequest, ImportResponse,
-  ImportStatus, Repo, RepoFlags,
+  CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GitHubBranches, GitHubCommitList, GitHubRepoChoice,
+  GraphSnapshot, ImportRequest,
+  ImportResponse, ImportStatus, Me, PickedImportRequest, Repo, RepoFlags,
 } from "./types";
+
+// The server refuses session POSTs without this header, so other sites cannot forge them.
+const csrfHeader = { "X-Requested-With": "code-flow" };
+
+function apiBase() {
+  return apiUrl.replace(/\/+$/, "");
+}
 
 class HttpError extends Error {
   constructor(readonly status: number, detail: string) {
@@ -13,16 +21,19 @@ class HttpError extends Error {
 
 async function requestJson<T>(path: string, signal?: AbortSignal, options?: RequestInit): Promise<T> {
   let response: Response;
+  const headers = options?.method === "POST" ? { ...csrfHeader, ...options.headers } : options?.headers;
   try {
-    response = await fetch(`${apiUrl.replace(/\/+$/, "")}/api${path}`, { ...options, signal });
+    response = await fetch(`${apiBase()}/api${path}`, { ...options, headers, signal });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error(`Cannot reach the code-flow server at ${apiUrl}.`);
+    throw new Error(apiBase() ? `Cannot reach the code-flow server at ${apiUrl}.` : "Cannot reach the code-flow server.");
   }
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    if ([400, 409].includes(response.status) && options?.method === "POST" && typeof body?.detail === "string") {
+    // POSTs and the GitHub routes explain themselves, so show their message as it is.
+    const plain = options?.method === "POST" || path.startsWith("/github/");
+    if ([400, 401, 404, 409].includes(response.status) && plain && typeof body?.detail === "string") {
       throw new Error(body.detail);
     }
     const detail = typeof body?.detail === "string" ? `: ${body.detail}` : "";
@@ -68,6 +79,42 @@ export async function fetchHostedRepos(signal: AbortSignal): Promise<Repo[]> {
     }
     throw error;
   }
+}
+
+export function signInUrl() {
+  return `${apiBase()}/api/auth/github/login`;
+}
+
+export async function fetchMe(signal?: AbortSignal): Promise<Me> {
+  const me = await requestJson<Partial<Me>>("/me", signal, { cache: "no-store" });
+  if (me?.signed_in === true) return me as Me;
+  return { configured: me?.configured === true, signed_in: false };
+}
+
+export function fetchGitHubRepos(signal?: AbortSignal) {
+  return requestJson<GitHubRepoChoice[]>("/github/repos", signal, { cache: "no-store" });
+}
+
+export function fetchGitHubBranches(repoId: number, signal?: AbortSignal) {
+  return requestJson<GitHubBranches>(`/github/repos/${repoId}/branches`, signal, { cache: "no-store" });
+}
+
+export function fetchGitHubCommits(repoId: number, branch: string, limit: number, signal?: AbortSignal) {
+  const query = new URLSearchParams({ branch, limit: String(limit) });
+  return requestJson<GitHubCommitList>(`/github/repos/${repoId}/commits?${query}`, signal, { cache: "no-store" });
+}
+
+export async function signOut() {
+  const response = await fetch(`${apiBase()}/api/auth/logout`, { method: "POST", headers: csrfHeader });
+  if (!response.ok) throw new Error("Could not sign out. Try again.");
+}
+
+export function importPickedRepo(body: PickedImportRequest, signal?: AbortSignal) {
+  return requestJson<ImportResponse>("/repos", signal, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export function importRepo(body: ImportRequest, signal?: AbortSignal) {

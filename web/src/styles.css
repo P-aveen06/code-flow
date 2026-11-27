@@ -260,7 +260,75 @@ button { font: inherit; }
   background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
 }
 .empty-state { color: var(--color-text-muted); }
+.repo-private {
+  margin-inline-start: var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-sunken);
+  font-size: var(--text-xs);
+}
+
+/* Sign in with GitHub (github_signin experiment variant) */
+.signin-card__lead { max-width: 60ch; }
+.signin-card__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.signin-card__account { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.signin-card__account img { border-radius: var(--radius-pill); }
+.signin-error { color: color-mix(in srgb, var(--color-danger) 75%, var(--color-text)); }
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+  justify-self: start;
+}
 .message-stack { display: grid; gap: var(--space-3); }
+
+/* Signed-in GitHub pages: the repos list and a repo's branch and commits. */
+.github-page {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
+}
+.github-card { display: grid; gap: var(--space-4); min-width: 0; }
+.github-card h1 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; }
+.github-card__field { display: grid; gap: var(--space-1); max-width: 28rem; }
+.github-card__subtitle { overflow-wrap: anywhere; }
+.github-card form fieldset { display: grid; gap: var(--space-3); margin: 0; padding: 0; border: 0; min-width: 0; }
+.github-card form button[type="submit"] { justify-self: start; }
+.github-repos, .branch-commits { display: grid; margin: 0; padding: 0; list-style: none; border-top: var(--border); }
+.github-repos li, .branch-commits li { border-bottom: var(--border); }
+.github-repos__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2);
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.github-repos__link:hover strong { color: var(--color-accent); text-decoration: underline; }
+.branch-commits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2);
+}
+.branch-commits__message { overflow-wrap: anywhere; }
+
+@media (max-width: 40rem) {
+  .github-page { padding: var(--space-4) var(--space-4) var(--space-6); }
+  .branch-commits li { grid-template-columns: auto minmax(0, 1fr); }
+  .branch-commits li > .muted { grid-column: 2; }
+}
 
 .viewer { display: flex; flex: 1; flex-direction: column; }
 .viewer-header {

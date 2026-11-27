@@ -159,6 +159,10 @@ class Store:
             and (directory / "commits.json").is_file()
         )
 
+    def sources(self) -> dict[str, dict]:
+        """Read every published import's source.json, keyed by repository id."""
+        return {repo: self._read_source(self.data_dir / repo) for repo in self.source_repo_ids()}
+
     def repo_info(self, repo: str) -> dict:
         directory = self._repo_dir(repo)
         index = self._index(directory)
@@ -178,6 +182,8 @@ class Store:
             "status": "ready",
             "message": "Ready",
             "warning": warning,
+            "visibility": source.get("visibility", "public"),
+            "owner_uid": source.get("owner_uid"),
         }
 
     @staticmethod

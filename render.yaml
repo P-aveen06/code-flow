@@ -18,3 +18,14 @@ services:
       # Leave FLAGSMITH_API_URL unset until the public SDK endpoint is available.
       - key: CODEFLOW_FLAGSMITH_SERVER_KEY
         sync: false
+      # Sign in with GitHub (docs/GITHUB_SIGNIN.md). Set all five or none.
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_SLUG
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
+        sync: false

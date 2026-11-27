@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { legacyRepoRedirect, parsePath, repoPath } from "./router";
+import { githubRepoPath, legacyRepoRedirect, parsePath, repoPath } from "./router";
 
 describe("parsePath", () => {
   it("matches the landing and viewer paths", () => {
@@ -9,7 +9,18 @@ describe("parsePath", () => {
     expect(parsePath(repoPath("review fixture"))).toEqual({ page: "viewer", id: "review fixture" });
   });
 
-  it.each(["/unknown", "/repo/", "/repo/x/extra", "/repo/x%2Fy", "/repo/%", "/repo/.."])("rejects %s", (path) => {
+  it("matches the GitHub repos and repo details paths", () => {
+    expect(parsePath("/github")).toEqual({ page: "github-repos" });
+    expect(parsePath("/github/")).toEqual({ page: "github-repos" });
+    expect(parsePath("/github/42")).toEqual({ page: "github-repo", repoId: 42 });
+    expect(githubRepoPath(42, "feature/cart")).toBe("/github/42?branch=feature%2Fcart");
+    expect(githubRepoPath(42)).toBe("/github/42");
+  });
+
+  it.each([
+    "/unknown", "/repo/", "/repo/x/extra", "/repo/x%2Fy", "/repo/%", "/repo/..",
+    "/github/0", "/github/x", "/github/1/2", "/github/12345678901234567",
+  ])("rejects %s", (path) => {
     expect(parsePath(path)).toEqual({ page: "not-found" });
   });
 });

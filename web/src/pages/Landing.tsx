@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
+import { useSigninVariant } from "../flags";
 import { pollRepoStatus } from "../pollRepoStatus";
-import { navigate, repoPath } from "../router";
+import { navigate, repoPath, useLocation } from "../router";
+import { beginJourney, trackSignin, watchForAbandon } from "../signinEvents";
 import type { ImportRequest, ImportResponse, ImportStatus } from "../types";
 import { useRequest } from "../useRequest";
 import { validateImport } from "./importHelpers";
@@ -11,11 +13,30 @@ import { LandingFlags } from "./LandingFlags";
 import { LandingHero } from "./LandingHero";
 import { LandingImport, type FormError } from "./LandingImport";
 import { LandingRepositories } from "./LandingRepositories";
+import { SignInImport } from "./SignInImport";
 
 type Job = ImportResponse & { body: ImportRequest };
 
+// A failed sign-in returns here with signin_error; the page reads it once, then drops it.
+// A successful one goes to the repos page (/github).
+const returnParams = ["signin_error"];
+const signinErrors: Record<string, string> = {
+  denied: "GitHub sign-in was cancelled.",
+  expired: "The sign-in took too long or started in another tab. Try again.",
+  github: "GitHub did not accept the sign-in. Try again.",
+};
+
+export function readSigninError(search: string) {
+  return signinErrors[new URLSearchParams(search).get("signin_error") ?? ""] ?? null;
+}
+
 export function Landing() {
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
+  const { search } = useLocation();
+  const signin = useSigninVariant(search);
+  const [signinError] = useState(() => readSigninError(search));
+  const [urlFormChosen, setUrlFormChosen] = useState(false);
+  const showSignin = signin.variant === "github_signin" && !urlFormChosen;
   const [fields, setFields] = useState<ImportFields>({ url: "", subdir: "", maxCommits: "30" });
   const [formError, setFormError] = useState<FormError | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -32,6 +53,21 @@ export function Landing() {
   const busy = submitting || Boolean(job && !pollError && update?.status !== "error");
 
   useEffect(() => () => submission.current?.abort(), []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!returnParams.some((name) => params.has(name))) return;
+    returnParams.forEach((name) => params.delete(name));
+    const query = params.toString();
+    navigate(`${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`, { replace: true });
+  }, []);
+
+  useEffect(() => {
+    if (!signin.ready) return;
+    beginJourney(signin.reviewerId, signin.variant, signin.exposed);
+  }, [signin.ready, signin.reviewerId, signin.variant, signin.exposed]);
+
+  useEffect(() => watchForAbandon(), []);
 
   useEffect(() => {
     setWaking(false);
@@ -51,6 +87,7 @@ export function Landing() {
         if (controller.signal.aborted) return;
         setRepoRevision((revision) => revision + 1);
         if (status.status === "ready") {
+          trackSignin("import_completed");
           navigationTimer = window.setTimeout(() => navigate(repoPath(id)), 2000);
         }
       },
@@ -106,7 +143,10 @@ export function Landing() {
 
   function submit() {
     const result = validateImport(fields);
-    if ("body" in result) void startImport(result.body);
+    if ("body" in result) {
+      trackSignin("import_started");
+      void startImport(result.body);
+    }
     else {
       setFormError(result);
       document.getElementById(`import-${result.field}`)?.focus();
@@ -119,10 +159,29 @@ export function Landing() {
       <LandingFlags />
       <LandingRepositories repos={repos} waking={waking} />
       <div className="landing__import" id="import" tabIndex={-1}>
-        <LandingImport
-          hosted={hosted} fields={fields} formError={formError} busy={busy} submitting={submitting}
-          onEdit={edit} onSubmit={submit}
-        />
+        {signinError && <p className="card signin-error" role="alert">{signinError}</p>}
+        {!signin.ready && (
+          <section className="card import-card" aria-label="Analyze a GitHub repo">
+            <p role="status">Loading…</p>
+          </section>
+        )}
+        {signin.ready && showSignin && (
+          <SignInImport
+            onSignedOut={() => setRepoRevision((revision) => revision + 1)}
+            onUseUrl={() => setUrlFormChosen(true)}
+          />
+        )}
+        {signin.ready && !showSignin && (
+          <LandingImport
+            hosted={hosted} fields={fields} formError={formError} busy={busy} submitting={submitting}
+            onEdit={edit} onSubmit={submit}
+          />
+        )}
+        {signin.ready && signin.variant === "github_signin" && urlFormChosen && (
+          <button type="button" className="link-button" onClick={() => setUrlFormChosen(false)}>
+            Sign in with GitHub instead
+          </button>
+        )}
         {job && (
           <ImportProgress
             job={job} update={update} pollError={pollError}

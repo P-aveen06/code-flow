@@ -20,6 +20,14 @@ from config import (
 )
 from diffs import load_diffs
 from experiments import Experiment, load_experiment
+from funnels import (
+    FunnelExperiment,
+    FunnelSummary,
+    funnel_events,
+    is_funnel,
+    load_funnel,
+    run_funnel,
+)
 from history import reserve_reviewers
 from model import MODELS
 from panels import EXPERIENCE_BANDS, Panel, generate_panel, load_panel, profile_counts, select_panel
@@ -106,7 +114,32 @@ def _print_summary(
         print(f"{variant:<{width}} {stats.reviewers:>9} {success:>15} {elapsed:>12}")
 
 
-def _print_persona_summary(summary: dict[str, VariantSummary], personas: PersonaModel) -> None:
+def _print_funnel_summary(
+    summary: dict[str, FunnelSummary], model: str, dry_run: bool, experiment: FunnelExperiment
+) -> None:
+    mode = "dry run" if dry_run else "Flagsmith"
+    print(f"Simulated visitors ({model} model, {mode})")
+    print(f"Experiment flag {experiment.flag} (control {experiment.control}).")
+    width = max(len("Variant"), *(len(variant) for variant in summary))
+    print(f"{'Variant':<{width}} {'Visitors':>9} {'Completed':>10} {'Median ms to flow':>18}")
+    for variant, stats in summary.items():
+        rate = f"{stats.completion_rate:.1%}" if stats.completion_rate is not None else "-"
+        elapsed = f"{stats.median_ms:,.0f}" if stats.median_ms is not None else "-"
+        print(f"{variant:<{width}} {stats.reviewers:>9} {rate:>10} {elapsed:>18}")
+
+    print("\nVisitors reaching each event")
+    events = funnel_events(experiment)
+    width = max(len("Event"), *(len(event) for event in events))
+    print(f"{'Event':<{width}}" + "".join(f" {variant:>16}" for variant in summary))
+    for event in events:
+        print(
+            f"{event:<{width}}" + "".join(f" {s.event_counts[event]:>16}" for s in summary.values())
+        )
+
+
+def _print_persona_summary(
+    summary: dict[str, VariantSummary] | dict[str, FunnelSummary], personas: PersonaModel
+) -> None:
     print("\nSimulated persona counts")
     print(f"{'Attribute':<22} {'Value':<20}" + "".join(f" {variant:>16}" for variant in summary))
     for attribute, values in (
@@ -225,11 +258,14 @@ def main(argv: list[str] | None = None) -> int:
             _print_profiles(args.panel, reviewers, personas)
             return 0
 
-        experiment = load_experiment(
-            named_path(EXPERIMENTS_DIR, args.experiment, ".yaml"), personas
-        )
+        path = named_path(EXPERIMENTS_DIR, args.experiment, ".yaml")
+        funnel = load_funnel(path, personas) if is_funnel(path) else None
+        experiment = funnel or load_experiment(path, personas)
         environment, api_url, key = _simulation_target(args.environment, dry_run=args.dry_run)
-        source, diffs = load_diffs(REPO_ROOT / "data", long_flows_only=experiment.long_flows_only)
+        if funnel is None:
+            source, diffs = load_diffs(
+                REPO_ROOT / "data", long_flows_only=experiment.long_flows_only
+            )
 
         known_repeats = set()
         if (
@@ -258,16 +294,27 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         rate = None if args.dry_run else args.rate
-        summary = run_simulation(
-            client,
-            experiment,
-            diffs,
-            reviewers=reviewers,
-            model_name=args.model,
-            rate=rate,
-            seed=args.seed,
-        )
-        _print_summary(summary, args.model, source, len(diffs), args.dry_run, experiment)
+        if funnel is not None:
+            summary = run_funnel(
+                client,
+                funnel,
+                reviewers=reviewers,
+                model_name=args.model,
+                rate=rate,
+                seed=args.seed,
+            )
+            _print_funnel_summary(summary, args.model, args.dry_run, funnel)
+        else:
+            summary = run_simulation(
+                client,
+                experiment,
+                diffs,
+                reviewers=reviewers,
+                model_name=args.model,
+                rate=rate,
+                seed=args.seed,
+            )
+            _print_summary(summary, args.model, source, len(diffs), args.dry_run, experiment)
     except FlagsmithFeatureDoesNotExistError:
         print(f"The selected Flagsmith environment has no {experiment.flag} flag.", file=sys.stderr)
         return 1

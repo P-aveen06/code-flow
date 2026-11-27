@@ -41,6 +41,9 @@ export function LandingRepositories({ repos, waking }: {
             <li key={repo.id}>
               <div className="repo-list__details">
                 <strong>{repo.name}</strong>
+                {repo.visibility === "private" && (
+                  <span className="status-chip repo-private" title="Only you can see this import">Private</span>
+                )}
                 <span className="muted">
                   {repo.subdir ? `${displaySubdir(repo.subdir)} · ` : ""}
                   {repo.commit_count} {repo.commit_count === 1 ? "commit" : "commits"}

@@ -1,15 +1,20 @@
 """Read API settings and the repo's Flagsmith scope from local configuration."""
 
+import base64
+import binascii
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from codeflow.diff import LONG_FLOW_MIN_DEPTH
 
 DEFAULT_FLAGSMITH_API_URL = "http://localhost:8000/api/v1/"
 MAX_IMPORT_COMMITS = 200
 DEFAULT_SNAPSHOT_CACHE_SIZE = 16
+DEFAULT_MAX_PRIVATE_IMPORTS = 3
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -34,6 +39,60 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
+def is_local_origin(origin: str) -> bool:
+    """Return whether the web origin points at this machine."""
+    return urlparse(origin).hostname in LOCAL_HOSTS
+
+
+@dataclass(frozen=True)
+class GitHubAppSettings:
+    """Credentials of the GitHub App used for sign-in and private clones."""
+
+    app_id: str
+    slug: str
+    client_id: str
+    client_secret: str = field(repr=False)
+    private_key: str = field(repr=False)
+
+
+def _read_private_key(values: dict[str, str]) -> str:
+    """Read the app's PEM key from a file path, raw PEM text, or base64 of the PEM."""
+    path = values.get("GITHUB_APP_PRIVATE_KEY_PATH")
+    if path:
+        return Path(path).expanduser().read_text(encoding="utf-8")
+    value = values.get("GITHUB_APP_PRIVATE_KEY", "").strip()
+    if value.startswith("-----BEGIN"):
+        return value.replace("\\n", "\n")
+    try:
+        return base64.b64decode(value, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        raise ValueError(
+            "GITHUB_APP_PRIVATE_KEY must be the PEM text or base64 of the PEM file."
+        ) from None
+
+
+def _github_app(values: dict[str, str]) -> GitHubAppSettings | None:
+    names = ("GITHUB_APP_ID", "GITHUB_APP_SLUG", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET")
+    has_key = bool(
+        values.get("GITHUB_APP_PRIVATE_KEY") or values.get("GITHUB_APP_PRIVATE_KEY_PATH")
+    )
+    present = [name for name in names if values.get(name)]
+    if not present and not has_key:
+        return None
+    missing = [name for name in names if not values.get(name)]
+    if not has_key:
+        missing.append("GITHUB_APP_PRIVATE_KEY")
+    if missing:
+        raise ValueError(f"GitHub sign-in is half configured. Missing: {', '.join(missing)}.")
+    return GitHubAppSettings(
+        app_id=values["GITHUB_APP_ID"],
+        slug=values["GITHUB_APP_SLUG"],
+        client_id=values["GITHUB_CLIENT_ID"],
+        client_secret=values["GITHUB_CLIENT_SECRET"],
+        private_key=_read_private_key(values),
+    )
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -44,6 +103,22 @@ class Settings:
     long_flow_min_depth: int = LONG_FLOW_MIN_DEPTH
     max_import_commits: int = MAX_IMPORT_COMMITS
     snapshot_cache_size: int = DEFAULT_SNAPSHOT_CACHE_SIZE
+    # A personal read-only token for private clones on a local machine only.
+    github_token: str | None = field(default=None, repr=False)
+    github_app: GitHubAppSettings | None = None
+    max_private_imports: int = DEFAULT_MAX_PRIVATE_IMPORTS
+
+    def __post_init__(self) -> None:
+        if self.github_token and not is_local_origin(self.web_origin):
+            raise ValueError(
+                "CODEFLOW_GITHUB_TOKEN is for local use only. Unset it when "
+                "CODEFLOW_WEB_ORIGIN is not a localhost origin."
+            )
+
+    @property
+    def secure_cookies(self) -> bool:
+        """Mark cookies Secure whenever the site is served over HTTPS."""
+        return self.web_origin.startswith("https://")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -80,6 +155,14 @@ class Settings:
                 raise ValueError
         except ValueError:
             raise ValueError("CODEFLOW_SNAPSHOT_CACHE_SIZE must be a positive integer.") from None
+        try:
+            max_private = int(
+                values.get("CODEFLOW_MAX_PRIVATE_IMPORTS") or DEFAULT_MAX_PRIVATE_IMPORTS
+            )
+            if max_private < 0:
+                raise ValueError
+        except ValueError:
+            raise ValueError("CODEFLOW_MAX_PRIVATE_IMPORTS must be zero or more.") from None
         return cls(
             data_dir=data_dir,
             web_origin=values.get("CODEFLOW_WEB_ORIGIN", "http://localhost:5173"),
@@ -91,6 +174,9 @@ class Settings:
             long_flow_min_depth=min_depth,
             max_import_commits=max_commits,
             snapshot_cache_size=cache_size,
+            github_token=values.get("CODEFLOW_GITHUB_TOKEN") or None,
+            github_app=_github_app(values),
+            max_private_imports=max_private,
         )
 
     def flag_scope(self, repo: str) -> tuple[str, set[str]]:

@@ -216,6 +216,7 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
                     "status": "queued",
                     "message": "Queued",
                     "warning": None,
+                    "visibility": "public",
                 }
             ]
             executor.before_run = None
@@ -276,6 +277,7 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
                 "status": "ready",
                 "message": "Ready",
                 "warning": None,
+                "visibility": "public",
             }
         ]
 
@@ -285,7 +287,13 @@ def test_full_import_and_reimport(tmp_path: Path, local_repo: Path, monkeypatch)
         assert not (clone / "shop").exists()
         source = json.loads((output / "source.json").read_text())
         assert source.pop("imported_at")
-        assert source == {"url": URL, "name": "Demo/shop", "subdir": "shop", "max_commits": 2}
+        assert source == {
+            "url": URL,
+            "name": "Demo/shop",
+            "subdir": "shop",
+            "max_commits": 2,
+            "visibility": "public",
+        }
         index = analyze.load_index(output)
         oldest, newest = index["commits"]
         assert (oldest["message"], newest["message"]) == ("Add price", "Update price")
@@ -462,7 +470,7 @@ def test_failed_refresh_preserves_published_output(github_import, monkeypatch):
     assert client.post(f"{REPO}/refresh").status_code == 202
     status = client.get(f"{REPO}/status").json()
     assert status["status"] == "error"
-    assert status["error"] == "Repository not found or not public"
+    assert status["error"] == import_analysis.UNAVAILABLE
     assert status["new_commits"] is None
     assert client.get(f"{REPO}/commits").json() == previous
     assert client.get(snapshot_url).json() == snapshot
@@ -506,7 +514,7 @@ def test_unavailable_repo_reports_readable_failure(tmp_path: Path):
         assert client.post(REPOS, json={"url": URL}).status_code == 202
         status = client.get(f"{REPO}/status").json()
         assert status["status"] == "error"
-        assert status["error"] == "Repository not found or not public"
+        assert status["error"] == import_analysis.UNAVAILABLE
 
 
 def _wait_for_status(
@@ -625,3 +633,21 @@ def test_shutdown_drains_running_import(tmp_path, local_repo, monkeypatch):
 
     timer.join()
     assert (settings.data_dir / REPO_ID / "commits.json").is_file()
+
+
+@pytest.mark.parametrize("branch", ["main", "feature/cart", "release-1.2", "v2_x"])
+def test_valid_branch_names_get_their_own_id(branch: str):
+    source = importer.validate_import({"url": URL, "branch": branch})
+    assert source.branch == branch
+    assert source.id == f"{REPO_ID}@{branch.replace('/', '~')}"
+    assert source.name == f"Demo/shop@{branch}"
+    assert importer.validate_import({"url": URL, "branch": ""}).id == REPO_ID
+
+
+@pytest.mark.parametrize(
+    "branch",
+    ["-x", "../a", "a..b", "a b", "a@b", "a~b", "a.lock", "/a", "a/", "a//b", ".a", "a/.b", 7],
+)
+def test_unsafe_branch_names_are_rejected(branch: object):
+    with pytest.raises(importer.BadRequest, match="Pick a branch"):
+        importer.validate_import({"url": URL, "branch": branch})

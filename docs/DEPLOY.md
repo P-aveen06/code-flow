@@ -111,14 +111,19 @@ the web build.
 Use the Node version from [web/.nvmrc](../web/.nvmrc). If you use nvm, run
 `nvm use` inside `web/` first. The build root is
 `web/`, the build command is `npm ci && npm run build`, and the output
-directory is `dist`. The `/repo/* / 200` rewrite serves the index for viewer
-links and preserves their query strings. Pages also has a built-in SPA fallback.
+directory is `dist`. The `/repo/*` and `/github` rewrites serve the index for
+viewer links and the GitHub repo pages, and preserve their query strings. Pages also has a built-in SPA fallback.
 Wrangler rejects the catch-all `/* /index.html 200` as a redirect loop.
 [Pages redirect rules](https://developers.cloudflare.com/pages/configuration/redirects/) · [Pages SPA routing](https://developers.cloudflare.com/pages/configuration/serving-pages/)
 
 Run this from the repo root. Set the two web Flagsmith variables to empty for a
 local Direct Upload build so Vite won't read your Mac's Flagsmith settings
 from the repo-root environment files.
+
+With Sign in with GitHub, the site calls `/api` on its own origin and a Pages
+Function forwards it to Render, so build with `VITE_API_URL=/`, set the
+`RENDER_API_ORIGIN` Pages secret, and deploy from `web/` so Wrangler picks up
+`web/functions/`. [Sign in with GitHub: Deploy](GITHUB_SIGNIN.md#4-deploy)
 
 ```sh
 export VITE_API_URL=https://code-flow-api-y9k1.onrender.com
@@ -155,7 +160,12 @@ deploying and belong in your local credential store.
 | `FLAGSMITH_API_URL` | Render | Unset initially. Set the tunnel SDK base URL ending in `/api/v1/` when connected. | No |
 | `CODEFLOW_FLAGSMITH_SERVER_KEY` | Render | Unset initially. Use the Production server key when connected. | **Yes** |
 | `CODEFLOW_FLAGSMITH_SCOPES_PATH` | Render, optional | Unset initially. Defaults to `flagsmith_scopes.json` under the data directory. | No |
-| `VITE_API_URL` | Pages build | Render origin with no `/api` suffix. | No |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID` | Render | The hosted GitHub App. Set with the two below, or leave all unset to turn sign-in off. | No |
+| `GITHUB_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Render | The hosted app's client secret and private key (PEM text or its base64). | **Yes** |
+| `CODEFLOW_MAX_PRIVATE_IMPORTS` | Render, optional | Private imports per signed-in person. Default `3`. | No |
+| `VITE_API_URL` | Pages build | `/` with Sign in with GitHub (same-origin proxy). Otherwise the Render origin with no `/api` suffix. | No |
+| `RENDER_API_ORIGIN` | Pages secret | The Render origin, for the `/api` Pages Function. | No |
+| `VITE_GITHUB_SIGNIN_FALLBACK` | Pages build, optional | Arm shown while Flagsmith is unreachable: `url_import` (default) or `github_signin`. | No |
 | `VITE_HOSTED_DEMO` | Pages build | `1` for the restart notice and cold-start retries. Off by default. | No |
 | `VITE_FLAGSMITH_API_URL` | Pages build | Empty initially. Use the same public SDK base URL when connected. | No |
 | `VITE_CODEFLOW_FLAGSMITH_ENV_KEY` | Pages build | Empty initially. Use the Production client-side environment key when connected. | No |
