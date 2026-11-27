@@ -1,23 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
-import { AppLink } from "../AppLink";
+import { useVariantPreview } from "../flags";
 import { pollRepoStatus } from "../pollRepoStatus";
 import { navigate, repoPath } from "../router";
-import type { ImportRequest, ImportResponse, ImportStatus, RepoStatus } from "../types";
+import type { ImportRequest, ImportResponse, ImportStatus } from "../types";
 import { useRequest } from "../useRequest";
-import { displaySubdir, validateImport } from "./importHelpers";
+import { readLandingVariant } from "../view";
+import { validateImport } from "./importHelpers";
 import type { ImportFields } from "./importHelpers";
 import { ImportProgress } from "./ImportProgress";
+import { LandingImport, type FormError } from "./LandingImport";
+import { LandingPreview } from "./LandingPreview";
+import { LandingRepositories } from "./LandingRepositories";
 
 const example: ImportFields = { url: "https://github.com/Flagsmith/flagsmith", subdir: "api", maxCommits: "50" };
-const repoStatusLabels: Record<RepoStatus, string> = {
-  queued: "Queued", cloning: "Cloning…", analyzing: "Analyzing…", ready: "Ready", error: "Error",
-};
 
 type Job = ImportResponse & { body: ImportRequest };
-type FormError = { field?: keyof ImportFields; message: string };
 
-export function Landing() {
+export function Landing({ search }: { search: string }) {
+  const requestedVariant = readLandingVariant(search);
+  const previewEnabled = useVariantPreview(!import.meta.env.DEV && requestedVariant ? search : undefined);
+  const variant = import.meta.env.DEV || previewEnabled ? requestedVariant : null;
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
   const [fields, setFields] = useState<ImportFields>({ url: "", subdir: "", maxCommits: "30" });
   const [formError, setFormError] = useState<FormError | null>(null);
@@ -116,6 +119,29 @@ export function Landing() {
     }
   }
 
+  const importForm = (
+    <>
+      <LandingImport
+        variant={variant} hosted={hosted} fields={fields} formError={formError} busy={busy} submitting={submitting}
+        onEdit={edit} onSubmit={() => submit(fields)} onExample={() => { setFields(example); submit(example); }}
+      />
+      {job && (
+        <ImportProgress
+          job={job} update={update} pollError={pollError}
+          onRetry={() => {
+            if (pollError) {
+              setPollError(null);
+              setJob({ ...job });
+            } else void startImport(job.body);
+          }}
+        />
+      )}
+    </>
+  );
+  const repositories = <LandingRepositories variant={variant} repos={repos} waking={waking} />;
+
+  if (variant) return <LandingPreview variant={variant} importForm={importForm} repositories={repositories} />;
+
   return (
     <main className="landing">
       <div className="landing__intro">
@@ -134,107 +160,8 @@ export function Landing() {
         </section>
       </div>
 
-      <div className="landing__import">
-        <section className="card import-card" aria-labelledby="import-title">
-          <h2 id="import-title">Analyze a GitHub repo</h2>
-          <form noValidate onSubmit={(event) => { event.preventDefault(); if (!busy) submit(fields); }}>
-            <fieldset disabled={busy}>
-              <div className="field">
-                <label className="field__label" htmlFor="import-url">GitHub repository URL</label>
-                <input
-                  id="import-url" className="input" type="url" required
-                  placeholder="https://github.com/owner/repo" value={fields.url}
-                  aria-invalid={formError?.field === "url"}
-                  aria-describedby={formError?.field === "url" ? "import-error" : undefined}
-                  onChange={(event) => edit("url", event.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label className="field__label" htmlFor="import-subdir">Subfolder (optional)</label>
-                <input
-                  id="import-subdir" className="input" type="text" value={fields.subdir}
-                  aria-invalid={formError?.field === "subdir"}
-                  aria-describedby={formError?.field === "subdir" ? "subdir-hint import-error" : "subdir-hint"}
-                  onChange={(event) => edit("subdir", event.target.value)}
-                />
-                <p className="muted field__hint" id="subdir-hint">e.g. api/ — only Python under this folder is analyzed</p>
-              </div>
-              <div className="field">
-                <label className="field__label" htmlFor="import-maxCommits">Number of recent commits</label>
-                <input
-                  id="import-maxCommits" className="input" type="number" min="1" max="200" step="1" required
-                  value={fields.maxCommits}
-                  aria-invalid={formError?.field === "maxCommits"}
-                  aria-describedby={formError?.field === "maxCommits" ? "import-error" : undefined}
-                  onChange={(event) => edit("maxCommits", event.target.value)}
-                />
-              </div>
-              {formError && <p className="field" id="import-error" role="alert">{formError.message}</p>}
-              <button type="submit" className="btn btn--primary">{submitting ? "Starting analysis…" : "Analyze repository"}</button>
-            </fieldset>
-          </form>
-          {hosted && (
-            <p className="muted field__hint">
-              Imports and new commits on this demo are temporary and reset when the server restarts.
-              The Flagsmith/flagsmith example is always available.
-            </p>
-          )}
-          <div className="import-examples">
-            <h3>Try an example</h3>
-            <div className="import-examples__actions">
-              {hosted ? (
-                <AppLink href={repoPath("Flagsmith__flagsmith")} className="btn btn--sm">
-                  Flagsmith/flagsmith (api/)
-                </AppLink>
-              ) : <button
-                type="button" className="btn btn--sm" disabled={busy}
-                onClick={() => { setFields(example); submit(example); }}
-              >
-                Flagsmith/flagsmith (api/)
-              </button>}
-            </div>
-          </div>
-        </section>
-
-        {job && (
-          <ImportProgress
-            job={job} update={update} pollError={pollError}
-            onRetry={() => {
-              if (pollError) {
-                setPollError(null);
-                setJob({ ...job });
-              } else void startImport(job.body);
-            }}
-          />
-        )}
-      </div>
-
-      <section className="card repositories" aria-labelledby="repositories-title">
-        <h2 id="repositories-title">Analyzed repositories</h2>
-        {repos.status === "loading" && <p role="status">{waking ? "Waking up the demo server…" : "Loading repositories…"}</p>}
-        {repos.status === "error" && <p role="alert">{repos.message}</p>}
-        {repos.status === "ready" && (repos.data.length ? (
-          <ul className="repo-list">
-            {repos.data.map((repo) => (
-              <li key={repo.id}>
-                <div className="repo-list__details">
-                  <strong>{repo.name}</strong>
-                  <span className="muted">
-                    {repo.subdir ? `${displaySubdir(repo.subdir)} · ` : ""}
-                    {repo.commit_count} {repo.commit_count === 1 ? "commit" : "commits"}
-                  </span>
-                  {repo.status === "error" && <p className="muted">{repo.message}</p>}
-                  {repo.warning && <p className="state-warning">{repo.warning}</p>}
-                </div>
-                <span className="status-chip repo-status" data-status={repo.status}>{repoStatusLabels[repo.status]}</span>
-                {(repo.status === "ready" || repo.commit_count > 0) && (
-                  <AppLink href={repoPath(repo.id)} className="btn btn--sm" label={`Open ${repo.name}`}>Open</AppLink>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : <p className="empty-state">No repositories analyzed yet. Add a GitHub repo above to get started.</p>)}
-      </section>
+      <div className="landing__import">{importForm}</div>
+      {repositories}
     </main>
   );
 }

@@ -120,27 +120,26 @@ export function exposeFlowAssignment(
   };
 }
 
-export function useCodeFlowFlags(search: string) {
-  const reviewerId = readReviewerId(search);
+function useFlagSnapshot(reviewerId?: string) {
   const api = import.meta.env.VITE_FLAGSMITH_API_URL?.trim();
   const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
   const [result, setResult] = useState<FlagSnapshot & { reviewerId: string }>();
-  const [assignment, setAssignment] = useState<FlowAssignment>();
 
   useEffect(() => {
-    if (!api || !key) return;
+    if (!api || !key || reviewerId === undefined) return;
+    const id = reviewerId;
     let active = true;
     let timer: number | undefined;
-    const fallback = () => setResult({ reviewerId, ...unavailableFlags });
+    const fallback = () => setResult({ reviewerId: id, ...unavailableFlags });
     const initialize = () => initFlagsmith(api, key);
 
     async function refresh(initial = false) {
       try {
         if (initial) await initialize();
         if (!active) return;
-        await (initial ? flagsmith.identify(reviewerId) : flagsmith.getFlags());
+        await (initial ? flagsmith.identify(id) : flagsmith.getFlags());
         if (!active) return;
-        setResult({ reviewerId, ...readFlagSnapshot(flagsmith) });
+        setResult({ reviewerId: id, ...readFlagSnapshot(flagsmith) });
       } catch {
         if (active) fallback();
       } finally {
@@ -152,7 +151,18 @@ export function useCodeFlowFlags(search: string) {
     return () => { active = false; window.clearTimeout(timer); };
   }, [api, key, reviewerId]);
 
-  const flags = !api || !key ? unavailableFlags : result?.reviewerId === reviewerId ? result : undefined;
+  return !api || !key ? unavailableFlags : result?.reviewerId === reviewerId ? result : undefined;
+}
+
+export function useVariantPreview(search?: string) {
+  const flags = useFlagSnapshot(search === undefined ? undefined : readReviewerId(search));
+  return flags?.variantPreview ?? false;
+}
+
+export function useCodeFlowFlags(search: string) {
+  const reviewerId = readReviewerId(search);
+  const flags = useFlagSnapshot(reviewerId);
+  const [assignment, setAssignment] = useState<FlowAssignment>();
   const variantPreview = flags?.variantPreview ?? false;
   const { viewOverride, directionOverride } = readPreviewOverrides(search, variantPreview);
   const previewOverride = viewOverride ?? directionOverride;
