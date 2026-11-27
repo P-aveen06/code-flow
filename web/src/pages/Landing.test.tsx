@@ -45,8 +45,10 @@ describe("landing", () => {
   it("offers the Flagsmith demo link and repository import form", async () => {
     await open();
 
-    const demoLink = container.querySelector('a[href="/repo/Flagsmith__flagsmith"]');
+    const demoLink = container.querySelector('a[href="/repo/Flagsmith__flagsmith?commit=47c774b"]');
     expect(demoLink?.textContent).toBe("Open the Flagsmith demo");
+    expect(container.querySelector('a[aria-label="Open Flagsmith/flagsmith"]')?.getAttribute("href"))
+      .toBe("/repo/Flagsmith__flagsmith");
     expect(container.querySelector('a[href="#import"]')?.textContent).toBe("Analyze your own repo");
     const form = container.querySelector<HTMLFormElement>("#import form");
     expect(form?.querySelector('label[for="import-url"]')?.textContent).toBe("GitHub repository URL");
