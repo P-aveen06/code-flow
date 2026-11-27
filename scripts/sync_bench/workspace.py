@@ -7,11 +7,14 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from sync_bench.checkpoints import read_record, template_key, write_record
 
 ROOT = Path(__file__).resolve().parents[2]
 SIZES = ("small", "medium", "large")
 UPSTREAM_URL = "https://github.com/Flagsmith/flagsmith.git"
-FORBIDDEN_PORTS = {5173, 8787}
+FORBIDDEN_PORTS = {5173, 5174, 8787, 8788}
 
 
 def validate_workdir(path: Path, *, repo: Path = ROOT) -> Path:
@@ -35,7 +38,9 @@ def validate_workdir(path: Path, *, repo: Path = ROOT) -> Path:
 
 def safe_port(port: int) -> int:
     if port in FORBIDDEN_PORTS or not 0 <= port <= 65535:
-        raise ValueError("Use an ephemeral port. Ports 5173 and 8787 are reserved.")
+        raise ValueError(
+            "Use an ephemeral port. Ports 5173, 5174, 8787, and 8788 are reserved."
+        )
     return port
 
 
@@ -255,6 +260,46 @@ def copy_template(template: Path, data: Path, upstreams: dict[str, Path]) -> Non
                 json.dumps({**metadata, **changes}), encoding="utf-8"
             )
         git("remote", "set-url", "origin", upstream.as_uri(), repo=clone)
+
+
+def cached_template(
+    workdir: Path,
+    size: str,
+    history: History,
+    code_flow_sha: str,
+    build: Callable[[Path], dict],
+) -> tuple[Path, dict]:
+    key = template_key(size, history.start, history.limit, code_flow_sha)
+    root = workdir / "templates"
+    directory = root / key
+    data = directory / "data"
+    if root.is_symlink() or directory.is_symlink() or data.is_symlink():
+        raise ValueError("Benchmark templates must be inside the workdir.")
+    repo = f"bench1__{history.name}"
+    metadata_path = directory / "import.json"
+    if metadata_path.is_file() and (data / "repos" / repo / ".git").is_dir():
+        metadata = read_record(metadata_path)
+        if (
+            metadata is not None
+            and metadata.get("start_sha") == history.start
+            and metadata.get("commits") == history.limit
+            and (data / repo / "commits.json").is_file()
+            and (data / repo / "source.json").is_file()
+            and (data / repo / "snapshots" / f"{history.start}.json").is_file()
+        ):
+            print(f"Reusing {size} template.", flush=True)
+            return data, metadata
+    print(f"Importing the {size} template.", flush=True)
+    root.mkdir(exist_ok=True)
+    with TemporaryDirectory(prefix=".import-", dir=root) as scratch:
+        stage = Path(scratch) / key
+        stage.mkdir()
+        metadata = build(stage / "data")
+        write_record(stage / "import.json", metadata)
+        if directory.exists():
+            directory.rename(Path(scratch) / "previous")
+        stage.rename(directory)
+    return data, metadata
 
 
 def disk_bytes(directory: Path) -> int:

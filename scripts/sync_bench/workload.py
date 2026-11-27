@@ -1,6 +1,7 @@
 """Generate the benchmark's seeded upstream and reviewer schedules."""
 
 import math
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,7 +55,7 @@ def run_schedule(
     manual: list[str],
     all_visible: Event,
     worker: ThreadPoolExecutor,
-    background: tuple[Future, ...],
+    check_background: Callable[[], None],
     page_now: Event,
 ) -> tuple[list[Advance], list[dict]]:
     rng = Random(workload.seed)
@@ -76,11 +77,12 @@ def run_schedule(
     advances = []
     visits = []
     for offset, repo, sha in events:
+        check_background()
         if offset < duration:
-            _wait_until(starts + offset, background)
+            _wait_until(starts + offset, check_background)
         else:
             while not all_visible.is_set() and monotonic() < starts + offset:
-                check_running(background)
+                check_background()
                 all_visible.wait(min(0.2, max(0, starts + offset - monotonic())))
             if all_visible.is_set():
                 break
@@ -93,7 +95,7 @@ def run_schedule(
             previous = sha
     deadline = starts + duration + max(workload.interval, visits_period) + 90
     while monotonic() < starts + duration or not all_visible.is_set():
-        check_running(background)
+        check_background()
         if monotonic() >= deadline:
             raise RuntimeError(
                 "Some upstream advances never became visible through /commits."
@@ -108,7 +110,7 @@ def check_running(futures: tuple[Future, ...]) -> None:
             future.result()
 
 
-def _wait_until(deadline: float, background: tuple[Future, ...]) -> None:
+def _wait_until(deadline: float, check_background: Callable[[], None]) -> None:
     while monotonic() < deadline:
-        check_running(background)
+        check_background()
         sleep(min(0.2, max(0, deadline - monotonic())))

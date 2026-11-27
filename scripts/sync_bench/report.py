@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sync_bench.checkpoints import SavedCase
 from sync_bench.metrics import FORMULAS, SCHEMA
 
 METHOD = {
@@ -20,11 +21,16 @@ METHOD = {
 
 
 def make_result(
-    environment: dict, settings: dict, templates: dict, runs: list[dict]
+    environment: dict,
+    settings: dict,
+    templates: dict,
+    runs: list[dict],
+    *,
+    finished_at_utc: str | None = None,
 ) -> dict:
     return {
         "schema": SCHEMA,
-        "finished_at_utc": datetime.now(UTC).isoformat(),
+        "finished_at_utc": finished_at_utc or datetime.now(UTC).isoformat(),
         "environment": environment,
         "settings": settings,
         "methods": METHOD,
@@ -32,6 +38,19 @@ def make_result(
         "templates": templates,
         "runs": runs,
     }
+
+
+def report_from_cases(settings: dict, cases: list[SavedCase]) -> dict:
+    templates = {}
+    for case in cases:
+        templates.setdefault(case.result["size"], case.template)
+    return make_result(
+        cases[0].environment,
+        {**settings, "elapsed_s": round(sum(case.elapsed_s for case in cases), 3)},
+        {size: templates[size] for size in settings["sizes"]},
+        [case.result for case in cases],
+        finished_at_utc=max(case.finished_at_utc for case in cases),
+    )
 
 
 def _pair(stats: dict) -> str:

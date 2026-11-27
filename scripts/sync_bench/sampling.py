@@ -2,16 +2,18 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Thread
 from time import time
 
-from sync_bench.runtime import RunningApi
+from sync_bench.runtime import RunningApi, stop_process_group
+from sync_bench.suspension import SuspensionCheck
 from sync_bench.workspace import ROOT
 
 
@@ -31,22 +33,33 @@ class ProcessSamples:
         self.server = server
         self.stop = Event()
         self.raw: list[list[float]] = []
+        self.heartbeat: list[float] = [time()]
 
     def _sample_ps(self) -> None:
+        use_ps = True
         while not self.stop.is_set():
-            try:
-                result = subprocess.run(
-                    ["ps", "-o", "time=,rss=", "-p", str(self.server.pid)],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                    check=True,
-                )
-                cpu, rss = result.stdout.split()
-            except (OSError, ValueError, subprocess.SubprocessError):
-                return
-            self.raw.append([time(), cpu_time(cpu), int(rss) * 1024])
+            if use_ps:
+                try:
+                    result = subprocess.run(
+                        ["ps", "-o", "time=,rss=", "-p", str(self.server.pid)],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=True,
+                    )
+                    cpu, rss = result.stdout.split()
+                    self.raw.append([time(), cpu_time(cpu), int(rss) * 1024])
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    use_ps = False
+            self.heartbeat.append(time())
             self.stop.wait(1)
+
+    def check_suspension(
+        self, check: SuspensionCheck, raw: list[list[float]] | None = None
+    ) -> float:
+        heartbeat = self.heartbeat.copy()
+        heartbeat.append(time())
+        return check.check(heartbeat, [row[0] for row in raw or []])
 
     def collect(self) -> tuple[str, list[list[float]]]:
         fallback = read_json_lines(self.server.resources)
@@ -59,15 +72,22 @@ class ProcessSamples:
 
 
 @contextmanager
-def process_samples(server: RunningApi) -> Iterator[ProcessSamples]:
+def process_samples(
+    server: RunningApi, suspension: SuspensionCheck | None = None
+) -> Iterator[ProcessSamples]:
     samples = ProcessSamples(server)
     thread = Thread(target=samples._sample_ps)
-    thread.start()
     try:
+        thread.start()
         yield samples
+    except Exception:
+        if suspension is not None:
+            samples.check_suspension(suspension, samples.collect()[1])
+        raise
     finally:
         samples.stop.set()
-        thread.join()
+        if thread.ident is not None:
+            thread.join()
 
 
 def read_json_lines(path: Path) -> list:
@@ -96,6 +116,7 @@ class Chrome:
         details = self._receive()
         self.version = details["browser"]
         self.mode = details["mode"]
+        self.pid = details["pid"]
 
     def _receive(self) -> dict:
         assert self.process.stdout is not None
@@ -145,16 +166,22 @@ def chrome(directory: Path) -> Iterator[Chrome]:
         text=True,
         start_new_session=True,
     ) as process:
+        browser = None
         try:
-            yield Chrome(process)
-        finally:
+            browser = Chrome(process)
+            yield browser
             if process.stdin:
                 process.stdin.close()
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
+        finally:
             try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, 9)
-                process.wait()
+                # The worker handles SIGINT and reaps its detached browser.
+                stop_process_group(process, signal.SIGINT)
+            finally:
+                if browser is not None:
+                    with suppress(ProcessLookupError, PermissionError):
+                        os.killpg(browser.pid, signal.SIGKILL)
 
 
 def trace_git(

@@ -3,15 +3,19 @@
 import argparse
 import math
 import platform
+import signal
 import subprocess
 import sys
+from contextlib import ExitStack
+from datetime import UTC, datetime
 from itertools import product
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
 
+from sync_bench.checkpoints import Case, CaseStore, SavedCase, lock_workdir, run_key
 from sync_bench.metrics import VARIANTS
-from sync_bench.report import make_result, write_report
+from sync_bench.report import report_from_cases, write_report
 from sync_bench.run import import_template, run_case
 from sync_bench.runtime import (
     api_listener,
@@ -20,12 +24,15 @@ from sync_bench.runtime import (
     development_key,
     web_server,
 )
-from sync_bench.sampling import chrome
+from sync_bench.sampling import Chrome, chrome
+from sync_bench.suspension import Suspended, SuspensionCheck
 from sync_bench.workload import Workload
 from sync_bench.workspace import (
     ROOT,
     SIZES,
+    History,
     build_history,
+    cached_template,
     copy_template,
     flagsmith_cache,
     git,
@@ -69,6 +76,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--visits-per-hour", type=float, default=12)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="remeasure cases, reusing imported templates",
+    )
+    parser.add_argument(
         "--offline", action="store_true", help="use the existing Flagsmith Git cache"
     )
     parser.add_argument(
@@ -95,7 +107,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _environment(browser_version: str) -> dict:
+def _environment(browser: Chrome, code_flow_sha: str) -> dict:
     cpu = platform.processor() or platform.machine()
     if platform.system() == "Darwin":
         result = subprocess.run(
@@ -112,62 +124,107 @@ def _environment(browser_version: str) -> dict:
         "python": platform.python_version(),
         "node": subprocess.check_output(["node", "--version"], text=True).strip(),
         "git": git("--version"),
-        "chrome": browser_version,
-        "code_flow_sha": git("rev-parse", "HEAD", repo=ROOT),
+        "chrome": browser.version,
+        "browser_mode": browser.mode,
+        "code_flow_sha": code_flow_sha,
         "dirty": bool(git("status", "--porcelain", repo=ROOT)),
     }
 
 
-def _prepare_templates(
-    args: argparse.Namespace, directory: Path, origin: str
-) -> tuple[dict, dict]:
-    cache = None
-    if any(size != "small" for size in args.sizes):
-        print("Preparing the pinned Flagsmith Git cache.", flush=True)
-        cache = flagsmith_cache(args.workdir, args.intervals, offline=args.offline)
-    histories = {}
-    templates = {}
-    for size in args.sizes:
-        print(f"Importing the {size} template.", flush=True)
-        stage = directory / size
-        stage.mkdir()
-        history = build_history(size, stage, args.intervals, cache)
-        histories[size] = history
+def _prepare_template(
+    args: argparse.Namespace,
+    stage: Path,
+    origin: str,
+    size: str,
+    cache: Path | None,
+    code_flow_sha: str,
+) -> tuple[History, Path, dict]:
+    stage.mkdir()
+    history = build_history(size, stage, args.intervals, cache)
+
+    def build(data: Path) -> dict:
         upstreams = make_upstreams(stage / "upstreams", history, 1)
-        data = directory / "templates" / size
         with (
             api_listener() as listener,
             api_server(
                 stage, listener, data, upstreams, origin, args.interval
             ) as server,
         ):
-            templates[size] = import_template(
-                server, data, next(iter(upstreams)), history
+            return import_template(server, data, next(iter(upstreams)), history)
+
+    template, metadata = cached_template(
+        args.workdir, size, history, code_flow_sha, build
+    )
+    return history, template, metadata
+
+
+def pending_cases(store: CaseStore, cases: list[Case], *, fresh: bool) -> list[Case]:
+    pending = []
+    for case in cases:
+        if not fresh and store.load(case) is not None:
+            variant, size, count = case
+            print(f"Reusing {variant}, {size}, {count} repo(s).", flush=True)
+        else:
+            pending.append(case)
+    return pending
+
+
+def _measure_case(
+    directory: Path,
+    build: Path,
+    origin: str,
+    key: str,
+    browser: Chrome,
+    history: History,
+    template: Path,
+    workload: Workload,
+    suspension: SuspensionCheck,
+) -> dict:
+    with TemporaryDirectory(prefix="case-", dir=directory) as case:
+        stage = Path(case)
+        data = stage / "data"
+        upstreams = make_upstreams(stage / "upstreams", history, workload.repo_count)
+        copy_template(template, data, upstreams)
+        with (
+            api_listener() as listener,
+            api_server(
+                stage, listener, data, upstreams, origin, workload.interval
+            ) as server,
+        ):
+            build_web(build, server.api.origin, origin, key)
+            suspension.check()
+            return run_case(
+                server, browser, origin, data, upstreams, history, workload, suspension
             )
-    return histories, templates
 
 
-def run(args: argparse.Namespace) -> tuple[Path, Path]:
+def _measure_pending(
+    args: argparse.Namespace,
+    store: CaseStore,
+    pending: list[Case],
+    cache: Path | None,
+    code_flow_sha: str,
+) -> None:
     key = development_key()
     if not key:
         raise ValueError(
             "Set CODEFLOW_SIM_FLAGSMITH_ENV_KEY to the Development client key."
         )
-    args.workdir.mkdir(parents=True, exist_ok=True)
     started = monotonic()
     with TemporaryDirectory(prefix="run-", dir=args.workdir) as scratch:
         directory = Path(scratch)
         build = directory / "site"
         build.mkdir()
-        (directory / "templates").mkdir()
-        with web_server(build, key) as origin, chrome(directory) as browser:
-            histories, templates = _prepare_templates(args, directory, origin)
-            environment = _environment(browser.version)
-            environment["browser_mode"] = browser.mode
-            environment["server_python"] = next(iter(templates.values()))["python"]
-            runs = []
-            for variant, size, count in product(args.variants, args.sizes, args.repos):
-                print(f"Measuring {variant}, {size}, {count} repo(s).", flush=True)
+        with web_server(build, key) as origin, ExitStack() as browsers:
+            templates = {}
+            browser = None
+            for case in pending:
+                variant, size, count = case
+                if size not in templates:
+                    templates[size] = _prepare_template(
+                        args, directory / size, origin, size, cache, code_flow_sha
+                    )
+                history, template, metadata = templates[size]
                 workload = Workload(
                     variant,
                     size,
@@ -177,31 +234,86 @@ def run(args: argparse.Namespace) -> tuple[Path, Path]:
                     args.visits_per_hour,
                     args.seed,
                 )
-                with TemporaryDirectory(prefix="case-", dir=directory) as case:
-                    stage = Path(case)
-                    data = stage / "data"
-                    upstreams = make_upstreams(
-                        stage / "upstreams", histories[size], count
-                    )
-                    copy_template(directory / "templates" / size, data, upstreams)
-                    with (
-                        api_listener() as listener,
-                        api_server(
-                            stage, listener, data, upstreams, origin, args.interval
-                        ) as server,
-                    ):
-                        build_web(build, server.api.origin, origin, key)
-                        runs.append(
-                            run_case(
-                                server,
-                                browser,
+                label = f"{variant}, {size}, {count} repo(s)"
+                setup_s = monotonic() - started
+                for attempt in range(2):
+                    print(f"Measuring {label}.", flush=True)
+                    attempt_started = monotonic()
+                    suspension = SuspensionCheck()
+                    try:
+                        try:
+                            if browser is None:
+                                browser = browsers.enter_context(chrome(directory))
+                                environment = _environment(browser, code_flow_sha)
+                            row = _measure_case(
+                                directory,
+                                build,
                                 origin,
-                                data,
-                                upstreams,
-                                histories[size],
+                                key,
+                                browser,
+                                history,
+                                template,
                                 workload,
+                                suspension,
                             )
-                        )
+                        except Exception:
+                            suspension.check()
+                            raise
+                        suspension.check()
+                    except Suspended as exc:
+                        message = f"Invalid case {label}: {exc} (possible sleep or suspension)."
+                        if attempt:
+                            raise RuntimeError(
+                                f"{message} Case was invalid twice."
+                            ) from exc
+                        print(f"{message} Retrying once.", flush=True)
+                        browsers.close()
+                        browser = None
+                        continue
+                    store.save(
+                        case,
+                        SavedCase(
+                            row,
+                            {**environment, "server_python": metadata["python"]},
+                            metadata,
+                            setup_s + monotonic() - attempt_started,
+                            datetime.now(UTC).isoformat(),
+                        ),
+                    )
+                    started = monotonic()
+                    break
+
+
+def run(args: argparse.Namespace) -> tuple[Path, Path]:
+    args.workdir.mkdir(parents=True, exist_ok=True)
+    with lock_workdir(args.workdir):
+        code_flow_sha = git("rev-parse", "HEAD", repo=ROOT)
+        cache = None
+        flagsmith_sha = None
+        if any(size != "small" for size in args.sizes):
+            print("Preparing the pinned Flagsmith Git cache.", flush=True)
+            cache = flagsmith_cache(args.workdir, args.intervals, offline=args.offline)
+            flagsmith_sha = git("rev-parse", "HEAD", repo=cache)
+        key = run_key(
+            code_flow_sha,
+            interval=args.interval,
+            intervals=args.intervals,
+            visits_per_hour=args.visits_per_hour,
+            seed=args.seed,
+            flagsmith_sha=flagsmith_sha,
+            quick=args.quick,
+        )
+        store = CaseStore(args.workdir, key)
+        cases = list(product(args.variants, args.sizes, args.repos))
+        pending = pending_cases(store, cases, fresh=args.fresh)
+        if pending:
+            _measure_pending(args, store, pending, cache, code_flow_sha)
+        saved = []
+        for case in cases:
+            record = store.load(case)
+            if record is None:
+                raise RuntimeError(f"Missing a valid result at {store.path(case)}.")
+            saved.append(record)
         settings = {
             "quick": args.quick,
             "offline": args.offline,
@@ -209,24 +321,42 @@ def run(args: argparse.Namespace) -> tuple[Path, Path]:
             "intervals": args.intervals,
             "visits_per_repo_hour": args.visits_per_hour,
             "seed": args.seed,
-            "elapsed_s": round(monotonic() - started, 3),
             "sizes": args.sizes,
             "repo_counts": args.repos,
             "variants": args.variants,
         }
-    return write_report(
-        make_result(environment, settings, templates, runs), ROOT / "docs/benchmarks"
-    )
+        return write_report(
+            report_from_cases(settings, saved), ROOT / "docs/benchmarks"
+        )
+
+
+class BenchmarkInterrupted(KeyboardInterrupt):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+
+
+def _interrupt(signum: int, _frame: object) -> None:
+    # Let context managers finish shutting down even if Ctrl-C is pressed again.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    raise BenchmarkInterrupted(signum)
 
 
 def main() -> int:
+    handlers = {
+        sig: signal.signal(sig, _interrupt) for sig in (signal.SIGINT, signal.SIGTERM)
+    }
     try:
         raw, summary = run(parse_args())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"Benchmark failed: {exc}", file=sys.stderr)
         return 1
-    except KeyboardInterrupt:
-        return 130
+    except BenchmarkInterrupted as exc:
+        print("Benchmark interrupted. Completed cases are saved.", file=sys.stderr)
+        return 128 + exc.signum
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
     print(f"Wrote {raw.relative_to(ROOT)} and {summary.relative_to(ROOT)}.")
     return 0
 

@@ -2,10 +2,11 @@
 
 import json
 import os
+import signal
 import socket
 import subprocess
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import partial
 from hmac import compare_digest
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -99,15 +100,33 @@ def api_listener() -> Iterator[socket.socket]:
 @contextmanager
 def web_server(directory: Path, key: str) -> Iterator[str]:
     handler = partial(WebHandler, directory=str(directory), key=key)
-    with ThreadingHTTPServer((HOST, 0), handler) as server:
+    with ThreadingHTTPServer((HOST, 0), handler, bind_and_activate=False) as server:
+        server.server_bind()
         port = safe_port(server.server_port)
-        thread = Thread(target=server.serve_forever)
-        thread.start()
+        server.server_activate()
+        thread = Thread(target=server.serve_forever, daemon=True)
         try:
+            thread.start()
             yield f"http://{HOST}:{port}"
         finally:
-            server.shutdown()
-            thread.join()
+            if thread.is_alive():
+                server.shutdown()
+                thread.join()
+
+
+def stop_process_group(
+    process: subprocess.Popen, first_signal: signal.Signals = signal.SIGTERM
+) -> None:
+    try:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, first_signal)
+        with suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=10)
+    finally:
+        # The group can outlive its leader (uv, npm, or the Chrome driver).
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
 
 
 def build_web(directory: Path, api_origin: str, web_origin: str, key: str) -> None:
@@ -118,15 +137,19 @@ def build_web(directory: Path, api_origin: str, web_origin: str, key: str) -> No
         "VITE_FLAGSMITH_API_URL": web_origin + "/flagsmith/api/v1/",
     }
     # Build output can include inlined client config. Keep it private and suppress tool output.
-    result = subprocess.run(
+    with subprocess.Popen(
         ["npm", "run", "build", "--", "--outDir", str(directory), "--emptyOutDir"],
-        check=False,
         cwd=ROOT / "web",
         env=env,
-        capture_output=True,
-        timeout=180,
-    )
-    if result.returncode:
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    ) as process:
+        try:
+            status = process.wait(timeout=180)
+        finally:
+            stop_process_group(process)
+    if status:
         raise RuntimeError(
             "Benchmark web build failed. Check 'npm run build' under web/."
         )
@@ -237,10 +260,4 @@ def api_server(
                 raise RuntimeError(f"Benchmark API did not start. See {log.name}.")
             yield running
         finally:
-            if process.poll() is None:
-                os.killpg(process.pid, 15)
-                try:
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, 9)
-                    process.wait()
+            stop_process_group(process)

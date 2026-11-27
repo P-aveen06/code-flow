@@ -1,6 +1,8 @@
 """Drive isolated benchmark cases and summarize their observations."""
 
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from time import monotonic, sleep, time
@@ -9,6 +11,7 @@ from sync_bench.metrics import COUNTERS, distribution, scale_hourly
 from sync_bench.observations import Probes, Publications, freshness, page_samples
 from sync_bench.runtime import Api, RunningApi
 from sync_bench.sampling import Chrome, process_samples, trace_git, window_samples
+from sync_bench.suspension import SuspensionCheck
 from sync_bench.workload import Workload, check_running, followed_repos, run_schedule
 from sync_bench.workspace import History, disk_bytes, fake_url, snapshot_names
 
@@ -74,9 +77,10 @@ def _browser_samples(
         page_now.clear()
 
 
-def _drain(api: Api) -> dict:
+def _drain(api: Api, check_suspension: Callable[[], float]) -> dict:
     deadline = monotonic() + 90
     while monotonic() < deadline:
+        check_suspension()
         repos = api.request("repos")
         if any(repo["status"] == "error" for repo in repos):
             raise RuntimeError("A benchmark repository refresh failed.")
@@ -89,6 +93,19 @@ def _drain(api: Api) -> dict:
     raise RuntimeError("The final refresh jobs did not drain in time.")
 
 
+@contextmanager
+def _case_workers() -> Iterator[ThreadPoolExecutor]:
+    pool = ThreadPoolExecutor(max_workers=4)
+    try:
+        yield pool
+    except BaseException:
+        # Let the API and Chrome contexts close before waiting on blocked requests.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        pool.shutdown()
+
+
 def run_case(
     server: RunningApi,
     chrome: Chrome,
@@ -97,21 +114,27 @@ def run_case(
     upstreams: dict[str, Path],
     history: History,
     workload: Workload,
+    suspension: SuspensionCheck,
 ) -> dict:
     repos = list(upstreams)
     auto = followed_repos(workload.variant, repos)
     manual = [repo for repo in repos if repo not in auto]
     before_bytes = disk_bytes(data)
     initial_snapshots = snapshot_names(data, repos)
-    with process_samples(server) as samples, ThreadPoolExecutor(max_workers=4) as pool:
+    with process_samples(server, suspension) as samples, _case_workers() as pool:
+
+        def check_suspension() -> float:
+            return samples.check_suspension(suspension)
+
         baseline = Probes(Api(server.api.port), repos, ())
         baseline_stop = Event()
         baseline_page_now = Event()
         baseline_rows: list[dict] = []
-        probe = pool.submit(baseline.poll, baseline_stop)
         try:
+            probe = pool.submit(baseline.poll, baseline_stop)
             # Let the real commits endpoint populate its lazy caches before measuring idle.
             while not baseline.ready.wait(0.2):
+                check_suspension()
                 check_running((probe,))
             baseline_begin = time()
             browser = pool.submit(
@@ -131,6 +154,7 @@ def run_case(
         probe.result()
         browser.result()
         baseline_end = time()
+        check_suspension()
         sleep(1)
 
         stop = Event()
@@ -138,23 +162,28 @@ def run_case(
         browser_rows: list[dict] = []
         publications = Publications(data, repos, history.advances)
         page_now = Event()
-        watcher = pool.submit(publications.poll, stop)
-        epoch = time()
-        background = (
-            watcher,
-            pool.submit(probes.poll, stop),
-            pool.submit(
-                _browser_samples,
-                chrome,
-                origin,
-                workload,
-                stop,
-                browser_rows,
-                workload.interval / 2,
-                page_now,
-            ),
-        )
         try:
+            watcher = pool.submit(publications.poll, stop)
+            epoch = time()
+            background = (
+                watcher,
+                pool.submit(probes.poll, stop),
+                pool.submit(
+                    _browser_samples,
+                    chrome,
+                    origin,
+                    workload,
+                    stop,
+                    browser_rows,
+                    workload.interval / 2,
+                    page_now,
+                ),
+            )
+
+            def check_background() -> None:
+                check_suspension()
+                check_running(background)
+
             server.api.request(
                 "auto-sync",
                 "PUT",
@@ -173,13 +202,13 @@ def run_case(
                 manual,
                 probes.ready,
                 pool,
-                background,
+                check_background,
                 page_now,
             )
             server.api.request(
                 "auto-sync", "PUT", {"all": False, "repos": dict.fromkeys(auto, False)}
             )
-            stats = _drain(server.api)
+            stats = _drain(server.api, check_suspension)
         finally:
             stop.set()
             page_now.set()
@@ -188,6 +217,7 @@ def run_case(
         end = time()
         sleep(1.1)
         method, raw_process = samples.collect()
+        max_sample_gap = samples.check_suspension(suspension, raw_process)
 
     cpu, cpu_elapsed = window_samples(raw_process, epoch, end)
     idle_cpu, idle_elapsed = window_samples(raw_process, baseline_begin, baseline_end)
@@ -220,6 +250,8 @@ def run_case(
         "variant": workload.variant,
         "size": workload.size,
         "repo_count": len(repos),
+        "suspended": False,
+        "max_sample_gap_s": round(max_sample_gap, 3),
         "auto_repos": auto,
         "manual_repos": manual,
         "epoch_utc_s": round(epoch, 3),

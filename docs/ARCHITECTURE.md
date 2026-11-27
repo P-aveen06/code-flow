@@ -420,6 +420,12 @@ variants show each GitHub import's sync status on the landing page. The
 at one and five repositories with isolated local upstreams and a real
 server and Chrome. Its dated reports in `docs/benchmarks/` include the raw
 samples, observed rates, and formulas for the 300-second projections.
+Each case records `suspended: false` and `max_sample_gap_s`. A clock
+divergence over 3 seconds or a sampling gap over 10 seconds triggers one
+retry. The benchmark resumes from completed cases and imported templates
+in its workdir. Use `--fresh` to remeasure cases with the cached templates.
+The report's `settings.elapsed_s` totals the active time saved with the
+completed cases.
 The [measured simulator config](../simulator/experiments/sync_mode.yaml)
 assigns seeded workload traits to the default panel. After Flagsmith assigns
 a variant, the simulator replays values from the matching benchmark cell.
