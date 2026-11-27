@@ -60,6 +60,14 @@ For GitHub imports, **Check for new commits** fetches the default
 branch and keeps existing history up to the configured cap. The viewer keeps
 your selected commit while it remains in that history. [Refresh screenshot](docs/screenshots/check-for-new-commits.png)
 
+### Sign in with GitHub
+
+To analyze private repositories, create a read-only GitHub App and set its
+`GITHUB_*` values and `VITE_API_URL=/` in `.env`. code-flow can then clone only
+the repositories each person picks, and only that person sees a private
+import. Sign-in is the `github_signin` arm of a Flagsmith experiment against
+the URL form. [Setup, security model and experiment](docs/GITHUB_SIGNIN.md)
+
 ### Connect Flagsmith
 
 Start a self-hosted Flagsmith instance with Docker Compose and set
@@ -101,6 +109,8 @@ python3 scripts/flagsmith_experiment.py status
 For the layout experiment, pass `--experiment flow_direction` to the
 experiment script and run
 `uv run --project simulator python simulator/simulate.py --experiment flow_direction`.
+For the sign-in experiment, pass `--experiment github_signin` and run
+`make simulate-signin`, which simulates the whole import journey.
 The simulator uses the fixed 1,300-reviewer panel. The simulator and experiment
 CLI default to Development. Production writes require explicit
 `--environment Production`. [Reviewer panel](simulator/panels/default.csv) · [Simulator configurations](simulator/experiments/)

@@ -19,7 +19,8 @@ type ImportBody = ImportRequest | PickedImportRequest;
 type Job = ImportResponse & { body: ImportBody };
 
 // GitHub sends the visitor back with one of these; the page reads them once, then drops them.
-const returnParams = ["signed_in", "signin_error", "github"];
+// GitHub adds installation_id and setup_action when it returns from the app install page.
+const returnParams = ["signed_in", "signin_error", "github", "installation_id", "setup_action"];
 const signinErrors: Record<string, string> = {
   denied: "GitHub sign-in was cancelled.",
   expired: "The sign-in took too long or started in another tab. Try again.",
