@@ -7,20 +7,18 @@ branch of the same repo. Exposure comes from the `app_flow` flag (control a 34%,
 
 ## Fewest clicks per step
 
-Clicks a visitor needs with no dead clicks. Totals: **today 10, flow A 9, flow B 9, flow C 9.**
+Clicks a visitor needs with no dead clicks, counting GitHub's own Authorize click. Totals: **today 10, flow A 9, flow B 8, flow C 9.** A browser walk-through of each built flow (`journey_clicks`, which counts clicks inside code-flow only) gives A 8, B 7, C 8, matching these totals less the Authorize click.
 
 | Step | Today | A | B | C | Source |
 |---|---|---|---|---|---|
-| Start sign-in (landing) | 1 | 1 | 1 | 1 | Today: the sign-in card's button (`pages/SignInImport.tsx`). B: inline card (`flows/b/Landing.tsx`). A and C: from the designs. |
-| Sign-in | 1 | 2 | 2 | 2 | One intermediate sign-in surface before GitHub: A a `/signin` page, B an inline panel, C a modal. |
+| Start sign-in (landing) | 1 | 1 | 1 | 1 | Today: the sign-in card's GitHub link (`pages/SignInImport.tsx`). B: the panel's GitHub link (`flows/b/SignIn.tsx`). A and C: the hero button (`flows/a/Landing.tsx`, `flows/c/Landing.tsx`). |
+| Sign-in | 1 | 2 | 1 | 2 | A's `/signin` page and C's modal add one click before GitHub. B's panel sits on the landing like today's card, so its GitHub button is the first click. |
 | Pick repo | 1 | 1 | 1 | 1 | One repo row in each picker. |
 | Analyze | 1 | 1 | 1 | 1 | Analyze button (`RepoDetails.tsx`, `SignIn.tsx`). |
 | First flow | 0 | 0 | 0 | 0 | The flow view opens on its own. |
 | Answer review | 1 | 1 | 1 | 1 | One answer button (`FlowView.tsx`, `diff_understood` / `diff_confusing`). |
 | Branch switch | 5 | 3 | 3 | 3 | Today: link to the picker, repo row, native select (open and pick), Analyze (`screens.tsx`). Flows: open the switcher, pick a branch, Analyze (`BranchSwitch.tsx`). |
 
-Caveat: on this branch the flow A and C sign-in screens are stubs. Their sign-in counts come from the
-designs, not from code.
 
 ## Assumptions beyond the code and designs
 

@@ -57,18 +57,19 @@ pieces:
     c: {review: {probability: 1.01}}  # Hypothesis: C keeps today's diagram shades.
 
   # Layout switches. Each sets fewest_clicks for the one step it changes. Today's values match
-  # the base journey, so the designs' fewest clicks are 10 today and 9 in each flow.
+  # the base journey, so the fewest clicks are 10 today, 9 in A and C, and 8 in B.
   # Landing: B's sign-in card is inline on the landing; A's is a /signin page; C's a modal.
   landing_layout:
     today: {sign_in_start: {fewest_clicks: 1}}
     a: {sign_in_start: {probability: 1.06, duration: 0.95, dead_click_rate: 0.90, fewest_clicks: 1}}
     b: {sign_in_start: {probability: 1.04, duration: 0.97, fewest_clicks: 1}}
     c: {sign_in_start: {duration: 1.05, dead_click_rate: 1.10, fewest_clicks: 1}}
-  # Sign-in: each flow has one more click before GitHub than today's card (fewest 2).
+  # Sign-in: A's page and C's modal add one click before GitHub (fewest 2). B's panel sits on the
+  # landing like today's card, so its GitHub button is the first click (fewest 1).
   signin_layout:
     today: {sign_in: {fewest_clicks: 1}}
     a: {sign_in: {probability: 0.98, duration: 1.05, fewest_clicks: 2}}
-    b: {sign_in: {duration: 0.97, fewest_clicks: 2}}
+    b: {sign_in: {duration: 0.97, fewest_clicks: 1}}
     c: {sign_in: {dead_click_rate: 1.05, fewest_clicks: 2}}
   # Repo picker: one row click in every flow and today.
   repos_layout:

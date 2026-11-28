@@ -272,7 +272,7 @@ def test_split_gives_each_visitor_their_own_buttons(app_flow: PiecesExperiment) 
 
 def test_fewest_clicks_match_the_designs(app_flow: PiecesExperiment) -> None:
     counts = {version: fewest_clicks(app_flow, version) for version in VERSIONS}
-    assert counts == {TODAY: 10, "a": 9, "b": 9, "c": 9}
+    assert counts == {TODAY: 10, "a": 9, "b": 8, "c": 9}
 
 
 def test_the_shipped_experiment_is_a_pieces_file() -> None:
