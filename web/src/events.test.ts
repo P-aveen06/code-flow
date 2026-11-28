@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildReviewEvent, formatElapsed, getReviewEvents, recordDiffViewed, recordReviewEvent,
 } from "./events";
 import type { ReviewContext } from "./events";
+import { beginAppFlowJourney } from "./appFlow/journey";
 import { readPreviewOverrides } from "./view";
+
+// The app_flow journey sends through the default Flagsmith client, so its calls are visible here.
+const flagsmith = vi.hoisted(() => ({ trackEvent: vi.fn(), flushEvents: vi.fn(() => Promise.resolve()) }));
+vi.mock("@flagsmith/flagsmith", () => ({ default: flagsmith }));
 
 const context: ReviewContext = {
   repo: "review-fixture",
@@ -130,5 +136,47 @@ describe("layout review events", () => {
     recordReviewEvent(review, client, { client, exposed: true });
 
     expect(client.trackEvent.mock.calls.map(([event]) => event)).toEqual(["diff_understood", "layout_understood"]);
+  });
+});
+
+describe("app_flow journey answers", () => {
+  const assignedContext = { ...context, devOverride: false };
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    flagsmith.trackEvent.mockClear();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sends the answer and its moves from the journey when no flow_view client sends the answer", () => {
+    beginAppFlowJourney("demo-1", "a", true, 0);
+    recordReviewEvent(buildReviewEvent(assignedContext, "diff_confusing", 100, 450), null);
+
+    expect(flagsmith.trackEvent.mock.calls).toEqual([
+      ["diff_confusing", { identifier: "demo-1", value: 350, metadata: { flow: "a" } }],
+      ["diagram_moves", { identifier: "demo-1", value: 0, metadata: { flow: "a" } }],
+    ]);
+  });
+
+  it("does not send the outcome twice when the flow_view client already sent it", () => {
+    beginAppFlowJourney("demo-1", "a", true, 0);
+    const client = { trackEvent: vi.fn() };
+    recordReviewEvent(buildReviewEvent(assignedContext, "diff_understood", 100, 450), client);
+
+    expect(client.trackEvent).toHaveBeenCalledExactlyOnceWith("diff_understood", {
+      identifier: "demo-1", value: 350, metadata: { variant: "overlay_summary" },
+    });
+    expect(flagsmith.trackEvent.mock.calls.map(([event]) => event)).toEqual(["diagram_moves"]);
+  });
+
+  it("keeps preview answers out of the journey", () => {
+    beginAppFlowJourney("demo-1", "a", true, 0);
+    recordReviewEvent(buildReviewEvent(context, "diff_understood", 100, 450), null);
+
+    expect(flagsmith.trackEvent).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   beginJourney, markRedirecting, readJourney, resumeJourney, shouldReportAbandon, trackSignin,
 } from "./signinEvents";
+import { beginAppFlowJourney, readJourney as readAppFlowJourney } from "./appFlow/journey";
+
+// Events that the github_signin client does not send reach Flagsmith through the default client.
+const flagsmith = vi.hoisted(() => ({ trackEvent: vi.fn(), flushEvents: vi.fn(() => Promise.resolve()) }));
+vi.mock("@flagsmith/flagsmith", () => ({ default: flagsmith }));
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -72,5 +78,47 @@ describe("returning to the repos page", () => {
     const store = memoryStorage();
     resumeJourney(store);
     expect(readJourney(store)).toBeNull();
+  });
+});
+
+describe("app_flow copies of the github_signin events", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    flagsmith.trackEvent.mockClear();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  it("sends the event for app_flow when github_signin is not sending it", () => {
+    const store = memoryStorage();
+    beginJourney("reviewer-5", "github_signin", false, 0, store);
+    beginAppFlowJourney("reviewer-5", "a", true, 0);
+    trackSignin("import_started", { trackEvent: vi.fn() }, 1, store);
+
+    expect(flagsmith.trackEvent).toHaveBeenCalledExactlyOnceWith("import_started", {
+      identifier: "reviewer-5", metadata: { flow: "a" },
+    });
+  });
+
+  it("forwards timed events with the time since the github_signin landing", () => {
+    const store = memoryStorage();
+    beginJourney("reviewer-5", "github_signin", false, 1_000, store);
+    beginAppFlowJourney("reviewer-5", "a", true, 2_000);
+    trackSignin("import_completed", { trackEvent: vi.fn() }, 31_000, store);
+
+    expect(flagsmith.trackEvent).toHaveBeenCalledExactlyOnceWith("import_completed", {
+      identifier: "reviewer-5", value: 30_000, metadata: { flow: "a" },
+    });
+  });
+
+  it("does not send the event again for app_flow when github_signin already sent it", () => {
+    const store = memoryStorage();
+    const client = { trackEvent: vi.fn() };
+    beginJourney("reviewer-6", "github_signin", true, 0, store);
+    beginAppFlowJourney("reviewer-6", "a", true, 0);
+    trackSignin("import_started", client, 1, store);
+
+    expect(client.trackEvent).toHaveBeenCalledTimes(1);
+    expect(flagsmith.trackEvent).not.toHaveBeenCalled();
+    expect(readAppFlowJourney()?.sent).toEqual(["import_started"]);
   });
 });

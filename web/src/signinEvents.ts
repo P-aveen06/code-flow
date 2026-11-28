@@ -1,6 +1,7 @@
 import flagsmith from "@flagsmith/flagsmith";
 import type { IFlagsmith } from "@flagsmith/flagsmith";
 import type { SigninVariant } from "./flags";
+import { forwardJourneyEvent, markJourneyEventSent } from "./appFlow/journey";
 
 // Events for the github_signin experiment. The journey lives in sessionStorage so it
 // survives the round trip to GitHub, which reloads the page.
@@ -68,7 +69,7 @@ export function beginJourney(
   saveJourney({ reviewerId, variant, exposed, landedAt: now, sent: [], redirecting: false }, store);
 }
 
-// Each event counts once per journey. Only visitors in the experiment reach Flagsmith.
+// Each event counts once per journey. Only visitors in the experiment reach Flagsmith from here.
 export function trackSignin(
   event: SigninEvent, client: Client = flagsmith, now = Date.now(), store: Storage | null = storage(),
 ) {
@@ -78,16 +79,22 @@ export function trackSignin(
   const value = timedEvents.has(event) ? Math.max(0, now - journey.landedAt) : undefined;
   saveJourney({ ...journey, sent: [...journey.sent, event] }, store);
   console.info(event, { variant: journey.variant, value });
-  if (!journey.exposed) return true;
-  try {
-    client.trackEvent(event, {
-      identifier: journey.reviewerId,
-      ...(value === undefined ? {} : { value }),
-      metadata: { variant: journey.variant },
-    });
-  } catch {
-    // Flagsmith may be unreachable; the import itself must not fail because of it.
+  let sentToFlagsmith = false;
+  if (journey.exposed) {
+    try {
+      client.trackEvent(event, {
+        identifier: journey.reviewerId,
+        ...(value === undefined ? {} : { value }),
+        metadata: { variant: journey.variant },
+      });
+      sentToFlagsmith = true;
+    } catch {
+      // Flagsmith may be unreachable; the import itself must not fail because of it.
+    }
   }
+  // The app_flow copy of the event goes to Flagsmith only when this path did not already send it.
+  if (sentToFlagsmith) markJourneyEventSent(event);
+  else forwardJourneyEvent(event, value);
   return true;
 }
 

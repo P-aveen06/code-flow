@@ -1,4 +1,5 @@
 import type { IFlagsmith } from "@flagsmith/flagsmith";
+import { markJourneyEventSent, recordReviewAnswer } from "./appFlow/journey";
 import type { FlowView } from "./view";
 
 // Review ms is measured from the rendered diff to the decision.
@@ -53,7 +54,10 @@ export function recordReviewEvent(
       value: payload.ms,
       metadata: { variant: payload.view },
     });
+    // The flow_view copy of the answer is sent, so the app_flow journey must not send it again.
+    markJourneyEventSent(payload.event);
   }
+  recordReviewAnswer(payload.event, payload.ms, payload.repo);
   if (layout?.exposed) {
     const event = payload.event === "diff_understood" ? "layout_understood" : "layout_confusing";
     layout.client.trackEvent(event, { value: payload.ms });
