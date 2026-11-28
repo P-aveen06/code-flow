@@ -272,3 +272,37 @@ Each event name is sent at most once per journey. The journey lives in `sessionS
   modals trap focus and close on Escape; text contrast at least 4.5:1.
 - `cd web && npm run build && npm test` must pass before you commit. Server: `cd server && uv run pytest`.
 - Commit with a clear message on your branch. Do not push.
+
+## Running the rounds (Development only)
+
+Every round is its own Flagsmith experiment, named after the round, with the same metrics:
+Journey completed (primary), Import completed, Diff understood, Journey clicks and Dead clicks.
+`scripts/flagsmith_app_flow.py` switches the flags between rounds and refuses Production.
+
+```bash
+python3 scripts/flagsmith_app_flow.py show                      # each flag's setting
+python3 scripts/flagsmith_app_flow.py reset                     # round 1: app_flow split, ui_* flow
+
+# Round 1: app_flow a 34 / b 33 / c 33, every piece follows it.
+python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 1" create
+(cd simulator && uv run python simulate.py --experiment app_flow --panel default --limit 500)
+python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 1" refresh --wait 180
+python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 1" status
+python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 1" rollout --variant a
+
+# Ablation round n: put the split back, turn one more switch off, same 500 reviewers again.
+python3 scripts/flagsmith_app_flow.py set app_flow=split ui_flow_view_layout=off
+python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 2" create
+(cd simulator && uv run python simulate.py --experiment app_flow --panel default --limit 500 --allow-repeat)
+# ... refresh, status, rollout --variant a as above
+
+# Stacking: split one switch 34/33/33 as its own experiment, then pin the winner.
+python3 scripts/flagsmith_app_flow.py set ui_branch_switch=split
+python3 scripts/flagsmith_experiment.py --experiment ui_branch_switch --round "round 14" create
+# ... simulate, refresh, status, then rollout --variant <winner> and
+python3 scripts/flagsmith_app_flow.py set ui_branch_switch=<winner>
+```
+
+Completing a round with `rollout --variant a` only closes it (Flagsmith serves the control to
+everyone until the next `set app_flow=split`). The round order and the tie rule are in the
+metrics doc; a flag with a running experiment can't be switched until that round is completed.
