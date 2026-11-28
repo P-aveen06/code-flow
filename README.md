@@ -41,6 +41,17 @@ for vertical and 60.8% for horizontal. The time result was inconclusive.
 Production uses vertical for long flows and horizontal for short flows.
 [Full results](docs/experiment-results.md#flow_direction-experiment-results-simulated-reviewers-long-flows)
 
+## Sign in with GitHub · `github_signin`
+
+We tested whether more visitors finish an import when they can sign in with
+GitHub and pick any repository they allow, including private ones, instead of
+pasting a public URL. With 1,300 simulated visitors in the Development
+environment, Flagsmith reported 62.3% completed imports with sign-in and 52.1%
+without, a 19.4% lift (95% credible interval 8.1% to 30.8%). The cost is time:
+visitors who reached a flow waited about twice as long, because of the trip to
+GitHub. Abandonment was inconclusive. Nothing is rolled out yet.
+[Full results](docs/experiment-results.md#github_signin-experiment-results-simulated-visitors)
+
 ## Run locally
 
 Install Git, [uv](https://docs.astral.sh/uv/), Python 3.11+, and Node.js 22.12+.

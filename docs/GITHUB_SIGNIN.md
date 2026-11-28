@@ -211,7 +211,9 @@ Each event counts once per visit. The Flagsmith experiment measures:
 - **Import completed** (goal, expected to rise)
 - **Time to first flow (ms)** (guardrail: lower is better, but sign-in is
   expected to add time)
-- **Import abandoned** (expected to fall)
+- **Import abandoned** (Flagsmith is told lower is better). The simulator's
+  own assumptions don't make it fall: sign-in brings more visitors into the
+  journey, and each GitHub step loses a few of them.
 
 Simulate it before real traffic. The assumptions are in
 [simulator/experiments/github_signin.yaml](../simulator/experiments/github_signin.yaml):
@@ -229,3 +231,6 @@ python3 scripts/flagsmith_experiment.py --experiment github_signin status
 
 Add `--model null` to the simulator for a run with no real difference between
 the arms, to check that Flagsmith doesn't report one.
+
+The first run, with 1,300 simulated visitors in Development, is written up in
+[experiment-results.md](experiment-results.md#github_signin-experiment-results-simulated-visitors).
