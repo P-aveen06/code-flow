@@ -1,0 +1,707 @@
+/* Flow C entry screens: the landing and the sign-in sheet. Layout and sizes only. Every colour,
+   font, weight, line height and button size comes from the tokens (docs/APP_FLOW_BUILD.md). */
+
+/* Landing: hero. Text, picture and timeline sit at the design's positions from 1280 px up. */
+
+.fc-landing {
+  display: grid;
+  min-width: 0;
+}
+
+.fc-landing__hero {
+  height: 472px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.fc-landing__lead {
+  position: absolute;
+  top: 68px;
+  left: 64px;
+  z-index: 2;
+  display: grid;
+  gap: 20px;
+  width: 476px;
+  justify-items: start;
+}
+
+.fc-landing__title {
+  margin: 0;
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-heading);
+}
+
+.fc-landing__sub {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.fc-landing__actions {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.fc-landing__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc-landing__chip-bar {
+  position: absolute;
+  top: 40px;
+  left: 536px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  box-sizing: border-box;
+  width: max-content;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fc-landing__divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--color-border-strong);
+}
+
+.fc-landing__picture {
+  position: absolute;
+  top: 112px;
+  left: 512px;
+  width: 1120px;
+  height: 240px;
+}
+
+.fc-landing__group {
+  position: absolute;
+  top: 0;
+  left: 190px;
+  box-sizing: border-box;
+  width: 636px;
+  height: 240px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-grid);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-surface) 55%, transparent);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fc-landing__wire {
+  position: absolute;
+  background: var(--diagram-context);
+}
+
+.fc-landing__wire--live {
+  background: var(--diagram-added);
+}
+
+.fc-landing__arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent var(--diagram-context);
+}
+
+.fc-landing__arrow--live {
+  border-left-color: var(--diagram-added);
+}
+
+.fc-landing__node {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 1px solid;
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-small);
+}
+
+.fc-landing__node--changed {
+  left: 210px;
+  top: 80px;
+  width: 276px;
+  height: 96px;
+  border-color: var(--diagram-changed);
+  background: var(--diagram-changed-fill);
+}
+
+.fc-landing__node--added {
+  left: 518px;
+  top: 80px;
+  width: 284px;
+  height: 96px;
+  border-color: var(--diagram-added);
+  background: var(--diagram-added-fill);
+}
+
+.fc-landing__node--context {
+  align-items: flex-start;
+  justify-content: center;
+  border-color: var(--diagram-context);
+}
+
+.fc-landing__node--ctx1 {
+  left: 0;
+  top: 104px;
+  width: 190px;
+  height: 48px;
+}
+
+.fc-landing__node--ctx2 {
+  left: 852px;
+  top: 54px;
+  width: 128px;
+  height: 32px;
+}
+
+.fc-landing__node--ctx3 {
+  left: 852px;
+  top: 159px;
+  width: 184px;
+  height: 48px;
+}
+
+.fc-landing__node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  font-family: var(--font-mono);
+}
+
+.fc-landing__node-name {
+  font-size: var(--text-mono);
+  line-height: var(--leading-heading);
+  overflow-wrap: anywhere;
+}
+
+.fc-landing__node-path {
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fc-landing__timeline {
+  position: absolute;
+  top: 384px;
+  left: 552px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fc-landing__track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 620px;
+  height: 16px;
+}
+
+.fc-landing__track::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--color-grid);
+}
+
+.fc-landing__dot {
+  position: relative;
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--diagram-context);
+}
+
+.fc-landing__dot--ink {
+  background: var(--color-text);
+}
+
+.fc-landing__dot--ink-lg,
+.fc-landing__dot--quiet-lg {
+  width: 8px;
+  height: 8px;
+}
+
+.fc-landing__dot--ink-lg {
+  background: var(--color-text);
+}
+
+.fc-landing__dot--selected {
+  width: 10px;
+  height: 10px;
+  background: var(--color-selection);
+}
+
+/* Landing: body sections */
+
+.fc-landing__body {
+  display: grid;
+  gap: 32px;
+  padding: 32px 64px 40px;
+}
+
+.fc-landing__section {
+  display: grid;
+  gap: 16px;
+}
+
+.fc-landing__heading {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fc-landing__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  line-height: var(--leading-body);
+}
+
+.fc-landing__small {
+  font-size: var(--text-small);
+}
+
+.fc-landing__strong {
+  font-weight: var(--weight-label);
+}
+
+.fc-landing__mono {
+  font-family: var(--font-mono);
+}
+
+.fc-landing__alert {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-sunken);
+  color: var(--color-text);
+}
+
+.fc-landing__url {
+  display: grid;
+  gap: 16px;
+  max-width: 520px;
+}
+
+.fc-landing__commit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fc-landing__commit {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+}
+
+.fc-landing__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 88px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: radial-gradient(circle, var(--color-grid) 1px, transparent 1.15px) 0 0 / 16px 16px var(--color-canvas);
+  overflow: hidden;
+}
+
+.fc-landing__thumb .fc-icon {
+  color: var(--diagram-added);
+}
+
+.fc-landing__chip {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  white-space: nowrap;
+}
+
+.fc-landing__chip--added {
+  border-color: var(--diagram-added);
+  background: var(--diagram-added-fill);
+  color: var(--diagram-added-text);
+}
+
+.fc-landing__chip--changed {
+  border-color: var(--diagram-changed);
+  background: var(--diagram-changed-fill);
+  color: var(--diagram-changed-text);
+}
+
+.fc-landing__chip--removed {
+  border-style: dashed;
+  border-color: var(--diagram-removed);
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+}
+
+.fc-landing__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fc-landing__counts {
+  display: flex;
+  gap: 4px;
+}
+
+.fc-landing__commit-title {
+  margin: 0;
+  color: var(--color-text);
+  line-height: var(--leading-body);
+}
+
+.fc-landing__flag-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fc-landing__flag {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 152px;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-canvas);
+}
+
+.fc-landing__stat {
+  margin: 0;
+  font-size: var(--text-h1);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fc-landing__flag-label {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+}
+
+.fc-landing__flag-title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fc-landing__repo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fc-landing__repo {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+}
+
+.fc-landing__repo-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fc-landing__repo-name {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  overflow-wrap: anywhere;
+}
+
+.fc-landing__repo-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.fc-landing__open {
+  margin-left: auto;
+}
+
+/* The design's text links sit flush with the text beside them (the shared button's padding is cut). */
+.fc-landing__paste.btn,
+.fc-signin__link.btn {
+  padding: 0 2px;
+}
+
+.fc-landing__waking {
+  display: grid;
+  gap: 8px;
+}
+
+.fc-landing__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-sunken);
+  overflow: hidden;
+}
+
+.fc-landing__bar > span {
+  display: block;
+  width: 25%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-text);
+}
+
+/* Sign-in sheet and the URL form (also used on the landing for other sign-in pieces) */
+
+.fc-signin__body {
+  display: grid;
+  gap: 16px;
+}
+
+.fc-signin__lead {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: var(--leading-body);
+}
+
+.fc-signin__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-sunken);
+  color: var(--color-text);
+}
+
+/* The shared stylesheet sets every role="alert" to the danger tone; these boxes keep the design's ink text. */
+.fc-signin__error[role="alert"],
+.fc-landing__alert[role="alert"] {
+  color: var(--color-text);
+}
+
+.fc-signin__account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.fc-signin__actions {
+  display: grid;
+  gap: 8px;
+}
+
+.fc-signin__full {
+  box-sizing: border-box;
+  width: 100%;
+  justify-content: center;
+}
+
+.fc-signin__link {
+  justify-self: center;
+}
+
+.fc-signin__form {
+  display: grid;
+  margin: 0;
+}
+
+.fc-signin__fields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fc-signin__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fc-signin__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 12px;
+}
+
+.fc-signin__label {
+  color: var(--color-text);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fc-signin__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--btn-height);
+  padding: 0 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+}
+
+.fc-signin__input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.fc-signin__input:focus-visible {
+  outline: 2px solid var(--color-selection);
+  outline-offset: 2px;
+}
+
+.fc-signin__muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  line-height: var(--leading-body);
+}
+
+.fc-signin__progress {
+  display: grid;
+  gap: 12px;
+}
+
+.fc-signin__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fc-signin__steps li[data-complete="true"],
+.fc-signin__steps li[aria-current="step"] {
+  color: var(--color-text);
+  font-weight: var(--weight-label);
+}
+
+.fc-signin__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-sunken);
+  overflow: hidden;
+}
+
+.fc-signin__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-text);
+  transition: width 300ms;
+}
+
+.fc-signin__bar--short > span {
+  width: 25%;
+}
+
+/* Narrower screens: stack the hero and the grids (below the 1280 px design width) */
+
+@media (max-width: 1279px) {
+  .fc-landing__hero {
+    display: grid;
+    height: auto;
+    gap: 24px;
+    padding: 32px 24px 0;
+  }
+
+  .fc-landing__lead,
+  .fc-landing__chip-bar,
+  .fc-landing__picture,
+  .fc-landing__timeline {
+    position: relative;
+    top: auto;
+    left: auto;
+  }
+
+  .fc-landing__lead {
+    width: auto;
+  }
+
+  .fc-landing__timeline {
+    justify-self: start;
+    margin-bottom: 24px;
+  }
+
+  .fc-landing__body {
+    padding: 32px 24px 40px;
+  }
+
+  .fc-landing__commit-grid,
+  .fc-landing__flag-grid,
+  .fc-landing__repo-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

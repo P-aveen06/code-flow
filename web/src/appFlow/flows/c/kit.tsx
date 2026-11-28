@@ -25,7 +25,8 @@ export type IconName =
   | "commit"
   | "chevron-right"
   | "help"
-  | "refresh";
+  | "refresh"
+  | "layers";
 
 // Stroke paths on a 24 x 24 grid, copied from the flow C designs. search, commit, help and refresh
 // are not in the designs, so they use the same stroke style.
@@ -48,6 +49,7 @@ const ICON_PATHS: Record<IconName, readonly string[]> = {
   "chevron-right": ["m9 6 6 6-6 6"],
   help: ["M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6", "M12 17h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
   refresh: ["M20 12a8 8 0 1 1-2.3-5.6", "M20 4v5h-5"],
+  layers: ["m12 3 9 5-9 5-9-5 9-5Zm9 9-9 5-9-5m18 4-9 5-9-5"],
 };
 
 /** A decorative stroke icon. Name it with the text or aria-label next to it. */
@@ -116,7 +118,7 @@ export function AvatarMenu({ me, onSignOut }: { me: Me; onSignOut: () => void })
   );
 }
 
-/** A white panel that floats over the canvas, with the 16 px radius and panel shadow. `title` labels it. */
+/** A raised panel that floats over the canvas, with the 16 px radius and panel shadow. `title` labels it. */
 export function FloatingPanel({ title, className, children }: {
   title?: string;
   className?: string;
