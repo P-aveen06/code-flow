@@ -1,0 +1,419 @@
+/* Flow B entry screens: the landing and its inline sign-in panel. Layout only: every colour, font,
+   weight, line height and button size reads a token (docs/APP_FLOW_BUILD.md, "Token vocabulary"). */
+
+/* Landing: a split hero, then the repositories and the Flagsmith notes */
+
+.fb-landing {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: calc(100dvh - 64px);
+  padding: var(--space-6) 64px var(--space-5);
+  background: var(--color-bg);
+}
+
+.fb-landing__hero,
+.fb-landing__lower {
+  display: grid;
+  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr);
+  align-items: start;
+  gap: 28px;
+}
+
+.fb-landing__lead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-landing__title {
+  margin: 0;
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-heading);
+}
+
+.fb-landing__subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-h3);
+}
+
+.fb-landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 4px 0 8px;
+}
+
+.fb-landing__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fb-landing__account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+}
+
+.fb-landing__login {
+  font-weight: var(--weight-label);
+}
+
+.fb-landing__mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  font-weight: var(--weight-mono);
+  line-height: var(--leading-code);
+}
+
+/* Product picture: the flow view screenshot in a frame */
+
+.fb-landing__shot {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.fb-landing__shot-bar,
+.fb-landing__shot-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-landing__shot-bar {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-header);
+  color: var(--color-text);
+  font-size: var(--text-body);
+}
+
+.fb-landing__shot-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-weight: var(--weight-heading);
+}
+
+.fb-landing__shot-image {
+  display: block;
+  width: 100%;
+  height: 244px;
+  object-fit: cover;
+  object-position: 50% 50%;
+}
+
+.fb-landing__shot-foot {
+  height: 32px;
+  margin: 0;
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Lower row: panels with a title bar */
+
+.fb-landing__panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fb-landing__note {
+  margin: 0;
+  padding: 14px;
+  color: var(--color-text-muted);
+}
+
+.fb-landing__loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-accent-soft);
+}
+
+.fb-landing__loading p {
+  margin: 0;
+}
+
+.fb-landing__loading progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--color-accent);
+}
+
+/* Repositories table cells */
+
+.fb-landing__repo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-landing__repo-name {
+  overflow: hidden;
+  font-weight: var(--weight-label);
+  text-overflow: ellipsis;
+}
+
+.fb-landing__badge,
+.fb-landing__status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+}
+
+.fb-landing__status[data-status="ready"],
+.fb-landing__status[data-status="cloning"],
+.fb-landing__status[data-status="analyzing"] {
+  border-color: color-mix(in srgb, var(--color-accent) 25%, var(--color-surface));
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+}
+
+.fb-landing__status[data-status="error"] {
+  border-color: var(--diagram-removed);
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+}
+
+/* How Flagsmith is used */
+
+.fb-landing__flags {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fb-landing__flag {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 9px 14px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.fb-landing__flag:first-child {
+  border-top: 0;
+}
+
+.fb-landing__flag > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fb-landing__flag p {
+  margin: 0;
+  font-size: var(--text-small);
+}
+
+.fb-landing__flag strong {
+  color: var(--color-text);
+  font-weight: var(--weight-label);
+}
+
+.fb-landing__flag-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-landing__flag-title code {
+  font-family: var(--font-mono);
+  font-size: 1em;
+}
+
+/* Sign-in panel and cards (SignInPanelB), also used on the other landings */
+
+.fb-signin__panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.fb-signin__panel--section {
+  max-width: 720px;
+}
+
+.fb-signin__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 20px 20px 22px;
+}
+
+.fb-signin__title {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-signin__lead {
+  max-width: 410px;
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.fb-signin__status,
+.fb-signin__alert {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.fb-signin__status {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+}
+
+.fb-signin__alert {
+  border: 1px solid var(--diagram-removed);
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+}
+
+.fb-signin__account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-sunken);
+}
+
+.fb-signin__account-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.fb-signin__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.fb-signin__url,
+.fb-signin__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fb-signin__progress > p {
+  margin: 0;
+}
+
+.fb-signin__form,
+.fb-signin__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fb-signin__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.fb-signin__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fb-signin__label {
+  font-weight: var(--weight-label);
+}
+
+.fb-signin__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  font-weight: var(--weight-mono);
+  line-height: var(--leading-code);
+}
+
+.fb-signin__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+/* Narrow screens: one column, so the layout stays usable below 1024 px */
+
+@media (max-width: 1023px) {
+  .fb-landing {
+    padding: var(--space-4);
+  }
+
+  .fb-landing__hero,
+  .fb-landing__lower {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
