@@ -132,10 +132,6 @@
   background: var(--color-border-strong);
 }
 
-.fa-stepper__step--done:not(:last-child)::after {
-  background: var(--color-accent);
-}
-
 .fa-stepper__marker {
   display: inline-flex;
   align-items: center;

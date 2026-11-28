@@ -21,12 +21,6 @@
 
 /* Repos page */
 
-/* The kit draws the line after a done step in accent. The designs keep every line grey. */
-.fa-repos .fa-stepper__step--done:not(:last-child)::after,
-.fa-repo-details__page .fa-stepper__step--done:not(:last-child)::after {
-  background: var(--color-border-strong);
-}
-
 /* 720 px on desktop; below that the column keeps a 16 px gutter on each side. */
 .fa-page.fa-repos,
 .fa-page.fa-repo-details__page {
