@@ -5,6 +5,8 @@ import {
   chooseFlowView, parseFlowDirection, parseFlowView, readPreviewOverrides,
 } from "./view";
 import type { FlowView } from "./view";
+import { APP_FLOW_FLAG, SWITCHES, switchFlagName } from "./appFlow/types";
+import type { Switch } from "./appFlow/types";
 
 const reviewerKey = "code-flow:reviewer";
 const pollInterval = 10_000;
@@ -79,23 +81,38 @@ interface FlagSnapshot {
   variantPreview: boolean;
   signinFlag: IFlagsmithFeature | null;
   commitCountFlag: IFlagsmithFeature | null;
+  // False when Flagsmith is not configured or did not answer. app_flow then uses VITE_APP_FLOW_FALLBACK.
+  reachable: boolean;
+  appFlowFlag: IFlagsmithFeature | null;
+  uiFlags: Partial<Record<Switch, IFlagsmithFeature>>;
 }
 
 const unavailableFlags: FlagSnapshot = {
   assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false, signinFlag: null,
-  commitCountFlag: null,
+  commitCountFlag: null, reachable: false, appFlowFlag: null, uiFlags: {},
 };
 
 function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
   return client.loadingState?.source === FlagSource.SERVER && !client.loadingState.error;
 }
 
+// One flag per switch, keyed by the switch name (ui_<switch> in Flagsmith). Missing flags stay out.
+function readUiFlags(allFlags: Partial<Record<string, IFlagsmithFeature>>): FlagSnapshot["uiFlags"] {
+  const uiFlags: FlagSnapshot["uiFlags"] = {};
+  for (const name of SWITCHES) {
+    const flag = allFlags[switchFlagName(name)];
+    if (flag) uiFlags[name] = flag;
+  }
+  return uiFlags;
+}
+
 export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getAllFlags" | "hasFeature">): FlagSnapshot {
   if (!hasServerFlags(client)) return unavailableFlags;
+  const allFlags = client.getAllFlags();
   const {
     flow_view: viewFlag, flow_direction: directionFlag, github_signin: signinFlag,
     branch_commit_count: commitCountFlag,
-  } = client.getAllFlags();
+  } = allFlags;
   return {
     assignmentKey: JSON.stringify([viewFlag?.value, viewFlag?.variant, viewFlag?.enabled, viewFlag?.experiment]),
     assignedView: parseFlowView(viewFlag?.value),
@@ -104,6 +121,9 @@ export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getA
     variantPreview: client.hasFeature("variant_preview"),
     signinFlag: signinFlag ?? null,
     commitCountFlag: commitCountFlag ?? null,
+    reachable: true,
+    appFlowFlag: allFlags[APP_FLOW_FLAG] ?? null,
+    uiFlags: readUiFlags(allFlags),
   };
 }
 
@@ -128,7 +148,7 @@ export function exposeFlowAssignment(
   };
 }
 
-function useFlagSnapshot(reviewerId: string) {
+export function useFlagSnapshot(reviewerId: string) {
   const api = import.meta.env.VITE_FLAGSMITH_API_URL?.trim();
   const key = import.meta.env.VITE_CODEFLOW_FLAGSMITH_ENV_KEY?.trim();
   const [result, setResult] = useState<FlagSnapshot & { reviewerId: string }>();

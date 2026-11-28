@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-type Route =
+export type Route =
   | { page: "landing" }
+  | { page: "signin" }
   | { page: "viewer"; id: string }
   | { page: "github-repos" }
   | { page: "github-repo"; repoId: number }
@@ -13,6 +14,7 @@ function validRepoId(id: string) {
 
 export function parsePath(pathname: string): Route {
   if (pathname === "/") return { page: "landing" };
+  if (/^\/signin\/?$/.test(pathname)) return { page: "signin" };
   if (/^\/github\/?$/.test(pathname)) return { page: "github-repos" };
   const github = /^\/github\/([1-9]\d{0,15})\/?$/.exec(pathname);
   if (github) return { page: "github-repo", repoId: Number(github[1]) };
