@@ -1,157 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchHostedRepos, fetchRepos, importRepo } from "../api";
-import { useSigninVariant } from "../flags";
-import { pollRepoStatus } from "../pollRepoStatus";
-import { navigate, repoPath, useLocation } from "../router";
-import { beginJourney, trackSignin, watchForAbandon } from "../signinEvents";
-import type { ImportRequest, ImportResponse, ImportStatus } from "../types";
-import { useRequest } from "../useRequest";
-import { validateImport } from "./importHelpers";
-import type { ImportFields } from "./importHelpers";
+import { useState } from "react";
+import { SignInSlot } from "../appFlow/SignInSlot";
+import { useLandingJourney } from "../appFlow/hooks/useLandingJourney";
+import { useLandingRepos } from "../appFlow/hooks/useLandingRepos";
+import { useUrlImport } from "../appFlow/hooks/useUrlImport";
 import { ImportProgress } from "./ImportProgress";
 import { LandingFlags } from "./LandingFlags";
 import { LandingHero } from "./LandingHero";
-import { LandingImport, type FormError } from "./LandingImport";
+import { LandingImport } from "./LandingImport";
 import { LandingRepositories } from "./LandingRepositories";
 import { SignInImport } from "./SignInImport";
 
-type Job = ImportResponse & { body: ImportRequest };
-
-// A failed sign-in returns here with signin_error; the page reads it once, then drops it.
-// A successful one goes to the repos page (/github).
-const returnParams = ["signin_error"];
-const signinErrors: Record<string, string> = {
-  denied: "GitHub sign-in was cancelled.",
-  expired: "The sign-in took too long or started in another tab. Try again.",
-  github: "GitHub did not accept the sign-in. Try again.",
-};
-
-export function readSigninError(search: string) {
-  return signinErrors[new URLSearchParams(search).get("signin_error") ?? ""] ?? null;
-}
+export { readSigninError } from "../appFlow/hooks/useLandingJourney";
 
 export function Landing() {
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
-  const { search } = useLocation();
-  const signin = useSigninVariant(search);
-  const [signinError] = useState(() => readSigninError(search));
+  const { signinError, signin } = useLandingJourney();
   const [urlFormChosen, setUrlFormChosen] = useState(false);
   const showSignin = signin.variant === "github_signin" && !urlFormChosen;
-  const [fields, setFields] = useState<ImportFields>({ url: "", subdir: "", maxCommits: "30" });
-  const [formError, setFormError] = useState<FormError | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
-  const [update, setUpdate] = useState<ImportStatus>();
-  const [pollError, setPollError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [repoRevision, setRepoRevision] = useState(0);
-  const [waking, setWaking] = useState(false);
-  const submission = useRef<AbortController | null>(null);
-  const loadRepos = useCallback((signal: AbortSignal) => (
-    hosted ? fetchHostedRepos(signal) : fetchRepos(signal)
-  ), [hosted, repoRevision]);
-  const repos = useRequest(loadRepos);
-  const busy = submitting || Boolean(job && !pollError && update?.status !== "error");
-
-  useEffect(() => () => submission.current?.abort(), []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!returnParams.some((name) => params.has(name))) return;
-    returnParams.forEach((name) => params.delete(name));
-    const query = params.toString();
-    navigate(`${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`, { replace: true });
-  }, []);
-
-  useEffect(() => {
-    if (!signin.ready) return;
-    beginJourney(signin.reviewerId, signin.variant, signin.exposed);
-  }, [signin.ready, signin.reviewerId, signin.variant, signin.exposed]);
-
-  useEffect(() => watchForAbandon(), []);
-
-  useEffect(() => {
-    setWaking(false);
-    if (!hosted || repos.status !== "loading") return;
-    const timer = window.setTimeout(() => setWaking(true), 3000);
-    return () => window.clearTimeout(timer);
-  }, [hosted, loadRepos, repos.status]);
-
-  useEffect(() => {
-    if (!job) return;
-    const { id } = job;
-    const controller = new AbortController();
-    let navigationTimer: number | undefined;
-
-    void pollRepoStatus(id, controller.signal, setUpdate).then(
-      (status) => {
-        if (controller.signal.aborted) return;
-        setRepoRevision((revision) => revision + 1);
-        if (status.status === "ready") {
-          trackSignin("import_completed");
-          navigationTimer = window.setTimeout(() => navigate(repoPath(id)), 2000);
-        }
-      },
-      (error: unknown) => {
-        if (!controller.signal.aborted) {
-          setPollError(error instanceof Error ? error.message : "Could not check the import status.");
-        }
-      },
-    );
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(navigationTimer);
-    };
-  }, [job]);
-
-  useEffect(() => {
-    if (repos.status !== "ready" || repos.data.every(({ status }) => status === "ready" || status === "error")) return;
-    const timer = window.setTimeout(() => setRepoRevision((revision) => revision + 1), 5000);
-    return () => window.clearTimeout(timer);
-  }, [repos]);
-
-  function edit(field: keyof ImportFields, value: string) {
-    setFields((previous) => ({ ...previous, [field]: value }));
-    if (formError) setFormError(null);
-  }
-
-  async function startImport(body: ImportRequest) {
-    if (submission.current) return;
-    const controller = new AbortController();
-    submission.current = controller;
-    setSubmitting(true);
-    setFormError(null);
-    setJob(null);
-    setUpdate(undefined);
-    setPollError(null);
-    try {
-      const response = await importRepo(body, controller.signal);
-      if (controller.signal.aborted) return;
-      setJob({ ...response, body });
-      setRepoRevision((revision) => revision + 1);
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setFormError({ message: error instanceof Error ? error.message : "Could not start the import." });
-      }
-    } finally {
-      if (!controller.signal.aborted) {
-        submission.current = null;
-        setSubmitting(false);
-      }
-    }
-  }
-
-  function submit() {
-    const result = validateImport(fields);
-    if ("body" in result) {
-      trackSignin("import_started");
-      void startImport(result.body);
-    }
-    else {
-      setFormError(result);
-      document.getElementById(`import-${result.field}`)?.focus();
-    }
-  }
+  const { repos, waking, reload } = useLandingRepos();
+  const { fields, edit, formError, submit, busy, submitting, job, update, pollError, retry } = useUrlImport();
 
   return (
     <main className="landing">
@@ -166,9 +33,9 @@ export function Landing() {
           </section>
         )}
         {signin.ready && showSignin && (
-          <SignInImport
-            onSignedOut={() => setRepoRevision((revision) => revision + 1)}
-            onUseUrl={() => setUrlFormChosen(true)}
+          <SignInSlot
+            placement="section"
+            today={<SignInImport onSignedOut={reload} onUseUrl={() => setUrlFormChosen(true)} />}
           />
         )}
         {signin.ready && !showSignin && (
@@ -182,17 +49,7 @@ export function Landing() {
             Sign in with GitHub instead
           </button>
         )}
-        {job && (
-          <ImportProgress
-            job={job} update={update} pollError={pollError}
-            onRetry={() => {
-              if (pollError) {
-                setPollError(null);
-                setJob({ ...job });
-              } else void startImport(job.body);
-            }}
-          />
-        )}
+        {job && <ImportProgress job={job} update={update} pollError={pollError} onRetry={retry} />}
       </div>
     </main>
   );

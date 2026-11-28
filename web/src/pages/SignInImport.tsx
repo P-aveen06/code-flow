@@ -1,9 +1,8 @@
-import { useCallback, useState } from "react";
-import { fetchMe, signInUrl, signOut } from "../api";
+import { useMe } from "../appFlow/hooks/useMe";
+import { signInUrl } from "../api";
 import { AppLink } from "../AppLink";
 import { githubReposPath } from "../router";
 import { markRedirecting, trackSignin } from "../signinEvents";
-import { useRequest } from "../useRequest";
 
 export function startSignIn() {
   trackSignin("import_started");
@@ -16,15 +15,12 @@ export function SignInImport({ onSignedOut, onUseUrl }: {
   onSignedOut: () => void;
   onUseUrl: () => void;
 }) {
-  const [revision, setRevision] = useState(0);
-  const loadMe = useCallback((signal: AbortSignal) => fetchMe(signal), [revision]);
-  const me = useRequest(loadMe);
+  const { me, signOut } = useMe();
 
   async function leave() {
     try {
       await signOut();
     } finally {
-      setRevision((value) => value + 1);
       onSignedOut();
     }
   }

@@ -1,19 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCommits, fetchRepos, fetchSnapshot, refreshRepo } from "../api";
+import { useEffect, useState } from "react";
+import { useRepoReview } from "../appFlow/hooks/useRepoReview";
+import { useReviewData } from "../appFlow/hooks/useReviewData";
+import type { ReviewData } from "../appFlow/hooks/useReviewData";
 import { AppLink } from "../AppLink";
-import { recordReviewEvent } from "../events";
-import { directionExposureKey, readFlowDirection, useCodeFlowFlags, useDirectionExposure } from "../flags";
-import type { FlowLayout } from "../layout/elk";
-import { pollRepoStatus } from "../pollRepoStatus";
-import { navigate, repoPath } from "../router";
-import { trackSignin } from "../signinEvents";
-import type { FlagCheck, FlagFinding, OverlayNode, TimelineCommit } from "../types";
-import { useDiff, useDiffLayout } from "../useDiff";
-import type { Hops } from "../useDiff";
-import { useRepoFlags } from "../useRepoFlags";
-import { useRequest } from "../useRequest";
-import { parseFlowDirection, parseFlowView, replaceDirectionOverride, replaceViewOverride } from "../view";
-import type { FlowDirection, FlowView } from "../view";
+import { replaceDirectionOverride, replaceViewOverride } from "../view";
 import { CodePane } from "../views/CodePane";
 import { FlagsmithPanel } from "../views/FlagsmithPanel";
 import { FlowLegend } from "../views/FlowCanvas";
@@ -24,54 +14,10 @@ import { ReviewBar } from "../views/ReviewBar";
 import { SideBySide } from "../views/SideBySide";
 import { Timeline } from "../views/Timeline";
 import { DirectionPreview, VariantPreview, flowDirectionLabels, flowViewLabels } from "../views/VariantPreview";
-import type { ExpandedContext } from "../views/collapse";
-import { liveFlagStates, toggleFlagSelection } from "../views/flagFindings";
-import { useDiagramFullscreen } from "../views/fullscreen";
-import { layoutPositionKey, useLayoutPositions } from "../views/layoutPositions";
-import {
-  formatCommitDate, formatFunctionCounts, hasFlowChange, nearestFlowChange, resolveCommit,
-} from "../views/timelineHelpers";
-import { displaySubdir, importProgress } from "./importHelpers";
+import { formatCommitDate, formatFunctionCounts } from "../views/timelineHelpers";
+import { displaySubdir } from "./importHelpers";
 
-const guidePreference = "code-flow:diagram-guide";
-const sourcePreference = "code-flow:source-code";
 const neighboursHint = "How many callers/callees around the changed functions to show";
-
-function readPanelPreference(key: string) {
-  try {
-    return window.localStorage.getItem(key) !== "closed";
-  } catch {
-    return true;
-  }
-}
-
-function savePanelPreference(key: string, open: boolean) {
-  try {
-    window.localStorage.setItem(key, open ? "open" : "closed");
-  } catch {
-    // Toggling a panel still works when storage is blocked.
-  }
-}
-
-async function hasNonemptySnapshot(id: string, commits: TimelineCommit[], signal: AbortSignal) {
-  // An addition or change proves that the commit's own snapshot contains nodes.
-  if (commits.some(({ stats }) => stats.nodes_added > 0 || stats.nodes_changed > 0)) return true;
-  // With no additions, later first-parent snapshots can only keep or remove the oldest snapshot's nodes.
-  const first = commits[0];
-  if (!first) return false;
-  const snapshot = await fetchSnapshot(id, first.sha, signal);
-  return snapshot.nodes.length > 0;
-}
-
-async function loadReview(id: string, signal: AbortSignal) {
-  const [history, repos] = await Promise.all([fetchCommits(id, signal), fetchRepos(signal)]);
-  const repo = repos.find((entry) => entry.id === id);
-  const hasNodes = await hasNonemptySnapshot(id, history.commits, signal);
-  return {
-    commits: history.commits, name: repo?.name ?? history.repo, subdir: repo?.subdir ?? null,
-    url: repo?.url ?? null, hasNodes,
-  };
-}
 
 function DiagramGuide({ onClose }: { onClose: () => void }) {
   const [more, setMore] = useState(false);
@@ -113,178 +59,18 @@ function NoFlowChange({ next, onReady }: {
   );
 }
 
-type ReviewData = Awaited<ReturnType<typeof loadReview>>;
-type RefreshState =
-  | { status: "running"; text: string }
-  | { status: "ready" | "error"; text: string; head: string | undefined };
-const checkingCommits = "Checking for new commits…";
-
-function pinCurrentCommit(commits: TimelineCommit[]) {
-  const location = new URL(window.location.href);
-  if (location.searchParams.has("commit")) return location.searchParams.get("commit");
-  const current = resolveCommit(commits, null);
-  if (!current) return null;
-  location.searchParams.set("commit", current.sha);
-  navigate(location.href, { replace: true });
-  return current.sha;
-}
-
 function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; search: string }) {
-  const [review, setReview] = useState(initial);
-  const { name, subdir, url, hasNodes, commits } = review;
   const {
-    flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
-    ready: flagsReady, assignedView, reviewEventClient, directionFlag,
-  } = useCodeFlowFlags(search);
-  const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
-  const head = selected?.sha;
-  const [refresh, setRefresh] = useState<RefreshState | null>(null);
-  const refreshRequest = useRef<AbortController | null>(null);
-  if (refresh && refresh.status !== "running" && refresh.head !== head) setRefresh(null);
-  useEffect(() => () => refreshRequest.current?.abort(), []);
-  const findings = useRepoFlags(id, flagsmithMode ? head : undefined);
-  const flags = findings.status === "ready" ? findings.data : undefined;
-  const liveStates = useMemo(() => liveFlagStates(flags), [flags]);
-  const [flagSelection, setFlagSelection] = useState<{
-    head: string | undefined; finding: FlagFinding;
-  }>();
-  const selectedFlag = flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
-    && flagSelection?.head === head ? flagSelection?.finding : undefined;
-  const checkIds = useMemo(() => selectedFlag?.checks.map((check) => check.function), [selectedFlag]);
-  const [hops, setHops] = useState<Hops>(1);
-  const [guideOpen, setGuideOpen] = useState(() => readPanelPreference(guidePreference));
-  const [sourceOpen, setSourceOpen] = useState(() => readPanelPreference(sourcePreference));
-  const guideButton = useRef<HTMLButtonElement>(null);
-  const workspace = useRef<HTMLDivElement>(null);
-  const sourceHeading = useRef<HTMLDivElement>(null);
-  const [context, setContext] = useState<{ head: string | undefined; expanded: ExpandedContext }>(
-    () => ({ head, expanded: new Set() }),
-  );
-  if (context.head !== head) setContext({ head, expanded: new Set() });
-  const [selection, setSelection] = useState<
-    { head: string; nodeId: string } | { head: string; check: FlagCheck } | null
-  >(null);
-  const [rendered, setRendered] = useState<{
-    layout: FlowLayout; view: FlowView; direction: FlowDirection;
-  } | null>(null);
-  const request = useDiff(id, hasNodes ? head : undefined, hops);
-  const diff = request.status === "ready" ? request.data : null;
-  const longFlow = diff ? diff.long_flow === true : undefined;
-  const { direction, assignedDirection, ready: directionReady } = readFlowDirection(
-    directionOverride, longFlow, directionFlag,
-  );
-  const { layout, hasCollapsedContext } = useDiffLayout(
-    diff, context.expanded, view === "side_by_side", direction, checkIds,
-  );
-  const currentLayout = layout.status === "ready" ? layout.data : null;
-  const layoutPositions = useLayoutPositions(layoutPositionKey(id, head ?? "", view, direction));
-  const contextExpanded = context.expanded === "all" || context.expanded.size > 0;
-  const currentSelection = selection?.head === head ? selection : null;
-  const selectedNode = currentSelection && "nodeId" in currentSelection
-    ? diff?.nodes.find(({ id }) => id === currentSelection.nodeId) : undefined;
-  const selectedCheck = currentSelection && "check" in currentSelection ? currentSelection.check : undefined;
-  const markRendered = useCallback(() => {
-    if (currentLayout) setRendered({ layout: currentLayout, view, direction });
-  }, [currentLayout, view, direction]);
-  const diagramRendered = Boolean(currentLayout && rendered?.layout === currentLayout
-    && rendered.view === view && rendered.direction === direction);
-  useEffect(() => {
-    // Ends the github_signin journey clock; it only counts after an import was started.
-    if (diagramRendered) trackSignin("first_flow_viewed");
-  }, [diagramRendered]);
-  const previewOverride = viewOverride ?? directionOverride;
-  const exposureKey = directionExposureKey(reviewerId, longFlow, previewOverride, directionFlag);
-  const layoutReview = useDirectionExposure(reviewerId, exposureKey, diagramRendered);
-  const reviewContext = diff && diagramRendered && layoutReview.ready
-    ? { repo: id, view, reviewerId, head: diff.head, base: diff.base, devOverride: previewOverride !== null }
-    : null;
+    name, subdir, url, hasNodes, commits, selected, head, commitTitle, selectCommit, commitHref, nextChange,
+    refresh, checkForNewCommits, flowChanged, view, viewOverride, assignedView, viewSource, direction,
+    directionOverride, assignedDirection, directionSource, directionReady, longFlow, flagsReady, variantPreview,
+    hops, setHops, request, layout, currentLayout, hasCollapsedContext, contextExpanded, toggleContext,
+    expandModule, layoutPositions, fullscreen, markRendered, guideOpen, setGuide, guideButton, reviewContext,
+    sendsReviewEvents, onReview, reviewKey, diff, selectedNode, selectNode, selectedCheck, openCheck,
+    clearSelection, sourceOpen, setSourceOpen, workspace, sourceHeading, findings, flags, flagsmithMode,
+    liveStates, selectedFlag, selectFlag,
+  } = useRepoReview(id, search, initial);
   const View = view === "side_by_side" ? SideBySide : Overlay;
-  const flowChanged = selected && hasFlowChange(selected.stats);
-  const fullscreen = useDiagramFullscreen(Boolean(flowChanged && layout.status === "ready" && layout.data?.nodes.length));
-  const nextChange = selected && !flowChanged ? nearestFlowChange(commits, selected.sha) : null;
-  const viewSource = variantPreview && parseFlowView(viewOverride) ? "Preview"
-    : !flagsReady ? "Loading assignment…" : assignedView ? "Assigned by Flagsmith" : "Default";
-  const directionSource = variantPreview && parseFlowDirection(directionOverride) ? "Preview"
-    : assignedDirection ? "Assigned by Flagsmith" : longFlow === false ? "Default for short flows" : "Default";
-
-  useEffect(() => {
-    if (!selectedFlag) return;
-    function clearHighlight(event: KeyboardEvent) {
-      if (event.key === "Escape" && !event.defaultPrevented) setFlagSelection(undefined);
-    }
-    window.addEventListener("keydown", clearHighlight);
-    return () => window.removeEventListener("keydown", clearHighlight);
-  }, [selectedFlag]);
-
-  const commitHref = useCallback((sha: string) => {
-    const params = new URLSearchParams(search);
-    params.set("commit", sha);
-    return `${repoPath(id)}?${params}`;
-  }, [id, search]);
-
-  const selectCommit = useCallback((sha: string) => {
-    if (sha !== head) {
-      setFlagSelection(undefined);
-      setSelection(null);
-      navigate(commitHref(sha));
-    }
-  }, [commitHref, head]);
-
-  async function checkForNewCommits() {
-    if (refreshRequest.current) return;
-    const controller = new AbortController();
-    const { signal } = controller;
-    refreshRequest.current = controller;
-    setRefresh({ status: "running", text: checkingCommits });
-    try {
-      const job = await refreshRepo(id, signal);
-      const status = await pollRepoStatus(job.id, signal, (update) => {
-        const progress = importProgress(job.status, update);
-        if (update.status === "analyzing" && progress.progress) {
-          setRefresh({ status: "running", text: progress.text });
-        }
-      });
-      if (status.status === "error") throw new Error(importProgress(job.status, status).text);
-
-      pinCurrentCommit(commits);
-      const updated = await loadReview(id, signal);
-      if (signal.aborted) return;
-      // The reviewer can navigate while the new history loads.
-      const next = resolveCommit(updated.commits, pinCurrentCommit(commits));
-      // A refresh can join a regular import, which has no refresh count.
-      const oldShas = new Set(commits.map(({ sha }) => sha));
-      const count = status.new_commits ?? updated.commits.filter(({ sha }) => !oldShas.has(sha)).length;
-      const text = count === 0 ? "Up to date" : `${count} new commit${count === 1 ? "" : "s"}`;
-      setReview(updated);
-      setRefresh({ status: "ready", head: next?.sha, text });
-    } catch (error) {
-      if (!signal.aborted) {
-        const current = resolveCommit(commits, new URLSearchParams(window.location.search).get("commit"));
-        const detail = error instanceof Error ? error.message : "Something went wrong.";
-        setRefresh({ status: "error", head: current?.sha, text: `Couldn't check for new commits: ${detail}` });
-      }
-    } finally {
-      refreshRequest.current = null;
-    }
-  }
-
-  function setGuide(open: boolean) {
-    setGuideOpen(open);
-    savePanelPreference(guidePreference, open);
-  }
-
-  function selectNode(node: OverlayNode) {
-    if (head) setSelection({ head, nodeId: node.id });
-    setSourceOpen(true);
-  }
-
-  function expandModule(module: string) {
-    setContext(({ expanded }) => ({
-      head, expanded: expanded === "all" ? expanded : new Set([...expanded, module]),
-    }));
-  }
-
-  const commitTitle = selected?.message || "Untitled commit";
 
   return (
     <main className="viewer">
@@ -363,7 +149,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
             {diff && flowChanged && (hasCollapsedContext || contextExpanded) && (
               <button
                 type="button" className="btn btn--sm"
-                onClick={() => setContext({ head, expanded: hasCollapsedContext ? "all" : new Set() })}
+                onClick={toggleContext}
               >{hasCollapsedContext ? "Expand all context" : "Collapse context"}</button>
             )}
             {hasNodes && (
@@ -424,20 +210,17 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
           )}
           {hasNodes && head && (
             <ReviewBar
-              key={JSON.stringify([id, head, view, reviewerId, viewOverride, direction, directionOverride])}
+              key={reviewKey}
               context={reviewContext}
-              sendsReviewEvents={reviewEventClient !== null || layoutReview.exposed}
-              onReview={(payload) => recordReviewEvent(payload, reviewEventClient, layoutReview)}
+              sendsReviewEvents={sendsReviewEvents}
+              onReview={onReview}
             />
           )}
         </section>
         <FlowSourceDivider workspace={workspace} sourceHeading={sourceHeading} hidden={!sourceOpen || fullscreen.active} />
         <CodePane repo={id} head={head} node={selectedNode} check={selectedCheck} headingRef={sourceHeading}
           nodes={diff?.nodes ?? []} open={sourceOpen} onSelect={selectNode}
-          onClear={() => setSelection(null)} onOpenChange={(open) => {
-            setSourceOpen(open);
-            savePanelPreference(sourcePreference, open);
-          }} />
+          onClear={clearSelection} onOpenChange={setSourceOpen} />
         <FlagsmithPanel
           view={{ value: flowViewLabels[view], source: viewSource }}
           direction={{ value: flowDirectionLabels[direction], source: directionSource }}
@@ -446,14 +229,8 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
           error={findings.status === "error" ? findings.message : undefined}
           loading={Boolean(head) && findings.status === "loading"}
           selected={selectedFlag?.name}
-          onSelect={(finding) => {
-            const name = toggleFlagSelection(selectedFlag?.name, finding.name);
-            setFlagSelection(name ? { head, finding } : undefined);
-          }}
-          onOpenCheck={(check) => {
-            if (head) setSelection({ head, check });
-            setSourceOpen(true);
-          }}
+          onSelect={selectFlag}
+          onOpenCheck={openCheck}
         />
       </div>
     </main>
@@ -461,8 +238,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
 }
 
 export function Viewer({ id, search }: { id: string; search: string }) {
-  const request = useCallback((signal: AbortSignal) => loadReview(id, signal), [id]);
-  const review = useRequest(request);
+  const review = useReviewData(id);
 
   if (review.status === "ready") return <RepoReview id={id} search={search} initial={review.data} />;
   return (
