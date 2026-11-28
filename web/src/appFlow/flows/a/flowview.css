@@ -1,0 +1,1052 @@
+/* Flow A "Guided" flow view and branch switch. Layout only: sizes, spacing and positions are set
+   here; every colour, font, weight, line height and shadow reads a token (docs/APP_FLOW_BUILD.md,
+   "Token vocabulary"). The branch switch styles are the .fa-branch block at the end. */
+
+/* Page frame: the kit header, then one body that fills the window. The story column sits left
+   of the canvas card; on narrow screens the two stack. */
+
+.fa-flowview {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.fa-flowview > .fa-header {
+  flex: none;
+}
+
+/* The design's header runs the full width, so its 32 px gutter lines up with the story column. */
+.fa-flowview .fa-header__inner {
+  max-width: none;
+}
+
+.fa-flowview kbd {
+  padding: 0 var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  line-height: var(--leading-heading);
+}
+
+.fa-flowview__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 344px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-height: 0;
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
+}
+
+.fa-flowview__body--message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fa-flowview__state {
+  margin: auto;
+  padding: var(--space-5);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.fa-flowview__state[role="alert"] {
+  color: var(--color-danger);
+}
+
+/* Story column */
+
+.fa-flowview__story {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-4) - 2px);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4) 0;
+  overflow-y: auto;
+}
+
+.fa-flowview__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.fa-flowview__repo {
+  font-weight: var(--weight-label);
+  overflow-wrap: anywhere;
+}
+
+.fa-flowview__commit {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fa-flowview__prefix {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  line-height: var(--leading-code);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.fa-flowview__commit h1 {
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.fa-flowview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) 0;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__meta > * + *::before {
+  content: "·";
+  margin-inline: var(--space-2);
+}
+
+.fa-flowview__meta code {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
+
+.fa-flowview__subdir {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__subdir code {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+.fa-flowview__counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.fa-flowview__count {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
+  border: var(--border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.fa-flowview__count dt {
+  order: 2;
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__count dd {
+  order: 1;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-h2);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+}
+
+.fa-flowview__summary .summary-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: 12px;
+  background: var(--color-accent-soft);
+}
+
+.fa-flowview__question {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-flowview__question h3 {
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-flowview__answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fa-flowview__answers .btn {
+  padding-inline: var(--space-3);
+}
+
+.fa-flowview__answers kbd {
+  margin-inline-start: 2px;
+}
+
+.fa-flowview__thanks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--weight-label);
+  color: var(--color-accent);
+}
+
+.fa-flowview__note {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: calc(var(--space-2) * -1);
+}
+
+.fa-flowview__steps .btn,
+.fa-flowview__all .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.fa-flowview__flagsmith {
+  border: var(--border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.fa-flowview__flagsmith > summary {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-small);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.fa-flowview__flagsmith > summary .fa-icon {
+  display: inline-block;
+  margin-inline: var(--space-1);
+  vertical-align: -2px;
+}
+
+.fa-flowview__flagsmith-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+  font-size: var(--text-small);
+}
+
+/* Canvas card: a toolbar over the diagram stage. The source drawer and the commit list sit over
+   its right side. */
+
+.fa-flowview__canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-flowview__canvas:is(:fullscreen, .fa-flowview__canvas--maximized) {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--color-bg);
+}
+
+.fa-flowview__canvas--maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+body:has(.fa-flowview__canvas--maximized) {
+  overflow: hidden;
+}
+
+.fa-flowview__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  min-height: 64px;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border);
+  background: var(--color-surface);
+}
+
+.fa-flowview__title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fa-flowview__title h2 {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  letter-spacing: 0;
+}
+
+.fa-flowview__title code {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fa-flowview__neighbours {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__segment {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+}
+
+.fa-flowview__segment button {
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.fa-flowview__segment button.is-active {
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.fa-flowview__refresh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  /* The strip under the diagram holds the legend, so the flow controls sit above it. */
+  padding-bottom: 56px;
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(var(--color-grid) 1px, var(--color-canvas) 1px);
+  background-size: 16px 16px;
+}
+
+.fa-flowview__guide {
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  z-index: 4;
+  display: grid;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 326px;
+  max-width: calc(100% - var(--space-8));
+  padding: var(--space-3) var(--space-4);
+  border: var(--border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__guide-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+}
+
+.fa-flowview__guide-head h3 {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+}
+
+.fa-flowview__disclose .fa-icon {
+  transition: transform var(--motion-fast);
+}
+
+.fa-flowview__disclose[aria-expanded="true"] .fa-icon {
+  transform: rotate(90deg);
+}
+
+.fa-flowview__guide-more {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__guide-more[hidden] {
+  display: none;
+}
+
+.fa-flowview__legend {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  z-index: 3;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.fa-flowview__legend .flow-legend {
+  border-top: 0;
+}
+
+.fa-flowview__empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  max-width: 560px;
+  margin: auto;
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+
+.fa-flowview__empty-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-flowview__empty h3 {
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-flowview__empty p {
+  max-width: 440px;
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+}
+
+/* Source code drawer: a panel over the right side of the canvas, hidden until opened */
+
+.fa-flowview__drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  max-width: 100%;
+  min-height: 0;
+  border-left: var(--border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-flowview__drawer[hidden] {
+  display: none;
+}
+
+.fa-flowview__drawer > .code-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 0;
+}
+
+/* All commits: a list over the right side of the canvas, opened from the story column */
+
+.fa-flowview__commits {
+  position: fixed;
+  top: calc(64px + var(--space-4));
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 400px;
+  max-width: calc(100vw - var(--space-8));
+  overflow: hidden;
+  border: var(--border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-flowview__commits-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border);
+}
+
+.fa-flowview__commits-head h2 {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+}
+
+.fa-flowview__muted {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.fa-flowview__filter input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.fa-flowview__filter p {
+  margin: 0;
+}
+
+.fa-flowview__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.fa-flowview__row {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border-inline-start: 3px solid var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.fa-flowview__row:hover {
+  background: var(--color-sunken);
+}
+
+.fa-flowview__row[aria-current="true"] {
+  border-inline-start-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.fa-flowview__row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview__row-meta code {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
+
+.fa-flowview__row-message {
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  overflow-wrap: anywhere;
+}
+
+.fa-flowview__row-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.fa-flowview__keys {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: var(--border);
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-flowview :is(a, button, input, summary):focus-visible,
+.fa-branch :is(a, button, input, summary):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1023px) {
+  .fa-flowview {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .fa-flowview__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    padding: var(--space-4);
+  }
+
+  .fa-flowview__story {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .fa-flowview__canvas {
+    min-height: 560px;
+  }
+
+  .fa-flowview__drawer {
+    width: 100%;
+  }
+
+  .fa-flowview__guide {
+    width: auto;
+    right: var(--space-4);
+  }
+
+  .fa-flowview__commits {
+    left: var(--space-4);
+    width: auto;
+  }
+}
+
+/* Branch switch: the trigger in the flow view's breadcrumb, and the 640 px dialog it opens.
+   The dialog is a fixed layer, so it is positioned on the window, not on the flow view. */
+
+.fa-branch {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.fa-branch .fa-branch__trigger {
+  max-width: 100%;
+  border-color: var(--color-accent-soft);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+}
+
+.fa-branch .fa-branch__trigger:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.fa-branch .fa-branch__trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fa-branch .fa-branch__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+/* The scrim is a layer under the dialog, so the dialog itself keeps full colour. */
+.fa-branch .fa-branch__overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--color-text);
+  opacity: 0.35;
+}
+
+.fa-branch .fa-branch__dialog {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: grid;
+  align-content: start;
+  width: 640px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 28px var(--space-5) var(--space-5);
+  border: var(--border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-branch .fa-branch__dialog:focus {
+  outline: none;
+}
+
+.fa-branch .fa-branch__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fa-branch .fa-branch__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-branch .fa-branch__heading h2 {
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  letter-spacing: -0.02em;
+}
+
+.fa-branch .fa-branch__heading p {
+  margin-top: 2px;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.fa-branch .fa-branch__heading code {
+  font-family: var(--font-mono);
+}
+
+.fa-branch .fa-branch__close {
+  width: var(--btn-height-sm);
+  padding: 0;
+  justify-content: center;
+  border-color: var(--color-border);
+}
+
+.fa-branch .fa-branch__step {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.fa-branch .fa-branch__step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fa-branch .fa-branch__step h3 {
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+}
+
+.fa-branch .fa-branch__step h3 code {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-body);
+}
+
+.fa-branch .fa-branch__hint,
+.fa-branch .fa-branch__status {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-branch .fa-branch__status {
+  font-size: var(--text-body);
+}
+
+.fa-branch .fa-branch__rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-branch .fa-branch__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  height: auto;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-4);
+  border-color: var(--color-border);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.fa-branch .fa-branch__row:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-sunken);
+}
+
+.fa-branch .fa-branch__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-body);
+}
+
+.fa-branch .fa-branch__name .fa-icon {
+  color: var(--color-text-muted);
+}
+
+.fa-branch .fa-branch__name code {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-body);
+  overflow-wrap: anywhere;
+}
+
+.fa-branch .fa-branch__state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.fa-branch .fa-branch__commits {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-branch .fa-branch__commit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border);
+  border-radius: 10px;
+}
+
+.fa-branch .fa-branch__sha {
+  font-size: var(--text-small);
+  color: var(--color-accent);
+}
+
+.fa-branch .fa-branch__sha code {
+  font-family: var(--font-mono);
+}
+
+.fa-branch .fa-branch__message {
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  overflow-wrap: anywhere;
+}
+
+.fa-branch .fa-branch__meta {
+  grid-column: 2;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.fa-branch .fa-branch__more > summary {
+  font-size: var(--text-small);
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+.fa-branch .fa-branch__more .fa-branch__commits {
+  margin-top: var(--space-2);
+}
+
+.fa-branch .fa-branch__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fa-branch .fa-branch__progress {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.fa-branch .fa-branch__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-branch .fa-branch__step-item {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+}
+
+/* The line runs from the previous marker's centre to this one's; the markers paint over it. */
+.fa-branch .fa-branch__step-item + .fa-branch__step-item::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: var(--color-border);
+}
+
+.fa-branch .fa-branch__marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: var(--border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  color: var(--color-text-muted);
+}
+
+.fa-branch .fa-branch__step-item--done,
+.fa-branch .fa-branch__step-item--current {
+  color: var(--color-text);
+}
+
+.fa-branch .fa-branch__step-item--done .fa-branch__marker {
+  border-color: var(--color-accent-soft);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-branch .fa-branch__step-item--current .fa-branch__marker {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.fa-branch .fa-branch__step-item--current .fa-branch__step-label {
+  font-weight: var(--weight-label);
+}
+
+.fa-branch .fa-branch__bar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fa-branch .fa-branch__bar-head p {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  color: var(--color-text);
+}
+
+.fa-branch .fa-branch__bar-head span {
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  color: var(--color-accent);
+}
+
+.fa-branch .fa-branch__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-sunken);
+}
+
+.fa-branch .fa-branch__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--motion-fast);
+}
+
+@media (max-width: 639px) {
+  .fa-branch .fa-branch__dialog {
+    padding: var(--space-5) var(--space-4) var(--space-4);
+  }
+}

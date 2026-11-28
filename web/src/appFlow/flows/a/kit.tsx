@@ -8,29 +8,45 @@ import "./kit.css";
 export type IconName =
   | "github"
   | "arrow-right"
+  | "arrow-up"
+  | "arrow-down"
+  | "arrow-left"
   | "branch"
   | "check"
   | "chevron-down"
+  | "chevron-right"
   | "close"
+  | "code"
   | "external"
+  | "flag"
+  | "layers"
   | "lock"
   | "plus"
+  | "refresh"
   | "search"
   | "info"
   | "commit";
 
-// Stroke paths on a 24 x 24 grid, copied from the flow A designs. search and commit are not in
-// the designs, so they use the same stroke style.
+// Stroke paths on a 24 x 24 grid, copied from the flow A designs. search, commit and the arrows,
+// code, flag, layers and refresh icons are not all in the designs, so they use the same stroke style.
 const ICON_PATHS: Record<IconName, readonly string[]> = {
   github: ["M9 19c-4 1-4-2-6-2m12 5v-3.9a3.4 3.4 0 0 0-.9-2.5c3-.3 6.1-1.5 6.1-6.7a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6S17.7 1.4 15 3a13.4 13.4 0 0 0-6 0C6.3 1.4 5.3 1.7 5.3 1.7a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3.8 9c0 5.1 3.1 6.3 6.1 6.7a3.4 3.4 0 0 0-.9 2.7V22"],
   "arrow-right": ["M4 12h15m-6-6 6 6-6 6"],
+  "arrow-up": ["M12 19V5", "m5 12 7-7 7 7"],
+  "arrow-down": ["M12 5v14", "m19 12-7 7-7-7"],
+  "arrow-left": ["M19 12H5", "m12 19-7-7 7-7"],
   branch: ["M6 6v10m12-10v2a4 4 0 0 1-4 4H6m0-9a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"],
   check: ["m5 12 4 4L19 6"],
   "chevron-down": ["m6 9 6 6 6-6"],
+  "chevron-right": ["m9 6 6 6-6 6"],
   close: ["m6 6 12 12M18 6 6 18"],
+  code: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
   external: ["M14 4h6v6m0-6-9 9m-1-7H5v13h13v-5"],
+  flag: ["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z", "M4 22v-7"],
+  layers: ["M12 3 3 7.5l9 4.5 9-4.5L12 3Z", "m3 12 9 4.5 9-4.5", "m3 16.5 9 4.5 9-4.5"],
   lock: ["M6 10h12v10H6zM8 10V8a4 4 0 0 1 8 0v2m-4 4v2"],
   plus: ["M12 5v14M5 12h14"],
+  refresh: ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5"],
   search: ["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z", "m20 20-4-4"],
   info: ["M12 11v5m0-8h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
   commit: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M3 12h5m8 0h5"],

@@ -16,6 +16,32 @@ vi.mock("../pages/GitHubRepos", () => ({ GitHubRepos: () => "Today repos" }));
 vi.mock("../pages/GitHubRepo", () => ({ GitHubRepoPage: () => "Today repo details" }));
 vi.mock("../pages/Viewer", () => ({ Viewer: () => "Today flow view" }));
 
+// Each flow's screens are stand-ins here: these tests check only which screen each piece picks.
+vi.mock("./flows/a/Landing", () => ({ LandingA: () => "Flow A · Landing is being built." }));
+vi.mock("./flows/a/Repos", () => ({ ReposA: () => "Flow A · Repos is being built." }));
+vi.mock("./flows/a/RepoDetails", () => ({ RepoDetailsA: () => "Flow A · Repo details is being built." }));
+vi.mock("./flows/a/FlowView", () => ({ FlowViewA: () => "Flow A · Flow view is being built." }));
+vi.mock("./flows/a/BranchSwitch", () => ({
+  BranchSwitchA: ({ currentBranch }: { currentBranch: string }) => <button type="button">{currentBranch}</button>,
+}));
+vi.mock("./flows/b/Landing", () => ({ LandingB: () => "Flow B · Landing is being built." }));
+vi.mock("./flows/b/Repos", () => ({ ReposB: () => "Flow B · Repos is being built." }));
+vi.mock("./flows/b/RepoDetails", () => ({ RepoDetailsB: () => "Flow B · Repo details is being built." }));
+vi.mock("./flows/b/FlowView", () => ({ FlowViewB: () => "Flow B · Flow view is being built." }));
+vi.mock("./flows/b/BranchSwitch", () => ({
+  BranchSwitchB: ({ currentBranch }: { currentBranch: string }) => <button type="button">{currentBranch}</button>,
+}));
+vi.mock("./flows/c/Landing", () => ({ LandingC: () => "Flow C · Landing is being built." }));
+vi.mock("./flows/c/Repos", () => ({ ReposC: () => "Flow C · Repos is being built." }));
+vi.mock("./flows/c/RepoDetails", () => ({ RepoDetailsC: () => "Flow C · Repo details is being built." }));
+vi.mock("./flows/c/FlowView", () => ({ FlowViewC: () => "Flow C · Flow view is being built." }));
+vi.mock("./flows/c/BranchSwitch", () => ({
+  BranchSwitchC: ({ currentBranch }: { currentBranch: string }) => <button type="button">{currentBranch}</button>,
+}));
+vi.mock("./flows/a/SignIn", () => ({ SignInPageA: () => "Flow A · Sign in is being built." }));
+vi.mock("./flows/b/SignIn", () => ({ SignInPanelB: () => "Flow B · Sign in panel" }));
+vi.mock("./flows/c/SignIn", () => ({ SignInModalC: () => null }));
+
 let root: Root;
 let container: HTMLDivElement;
 
