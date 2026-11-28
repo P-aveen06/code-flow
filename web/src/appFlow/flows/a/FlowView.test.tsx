@@ -107,6 +107,7 @@ function reviewModel(overrides: Record<string, unknown> = {}) {
     findings: { status: "ready", data: [] },
     flags: [],
     flagsmithMode: false,
+    liveFlagPanel: false,
     liveStates: {},
     selectedFlag: null,
     selectFlag: vi.fn(),

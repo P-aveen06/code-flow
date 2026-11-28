@@ -498,7 +498,7 @@ function Inspector({ review, onOpenCheck }: { review: RepoReviewModel; onOpenChe
   const {
     hasNodes, head, reviewContext, sendsReviewEvents, onReview, reviewKey, variantPreview, view, viewOverride,
     assignedView, flagsReady, direction, directionOverride, assignedDirection, longFlow, directionReady, viewSource,
-    directionSource, flagsmithMode, flags, findings, selectedFlag, selectFlag,
+    directionSource, flagsmithMode, liveFlagPanel, flags, findings, selectedFlag, selectFlag,
   } = review;
 
   return (
@@ -531,6 +531,7 @@ function Inspector({ review, onOpenCheck }: { review: RepoReviewModel; onOpenChe
         view={{ value: flowViewLabels[view], source: viewSource }}
         direction={{ value: flowDirectionLabels[direction], source: directionSource }}
         enabled={flagsmithMode}
+        showFindings={liveFlagPanel}
         data={flags}
         error={findings.status === "error" ? findings.message : undefined}
         loading={Boolean(head) && findings.status === "loading"}

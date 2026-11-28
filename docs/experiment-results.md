@@ -115,3 +115,52 @@ The time metric is the mean `diff_understood` value per exposure, with reviewers
 - These are simulated reviewers whose behaviour encodes the hypotheses; agreement between the two runs shows that the pipeline and Flagsmith's analysis are consistent, not that real users behave this way.
 
 On 2026-11-27, the `sync_mode` experiment ran in Development and compared a manual button, per-repo auto-sync, and global auto-sync. Auto-sync was dropped from scope to keep code-flow focused. The manual **Check for new commits** button stays.
+
+# github_signin experiment: results (simulated visitors)
+
+Run on 28 Nov 2026 in Paveen's self-hosted Flagsmith 2.295.2, project `code-flow`, environment **Development**, at commit `2e4fd71` (the Sign in with GitHub merge). Production was not touched. Numbers in the first table are Flagsmith's own analysis (`python3 scripts/flagsmith_experiment.py --experiment github_signin status`).
+
+**The visitors are simulated.** Their journeys come from [`simulator/experiments/github_signin.yaml`](../simulator/experiments/github_signin.yaml): the share of each role who came for a private repository, and the chance of getting through each step. Those numbers are our guesses, so this run tests the setup and Flagsmith's analysis, not real users.
+
+- **Hypothesis:** more visitors finish an import when they can sign in with GitHub and pick any repository they allow, including private ones, than when they can only paste a public URL.
+- **Flag:** `github_signin` (multivariate): `url_import` (control) 50 %, `github_signin` 50 %.
+- **Exposure:** `getExperimentFlag("github_signin")` on the landing page.
+- **Metrics:**
+  - Import completed: occurrence of `import_completed`. This is the goal, and higher is better.
+  - Time to first flow (ms): mean `first_flow_viewed` value per exposure. Lower is better. This is the guardrail.
+  - Import abandoned: occurrence of `import_abandoned`. Lower is better.
+- **Traffic:** the same 1,300-persona panel as the other experiments (`simulator/panels/default.csv`), sent with `make simulate-signin`.
+
+## Flagsmith's results (1,300 visitors)
+
+| Metric | url_import (control), 635 | github_signin, 665 | Lift (95 % CI) | Win probability |
+|---|---:|---:|---|---:|
+| Import completed | 331, 52.1 % | 414, 62.3 % | +19.4 % (+8.1 % to +30.8 %) | 100.0 % |
+| Time to first flow (ms), mean per exposure | 24,566 | 56,416 | +129.7 % (+105.5 % to +153.8 %) | 0.0 % |
+| Import abandoned | 140, 22.0 % | 169, 25.4 % | +15.3 % (−7.3 % to +37.9 %) | 9.3 % |
+
+Win probability is the chance that `github_signin` is better than the control. For time and abandonment, better means lower.
+
+## The journey, step by step
+
+These counts come from the simulator's own summary of the same run.
+
+| Event | url_import | github_signin |
+|---|---:|---:|
+| import_started | 471 | 583 |
+| signin_started | 0 | 518 |
+| signin_completed | 0 | 478 |
+| app_installed | 0 | 413 |
+| repo_selected | 0 | 394 |
+| import_completed | 331 | 414 |
+| import_abandoned | 140 | 169 |
+| Median time to first flow, visitors who saw one | 45,246 ms | 90,572 ms |
+
+The offline rehearsal (`make simulate-signin-dry-run`) split the panel 676 / 624 and gave 47.6 % against 65.1 % completion. The live split differs because Flagsmith assigns variants with its own hashing.
+
+## Reading it
+
+- **Sign-in gets more visitors to a finished import:** +19.4 %, with the whole interval above zero. The gain comes from visitors who came for a private repository, which a public URL can't reach.
+- **It takes about twice as long:** visitors who saw a flow waited about 91 s with sign-in and 47 s without (mean, derived from Flagsmith's per-exposure numbers). The extra time is the trip to GitHub to authorize and choose repositories. Flagsmith's +129.7 % is larger than that because visitors with no flow count as 0, and sign-in has more visitors with a flow. The guardrail fails, as expected when we planned it.
+- **Abandonment is not conclusive:** the interval spans zero. Sign-in brings more visitors into the journey (583 against 471 started an import), and about the same share of those who start leave without finishing (29.0 % against 29.7 %). So the higher count reflects more starts, not a worse journey. The simulator's assumptions never made abandonment fall; the setup doc now says so.
+- **Decision:** the experiment is still running in Development and nothing was rolled out. Real visitors would also need the GitHub App to be set up on the hosted site first (see [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md)). If the time cost matters, the obvious lever is to cut a GitHub trip, for example by letting visitors choose repositories while they authorize.

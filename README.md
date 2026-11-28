@@ -41,6 +41,17 @@ for vertical and 60.8% for horizontal. The time result was inconclusive.
 Production uses vertical for long flows and horizontal for short flows.
 [Full results](docs/experiment-results.md#flow_direction-experiment-results-simulated-reviewers-long-flows)
 
+## Sign in with GitHub · `github_signin`
+
+We tested whether more visitors finish an import when they can sign in with
+GitHub and pick any repository they allow, including private ones, instead of
+pasting a public URL. With 1,300 simulated visitors in the Development
+environment, Flagsmith reported 62.3% completed imports with sign-in and 52.1%
+without, a 19.4% lift (95% credible interval 8.1% to 30.8%). The cost is time:
+visitors who reached a flow waited about twice as long, because of the trip to
+GitHub. Abandonment was inconclusive. Nothing is rolled out yet.
+[Full results](docs/experiment-results.md#github_signin-experiment-results-simulated-visitors)
+
 ## Run locally
 
 Install Git, [uv](https://docs.astral.sh/uv/), Python 3.11+, and Node.js 22.12+.
@@ -95,10 +106,11 @@ writes Production only with `--environment Production --only app-flow`. A flag t
 already exists keeps its values and only gets the tag, so create them in Development first.
 
 The demo project has no repo flags, so the Flagsmith and OpenFeature checks in
-Flagsmith/flagsmith appear as **orphan** when connected with `flagsmith_mode`
-on. To see live, off, or stale findings and live-path highlighting, create a
-flag with the exact name of a detected check in your Flagsmith project and tag
-it `repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.
+Flagsmith/flagsmith appear as **orphan** when connected with both
+`flagsmith_mode` and `live_flag_panel` on. To see live, off, or stale findings
+and live-path highlighting, create a flag with the exact name of a detected
+check in your Flagsmith project and tag it `repo:flagsmith-api`. Rerun
+`make flagsmith-setup` to refresh the scope file.
 
 [Earlier demo with repo flags configured](docs/screenshots/m3-flagsmith-orphan-and-stale.png)
 

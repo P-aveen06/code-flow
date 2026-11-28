@@ -208,6 +208,7 @@ function RepoReview({ id, initial, search, account }: {
                       view={{ value: flowViewLabels[m.view], source: m.viewSource }}
                       direction={{ value: flowDirectionLabels[m.direction], source: m.directionSource }}
                       enabled={m.flagsmithMode}
+                      showFindings={m.liveFlagPanel}
                       data={m.flags}
                       error={m.findings.status === "error" ? m.findings.message : undefined}
                       loading={Boolean(m.head) && m.findings.status === "loading"}

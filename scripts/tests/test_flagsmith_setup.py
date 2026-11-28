@@ -376,7 +376,7 @@ def test_development_cli_restores_experiment_states_and_preserves_production(
     assert scope_file.read_bytes() == before_scope
     assert {key: client.states[key] for key in before_production} == before_production
     assert all(production["api_key"] not in path for _, path in client.calls)
-    assert len(client.features) == 7
+    assert len(client.features) == 8
     assert preview_state["enabled"] is True
     assert preview_state["feature_state_value"] is None
     assert set(client.keys) == {production["id"]}
@@ -482,6 +482,7 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
         "flow_direction",
         "flow_view",
         "github_signin",
+        "live_flag_panel",
         "variant_preview",
     }
     assert len(client.keys[environment["id"]]) == 1
@@ -527,6 +528,7 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
     for name, enabled in [
         ("flagsmith_mode", True),
         ("ai_summary", False),
+        ("live_flag_panel", False),
         ("variant_preview", False),
     ]:
         _, state = client.project_flag(environment, name)
@@ -545,6 +547,7 @@ def test_setup_is_idempotent_and_hides_credentials(env_file, scope_file, capsys)
             "flow_direction",
             "flow_view",
             "github_signin",
+            "live_flag_panel",
             "variant_preview",
         ],
     }
@@ -759,6 +762,7 @@ def test_dry_run_has_no_api_or_file_writes(env_file, scope_file, capsys, existin
         in output.out
     )
     assert '"side_by_side" 34%, "overlay" 33%, "overlay_summary" 33%' in output.out
+    assert "Would create flag live_flag_panel with tag code-flow (off, null)." in output.out
     assert "Would create server-side key code-flow server." in output.out
     assert "Would enable the Flagsmith database warehouse." in output.out
     assert "Would write CODEFLOW_FLAGSMITH_SERVER_KEY" in output.out

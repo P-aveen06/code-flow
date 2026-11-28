@@ -118,6 +118,7 @@ function model(overrides: Partial<RepoReviewModel> = {}): RepoReviewModel {
     findings: { status: "loading" },
     flags: undefined,
     flagsmithMode: false,
+    liveFlagPanel: false,
     liveStates: new Map(),
     selectedFlag: undefined,
     selectFlag: vi.fn(),

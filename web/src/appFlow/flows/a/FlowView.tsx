@@ -78,7 +78,7 @@ function FlowReview({ id, search, initial }: { id: string; search: string; initi
     hops, setHops, diff, request, layout, currentLayout, hasCollapsedContext, contextExpanded, toggleContext,
     expandModule, layoutPositions, fullscreen, markRendered, guideOpen, setGuide, reviewContext, sendsReviewEvents,
     onReview, reviewKey, selectedNode, selectNode, selectedCheck, openCheck, clearSelection, sourceOpen, setSourceOpen,
-    findings, flags, flagsmithMode, liveStates, selectedFlag, selectFlag,
+    findings, flags, flagsmithMode, liveFlagPanel, liveStates, selectedFlag, selectFlag,
   } = review;
   const [commitsOpen, setCommitsOpen] = useState(false);
   const [hideUnchanged, setHideUnchanged] = useState(true);
@@ -234,6 +234,7 @@ function FlowReview({ id, search, initial }: { id: string; search: string; initi
               view={{ value: flowViewLabels[view], source: viewSource }}
               direction={{ value: flowDirectionLabels[direction], source: directionSource }}
               enabled={flagsmithMode}
+              showFindings={liveFlagPanel}
               data={flags}
               error={findings.status === "error" ? findings.message : undefined}
               loading={Boolean(head) && findings.status === "loading"}

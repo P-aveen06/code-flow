@@ -78,6 +78,7 @@ interface FlagSnapshot {
   assignedView: FlowView | null;
   directionFlag: IFlagsmithFeature | null;
   flagsmithMode: boolean;
+  liveFlagPanel: boolean;
   variantPreview: boolean;
   signinFlag: IFlagsmithFeature | null;
   commitCountFlag: IFlagsmithFeature | null;
@@ -88,8 +89,8 @@ interface FlagSnapshot {
 }
 
 const unavailableFlags: FlagSnapshot = {
-  assignedView: null, directionFlag: null, flagsmithMode: false, variantPreview: false, signinFlag: null,
-  commitCountFlag: null, reachable: false, appFlowFlag: null, uiFlags: {},
+  assignedView: null, directionFlag: null, flagsmithMode: false, liveFlagPanel: false, variantPreview: false,
+  signinFlag: null, commitCountFlag: null, reachable: false, appFlowFlag: null, uiFlags: {},
 };
 
 function hasServerFlags(client: Pick<IFlagsmith, "loadingState">) {
@@ -118,6 +119,7 @@ export function readFlagSnapshot(client: Pick<IFlagsmith, "loadingState" | "getA
     assignedView: parseFlowView(viewFlag?.value),
     directionFlag: directionFlag ?? null,
     flagsmithMode: client.hasFeature("flagsmith_mode"),
+    liveFlagPanel: client.hasFeature("live_flag_panel"),
     variantPreview: client.hasFeature("variant_preview"),
     signinFlag: signinFlag ?? null,
     commitCountFlag: commitCountFlag ?? null,
@@ -209,6 +211,7 @@ export function useCodeFlowFlags(search: string) {
     reviewerId, viewOverride, directionOverride, variantPreview, ready, assignedView,
     flowView: chooseFlowView(viewOverride, () => assignedView),
     flagsmithMode: flags?.flagsmithMode ?? false,
+    liveFlagPanel: flags?.liveFlagPanel ?? false,
     reviewEventClient: previewOverride === null && currentAssignment?.exposed && assignedView !== null ? flagsmith : null,
     directionFlag: flags?.directionFlag,
   };

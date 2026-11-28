@@ -35,7 +35,7 @@ describe("reviewer identity", () => {
   });
 });
 
-describe("variant_preview snapshot", () => {
+describe("panel and preview flags in the snapshot", () => {
   const loaded = { source: FlagSource.SERVER, isLoading: false, isFetching: false, error: null };
 
   it("reads the preview feature on each refresh", () => {
@@ -46,24 +46,32 @@ describe("variant_preview snapshot", () => {
     expect(readFlagSnapshot(client).variantPreview).toBe(true);
     previewEnabled = false;
     expect(readFlagSnapshot(client).variantPreview).toBe(false);
-    expect(hasFeature.mock.calls.map(([flag]) => flag)).toEqual([
-      "flagsmith_mode", "variant_preview", "flagsmith_mode", "variant_preview",
-    ]);
+    expect(hasFeature.mock.calls.filter(([flag]) => flag === "variant_preview")).toHaveLength(2);
+  });
+
+  it.each([true, false])("reads live_flag_panel as %s", (enabled) => {
+    const hasFeature = vi.fn((flag: string) => flag === "live_flag_panel" && enabled);
+    const flags = readFlagSnapshot({ loadingState: loaded, hasFeature, getAllFlags: () => ({}) });
+
+    expect(hasFeature).toHaveBeenCalledWith("live_flag_panel");
+    expect(flags.liveFlagPanel).toBe(enabled);
   });
 
   it("defaults to off when the SDK reports an unknown flag", () => {
     const flags = readFlagSnapshot({ loadingState: loaded, getAllFlags: () => ({}), hasFeature: () => false });
     expect(flags.variantPreview).toBe(false);
+    expect(flags.liveFlagPanel).toBe(false);
   });
 
   it.each([
     { ...loaded, source: FlagSource.CACHE },
     { ...loaded, error: new Error("Flagsmith unavailable") },
-  ])("disables previews when the latest flag fetch is unavailable", (loadingState) => {
+  ])("disables findings and previews when the latest flag fetch is unavailable", (loadingState) => {
     const hasFeature = vi.fn(() => true);
     const flags = readFlagSnapshot({ loadingState, hasFeature, getAllFlags: () => ({}) });
 
     expect(flags.variantPreview).toBe(false);
+    expect(flags.liveFlagPanel).toBe(false);
     expect(hasFeature).not.toHaveBeenCalled();
   });
 });

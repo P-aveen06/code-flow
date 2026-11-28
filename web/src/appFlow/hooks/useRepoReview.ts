@@ -103,6 +103,8 @@ export interface RepoReviewModel {
   findings: ReturnType<typeof useRepoFlags>;
   flags: RepoFlags | undefined;
   flagsmithMode: boolean;
+  // live_flag_panel: shows the Live from Flagsmith findings list and lets a flag be picked from it
+  liveFlagPanel: boolean;
   liveStates: ReturnType<typeof liveFlagStates>;
   selectedFlag: FlagFinding | undefined;
   selectFlag(finding: FlagFinding): void;
@@ -139,7 +141,7 @@ export function useRepoReview(id: string, search: string, initial: ReviewData): 
   const { name, subdir, url, branch, hasNodes, commits } = review;
   const {
     flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
-    ready: flagsReady, assignedView, reviewEventClient, directionFlag,
+    liveFlagPanel, ready: flagsReady, assignedView, reviewEventClient, directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
@@ -153,7 +155,8 @@ export function useRepoReview(id: string, search: string, initial: ReviewData): 
   const [flagSelection, setFlagSelection] = useState<{
     head: string | undefined; finding: FlagFinding;
   }>();
-  const selectedFlag = flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
+  const selectedFlag = liveFlagPanel
+    && flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
     && flagSelection?.head === head ? flagSelection?.finding : undefined;
   const checkIds = useMemo(() => selectedFlag?.checks.map((check) => check.function), [selectedFlag]);
   const [hops, setHops] = useState<Hops>(1);
@@ -332,6 +335,6 @@ export function useRepoReview(id: string, search: string, initial: ReviewData): 
     reviewKey: JSON.stringify([id, head, view, reviewerId, viewOverride, direction, directionOverride]),
     selectedNode, selectNode, selectedCheck, openCheck, clearSelection, sourceOpen, setSourceOpen,
     workspace, sourceHeading,
-    findings, flags, flagsmithMode, liveStates, selectedFlag, selectFlag,
+    findings, flags, flagsmithMode, liveFlagPanel, liveStates, selectedFlag, selectFlag,
   };
 }

@@ -70,7 +70,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
     expandModule, layoutPositions, fullscreen, markRendered, guideOpen, setGuide, guideButton, reviewContext,
     sendsReviewEvents, onReview, reviewKey, diff, selectedNode, selectNode, selectedCheck, openCheck,
     clearSelection, sourceOpen, setSourceOpen, workspace, sourceHeading, findings, flags, flagsmithMode,
-    liveStates, selectedFlag, selectFlag, branch,
+    liveFlagPanel, liveStates, selectedFlag, selectFlag, branch,
   } = useRepoReview(id, search, initial);
   // With app_flow on, today's flow view also carries the branch_switch piece. Off, it stays as today.
   const appFlowOn = useAppFlow().flow !== null;
@@ -234,6 +234,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
           view={{ value: flowViewLabels[view], source: viewSource }}
           direction={{ value: flowDirectionLabels[direction], source: directionSource }}
           enabled={flagsmithMode}
+          showFindings={liveFlagPanel}
           data={flags}
           error={findings.status === "error" ? findings.message : undefined}
           loading={Boolean(head) && findings.status === "loading"}
