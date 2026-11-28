@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# GitHub App private keys (GITHUB_APP_PRIVATE_KEY_PATH)
+*.pem
 
 # Python
 __pycache__/
