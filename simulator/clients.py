@@ -2,12 +2,13 @@
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
 
 from flagsmith import Flagsmith
 from flagsmith.analytics import EventProcessorConfig
-from flagsmith.models import DefaultFlag, ExperimentMetadata, Flag
+from flagsmith.models import DefaultFlag, ExperimentMetadata, Flag, Flags
 from flagsmith.types import TraitMapping
 
 DEFAULT_API_URL = "http://localhost:8000/api/v1/"
@@ -23,6 +24,12 @@ class ExperimentClient(Protocol):
     ) -> None: ...
 
     def close(self) -> None: ...
+
+
+class PieceClient(ExperimentClient, Protocol):
+    """A pieces run also reads every flag for one visitor at once, as the landing page does."""
+
+    def get_identity_flags(self, *, identifier: str, traits: TraitMapping) -> Flags: ...
 
 
 class DryRunClient:
@@ -56,6 +63,70 @@ class DryRunClient:
             variant=variant,
             experiment=ExperimentMetadata(id=1, name=feature_name, in_experiment=True),
         )
+
+    def track_event(
+        self, event: str, *, identifier: str, value: float | None, traits: TraitMapping
+    ) -> None:
+        self.events.append((event, identifier, value))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@dataclass(frozen=True)
+class DryFlag:
+    """One offline flag: a fixed value, switched off, or split between variants by allocations."""
+
+    enabled: bool = True
+    value: str = "flow"
+    allocations: Mapping[str, int] | None = None
+
+
+def _assigned_variant(feature: str, identifier: str, allocations: Mapping[str, int]) -> str:
+    """Hash the flag and the identity together, so each flag splits the same visitors on its own."""
+    digest = hashlib.sha256(f"{feature}:{identifier}".encode()).digest()
+    bucket = int.from_bytes(digest, "big") % 100
+    for variant, allocation in allocations.items():
+        if bucket < allocation:
+            return variant
+        bucket -= allocation
+    raise ValueError("Dry-run variant allocations must add up to 100.")
+
+
+class DryRunPiecesClient:
+    """Serve the offline flags for a pieces run and keep a log of exposures and events."""
+
+    def __init__(self, flags: Mapping[str, DryFlag]) -> None:
+        self.flags = flags
+        self.events: list[tuple[str, str, str | int | float | None]] = []
+        self.closed = False
+
+    def _flag(self, name: str, identifier: str) -> Flag:
+        setting = self.flags[name]
+        if setting.allocations is None:
+            return Flag(
+                enabled=setting.enabled, value=setting.value, feature_id=1, feature_name=name
+            )
+        variant = _assigned_variant(name, identifier, setting.allocations)
+        return Flag(
+            enabled=setting.enabled,
+            value=variant,
+            feature_id=1,
+            feature_name=name,
+            variant=variant,
+            experiment=ExperimentMetadata(id=1, name=name, in_experiment=True),
+        )
+
+    def get_identity_flags(self, *, identifier: str, traits: TraitMapping) -> Flags:
+        return Flags(flags={name: self._flag(name, identifier) for name in self.flags})
+
+    def get_experiment_flag(
+        self, feature_name: str, *, identifier: str, traits: TraitMapping
+    ) -> Flag:
+        flag = self._flag(feature_name, identifier)
+        if flag.enabled and flag.experiment is not None:
+            self.events.append(("$flag_exposure", identifier, flag.variant))
+        return flag
 
     def track_event(
         self, event: str, *, identifier: str, value: float | None, traits: TraitMapping

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim flagsmith-setup-app-flow flagsmith-setup-app-flow-dry-run simulate-dry-run simulate simulate-signin-dry-run simulate-signin panel-profiles
+.PHONY: help install test lint dev analyze-flagsmith flagsmith-setup flagsmith-setup-dry-run flagsmith-setup-sim flagsmith-setup-app-flow flagsmith-setup-app-flow-dry-run simulate-dry-run simulate simulate-signin-dry-run simulate-signin simulate-app-flow-dry-run simulate-app-flow panel-profiles
 
 help:
 	@echo "install  Install Python and web dependencies"
@@ -18,6 +18,8 @@ help:
 	@echo "simulate                 Run flow_view in the simulation environment with the default panel"
 	@echo "simulate-signin-dry-run  Rehearse the github_signin import funnel offline"
 	@echo "simulate-signin          Run the github_signin import funnel in the simulation environment"
+	@echo "simulate-app-flow-dry-run  Rehearse the app_flow journeys offline with the default panel"
+	@echo "simulate-app-flow           Run the app_flow journeys in the simulation environment"
 	@echo "panel-profiles          Show the default reviewer panel's traits offline"
 
 analyze-flagsmith:
@@ -49,6 +51,12 @@ simulate-signin-dry-run:
 
 simulate-signin:
 	cd simulator && uv run python simulate.py --experiment github_signin --panel default
+
+simulate-app-flow-dry-run:
+	cd simulator && uv run python simulate.py --experiment app_flow --panel default --limit 500 --dry-run
+
+simulate-app-flow:
+	cd simulator && uv run python simulate.py --experiment app_flow --panel default --limit 500
 
 panel-profiles:
 	cd simulator && uv run python simulate.py --panel default --profiles

@@ -1,0 +1,97 @@
+# Journey assumptions for the app_flow experiment. These are hypotheses, not user data.
+# A simulated visitor walks from the landing page to a second branch of the same repo. Exposure
+# comes from the app_flow flag. Each ui_* switch sets one piece to today, a, b or c.
+mode: pieces
+flag: app_flow
+control: a
+# Whole percentages for offline runs only. The live split is set in Flagsmith (34/33/33).
+allocations: {a: 34, b: 33, c: 33}
+
+# Base journey with every piece on today's UI. Each step has a chance to pass, a lognormal time
+# (median_ms, with sigma on the log scale), the fewest clicks it needs and the mean number of
+# dead clicks. The sign_in step is the GitHub round trip: a visitor who leaves there sends no
+# events, because the app's code does not run on GitHub's pages (web/src/appFlow/journey.ts).
+journey:
+  sign_in_start: {probability: 0.85, median_ms: 9000, sigma: 0.5, clicks: 1, dead_clicks: 0.3}
+  sign_in: {probability: 0.92, median_ms: 16000, sigma: 0.4, clicks: 1, dead_clicks: 0.1}
+  repo_pick: {probability: 0.96, median_ms: 8000, sigma: 0.4, clicks: 1, dead_clicks: 0.4}
+  # Hypothesis: the time is the repo analysis. The screen moves on about 2 s after it finishes.
+  analysis: {probability: 0.95, median_ms: 14000, sigma: 0.4, clicks: 1, dead_clicks: 0.2}
+  first_flow: {probability: 0.99, median_ms: 3000, sigma: 0.3, clicks: 0, dead_clicks: 0.0}
+  review: {probability: 0.70, median_ms: 30000, sigma: 0.5, clicks: 1, dead_clicks: 0.5,
+    diagram_moves: 4}
+  # Today's branch switch is a link to the repo picker, a row, a native select and Analyze.
+  branch_switch: {probability: 0.60, median_ms: 25000, sigma: 0.4, clicks: 5, dead_clicks: 0.4}
+
+# What each switch does to each version, with every switch on the same version in turn. A
+# layout switch changes one step and sets its fewest clicks. A style switch changes the review
+# or every step. Keys are steps, or "all" for every step. Hypotheses are marked as such.
+pieces:
+  # Style switches (font, weight, spacing, buttons, colours). Fonts differ per flow: A Plus
+  # Jakarta Sans, B IBM Plex Sans, C Geist (docs/APP_FLOW_BUILD.md, fonts).
+  font_family:
+    today: {}
+    a: {review: {probability: 1.01, duration: 0.99}}  # Hypothesis: a's sans reads fastest.
+    b: {review: {duration: 1.01}}  # Hypothesis: a slightly slower read.
+    c: {review: {duration: 0.99}}  # Hypothesis: a light sans reads quickly.
+  font_weight:
+    today: {}
+    a: {all: {dead_click_rate: 0.97}}  # Hypothesis: a heavier weight marks controls better.
+    b: {}
+    c: {all: {dead_click_rate: 1.03}}  # Hypothesis: a light weight hides controls a little.
+  line_spacing:
+    today: {}
+    a: {review: {probability: 1.01, duration: 1.03}}  # Hypothesis: looser text, slower, a bit
+    b: {review: {probability: 0.99, duration: 0.98}}  # Hypothesis: tighter text, a bit faster.
+    c: {}
+  buttons:
+    today: {}
+    # Shapes differ by flow: A pill 44/36 px, B square 32/28 px, C soft 40/32 px (build doc).
+    a: {all: {dead_click_rate: 0.90}}  # Hypothesis: large pill buttons get hit, not missed.
+    b: {all: {dead_click_rate: 1.12, extra_clicks: 0.02}}  # Small square buttons get missed.
+    c: {all: {dead_click_rate: 1.03}}
+  colours:
+    today: {}
+    a: {}
+    b: {review: {duration: 0.99}}  # Hypothesis: B's diagram shades are easier to compare.
+    c: {review: {probability: 1.01}}  # Hypothesis: C keeps today's diagram shades.
+
+  # Layout switches. Each sets fewest_clicks for the one step it changes. Today's values match
+  # the base journey, so the designs' fewest clicks are 10 today and 9 in each flow.
+  # Landing: B's sign-in card is inline on the landing; A's is a /signin page; C's a modal.
+  landing_layout:
+    today: {sign_in_start: {fewest_clicks: 1}}
+    a: {sign_in_start: {probability: 1.06, duration: 0.95, dead_click_rate: 0.90, fewest_clicks: 1}}
+    b: {sign_in_start: {probability: 1.04, duration: 0.97, fewest_clicks: 1}}
+    c: {sign_in_start: {duration: 1.05, dead_click_rate: 1.10, fewest_clicks: 1}}
+  # Sign-in: each flow has one more click before GitHub than today's card (fewest 2).
+  signin_layout:
+    today: {sign_in: {fewest_clicks: 1}}
+    a: {sign_in: {probability: 0.98, duration: 1.05, fewest_clicks: 2}}
+    b: {sign_in: {duration: 0.97, fewest_clicks: 2}}
+    c: {sign_in: {dead_click_rate: 1.05, fewest_clicks: 2}}
+  # Repo picker: one row click in every flow and today.
+  repos_layout:
+    today: {repo_pick: {fewest_clicks: 1}}
+    a: {repo_pick: {dead_click_rate: 0.90, fewest_clicks: 1}}
+    b: {repo_pick: {duration: 0.97, dead_click_rate: 1.10, fewest_clicks: 1}}
+    c: {repo_pick: {duration: 1.03, dead_click_rate: 0.95, fewest_clicks: 1}}
+  # Repo details: one Analyze click in every flow and today; analysis then runs on its own.
+  repo_details_layout:
+    today: {analysis: {fewest_clicks: 1}}
+    a: {analysis: {probability: 1.03, fewest_clicks: 1}}
+    b: {analysis: {probability: 0.99, fewest_clicks: 1}}
+    c: {analysis: {probability: 1.02, dead_click_rate: 1.05, fewest_clicks: 1}}
+  # Flow view: one answer click in every flow and today. Moves are counted on the diagram.
+  flow_view_layout:
+    today: {review: {fewest_clicks: 1}}
+    a: {review: {probability: 1.10, duration: 0.95, diagram_moves: 0.85, fewest_clicks: 1}}
+    b: {review: {probability: 0.97, duration: 1.05, diagram_moves: 1.20, fewest_clicks: 1}}
+    c: {review: {probability: 1.04, dead_click_rate: 1.10, diagram_moves: 1.30, fewest_clicks: 1}}
+  # Branch switch: today 5 clicks (link, repo row, native select open and pick, Analyze). Each
+  # flow has a 3-click picker: open, pick the branch, Analyze.
+  branch_switch:
+    today: {branch_switch: {fewest_clicks: 5}}
+    a: {branch_switch: {duration: 0.95, fewest_clicks: 3}}
+    b: {branch_switch: {duration: 0.90, fewest_clicks: 3}}
+    c: {branch_switch: {probability: 1.02, duration: 0.95, fewest_clicks: 3}}

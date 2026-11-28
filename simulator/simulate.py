@@ -8,7 +8,13 @@ from pathlib import Path
 from codeflow.diff import LONG_FLOW_MIN_DEPTH
 from flagsmith.exceptions import FlagsmithClientError, FlagsmithFeatureDoesNotExistError
 
-from clients import DEFAULT_API_URL, DryRunClient, ExperimentClient, flagsmith_client
+from clients import (
+    DEFAULT_API_URL,
+    DryRunClient,
+    DryRunPiecesClient,
+    ExperimentClient,
+    flagsmith_client,
+)
 from config import (
     DEFAULT_SIM_ENVIRONMENT,
     PRODUCTION_ENVIRONMENT,
@@ -32,6 +38,16 @@ from history import reserve_reviewers
 from model import MODELS
 from panels import EXPERIENCE_BANDS, Panel, generate_panel, load_panel, profile_counts, select_panel
 from personas import PersonaModel, load_personas
+from pieces import (
+    JOURNEY_EVENTS,
+    PiecesExperiment,
+    PiecesSummary,
+    dry_run_flags,
+    is_pieces,
+    load_pieces,
+    parse_piece_overrides,
+    run_pieces,
+)
 from runner import SimulationError, VariantSummary, run_simulation
 
 SIMULATOR_DIR = Path(__file__).resolve().parent
@@ -73,6 +89,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--persona-summary", action="store_true", help="show simulated persona counts by variant"
     )
+    parser.add_argument(
+        "--pieces",
+        help="dry run only: set ui_ switches, such as ui_buttons=a, to flow, off, split, a, b or c",
+    )
     args = parser.parse_args(argv)
     if args.panel != "generated" and (args.n is not None or args.prefix is not None):
         parser.error("--n and --prefix require --panel generated")
@@ -86,6 +106,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error("--rate must be positive and finite")
     if args.prefix is not None and (not args.prefix or args.prefix != args.prefix.strip()):
         parser.error("--prefix must be nonempty without surrounding whitespace")
+    if args.pieces is not None:
+        if not args.dry_run:
+            parser.error("--pieces works only with --dry-run")
+        try:
+            parse_piece_overrides(args.pieces)
+        except ValueError as exc:
+            parser.error(str(exc))
     return args
 
 
@@ -137,8 +164,56 @@ def _print_funnel_summary(
         )
 
 
+def _format_count(value: float | None) -> str:
+    return f"{value:.2f}" if value is not None else "-"
+
+
+def _print_pieces_summary(
+    summary: dict[str, PiecesSummary],
+    model: str,
+    dry_run: bool,
+    experiment: PiecesExperiment,
+    overrides: str | None,
+) -> None:
+    mode = "dry run" if dry_run else "Flagsmith"
+    print(f"Simulated visitors ({model} model, {mode})")
+    print(f"Experiment flag {experiment.flag} (control {experiment.control}).")
+    if overrides:
+        print(f"Dry-run pieces: {overrides}")
+    width = max(len("Flow"), *(len(flow) for flow in summary))
+    print(f"{'Flow':<{width}} {'Visitors':>9} {'Completed':>10} {'Median ms':>10} {'Clicks':>7}")
+    for flow, stats in summary.items():
+        rate = f"{stats.completion_rate:.1%}" if stats.completion_rate is not None else "-"
+        elapsed = f"{stats.median_ms:,.0f}" if stats.median_ms is not None else "-"
+        clicks = f"{stats.median_clicks:.1f}" if stats.median_clicks is not None else "-"
+        print(f"{flow:<{width}} {stats.visitors:>9} {rate:>10} {elapsed:>10} {clicks:>7}")
+    print("Median ms and clicks are for visitors who completed: landing to a second branch.")
+
+    print("\nVisitors reaching each event")
+    width = max(len("Event"), *(len(event) for event in JOURNEY_EVENTS))
+    print(f"{'Event':<{width}}" + "".join(f" {flow:>10}" for flow in summary))
+    for event in JOURNEY_EVENTS:
+        counts = "".join(f" {stats.reached[event]:>10}" for stats in summary.values())
+        print(f"{event:<{width}}{counts}")
+
+    print("\nAverage per exposed visitor")
+    width = max(len("Measure"), len("Dead clicks, completed"))
+    print(f"{'Measure':<{width}}" + "".join(f" {flow:>10}" for flow in summary))
+    for label, field in (
+        ("Dead clicks, all", "dead_clicks"),
+        ("Dead clicks, completed", "finisher_dead_clicks"),
+        ("Diagram moves, all", "diagram_moves"),
+        ("Diagram moves, completed", "finisher_moves"),
+    ):
+        values = "".join(
+            f" {_format_count(getattr(stats, field)):>10}" for stats in summary.values()
+        )
+        print(f"{label:<{width}}{values}")
+
+
 def _print_persona_summary(
-    summary: dict[str, VariantSummary] | dict[str, FunnelSummary], personas: PersonaModel
+    summary: dict[str, VariantSummary] | dict[str, FunnelSummary] | dict[str, PiecesSummary],
+    personas: PersonaModel,
 ) -> None:
     print("\nSimulated persona counts")
     print(f"{'Attribute':<22} {'Value':<20}" + "".join(f" {variant:>16}" for variant in summary))
@@ -259,10 +334,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         path = named_path(EXPERIMENTS_DIR, args.experiment, ".yaml")
-        funnel = load_funnel(path, personas) if is_funnel(path) else None
-        experiment = funnel or load_experiment(path, personas)
+        pieces = load_pieces(path, personas) if is_pieces(path) else None
+        if args.pieces is not None and pieces is None:
+            raise SimulationError("--pieces applies only to pieces experiments such as app_flow.")
+        funnel = load_funnel(path, personas) if pieces is None and is_funnel(path) else None
+        experiment = pieces or funnel or load_experiment(path, personas)
         environment, api_url, key = _simulation_target(args.environment, dry_run=args.dry_run)
-        if funnel is None:
+        if pieces is None and funnel is None:
             source, diffs = load_diffs(
                 REPO_ROOT / "data", long_flows_only=experiment.long_flows_only
             )
@@ -281,20 +359,34 @@ def main(argv: list[str] | None = None) -> int:
             _check_repeats(
                 experiment.flag, len(known_repeats), confirmed=True, allow_repeat=args.allow_repeat
             )
-        client = (
-            DryRunClient(experiment.allocations)
-            if args.dry_run
-            else _live_client(
+        rate = None if args.dry_run else args.rate
+        identities = reviewers.keys() - known_repeats
+        if not args.dry_run:
+            client = _live_client(
                 api_url,
                 key,
                 environment,
                 experiment.flag,
-                reviewers.keys() - known_repeats,
+                identities,
                 allow_repeat=args.allow_repeat,
             )
-        )
-        rate = None if args.dry_run else args.rate
-        if funnel is not None:
+        elif pieces is not None:
+            client = DryRunPiecesClient(
+                dry_run_flags(pieces, parse_piece_overrides(args.pieces or ""))
+            )
+        else:
+            client = DryRunClient(experiment.allocations)
+        if pieces is not None:
+            summary = run_pieces(
+                client,
+                pieces,
+                reviewers=reviewers,
+                model_name=args.model,
+                rate=rate,
+                seed=args.seed,
+            )
+            _print_pieces_summary(summary, args.model, args.dry_run, pieces, args.pieces)
+        elif funnel is not None:
             summary = run_funnel(
                 client,
                 funnel,
