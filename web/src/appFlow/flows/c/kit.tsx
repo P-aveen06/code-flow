@@ -9,7 +9,9 @@ import "./kit.css";
 
 export type IconName =
   | "github"
+  | "arrow-left"
   | "arrow-right"
+  | "arrow-up-right"
   | "branch"
   | "check"
   | "chevron-down"
@@ -17,6 +19,7 @@ export type IconName =
   | "external"
   | "lock"
   | "plus"
+  | "repo"
   | "search"
   | "info"
   | "commit"
@@ -28,7 +31,10 @@ export type IconName =
 // are not in the designs, so they use the same stroke style.
 const ICON_PATHS: Record<IconName, readonly string[]> = {
   github: ["M9 19c-4 1.2-4-2-5.5-2.5M15 22v-3a2.6 2.6 0 0 0-.7-2c2.5-.3 5.2-1.2 5.2-5.6 0-1.2-.4-2.2-1.2-3 .1-.3.5-1.4-.1-3-1 0-2.5.6-3.2 1.1a13 13 0 0 0-6 0c-.7-.5-2.2-1.1-3.2-1.1-.6 1.6-.2 2.7-.1 3-.8.8-1.2 1.8-1.2 3 0 4.4 2.7 5.3 5.2 5.6-.5.5-.7 1.2-.7 2v3"],
+  "arrow-left": ["M20 12H5m6-6-6 6 6 6"],
   "arrow-right": ["M4 12h15m-6-6 6 6-6 6"],
+  "arrow-up-right": ["M6 18 18 6M7 6h11v11"],
+  repo: ["M5 4h14v16H5V4Zm0 13h14M9 7h5M9 10h3"],
   branch: ["M6 6v10m12-10v2a4 4 0 0 1-4 4H6m0-9a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"],
   check: ["m5 12 4 4L19 6"],
   "chevron-down": ["m6 9 6 6 6-6"],
