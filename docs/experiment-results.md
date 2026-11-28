@@ -237,3 +237,39 @@ Both lucky pieces were pinned back to a. Then `app_flow` was set to a, so every 
 - A 95 % bar per comparison is not enough when one round makes 22 comparisons: expect about one lucky win. Confirm any piece-level win with a round sized for the gap before rolling it out.
 - Size each round for the smallest gap that matters. 1,000 reviewers separate whole apps that differ by 7 points (Workbench lost clearly in round 1) but not pieces that differ by 2.
 - Give every round fresh identities. Flagsmith counts an identity's events in every experiment that identity is in, so reused reviewers mix rounds.
+
+## Ablation: which pieces make the flows differ? (10,000 reviewers per round)
+
+Paveen's method asks for an ablation before choosing a flow: keep `app_flow` split, switch one more piece off (back to the earlier UI) each round, and stop at the first round where the three flows tie. Round 1 had no clear winner between Guided and Canvas, but Workbench lost clearly, so the flows did not really tie. We ran the ablation with 10,000 fresh reviewers per round (`sim-abl-01` to `sim-abl-04`), big enough that a tie means the flows are equal and not just noise. Tie: neither b nor c has at least 95 % or at most 5 % win probability against a on Journey completed.
+
+| Round | Pieces off (cumulative) | Journey completed a / b / c | Win probability b, c vs a | Import completed a / b / c | Dead clicks a / b / c | Result |
+|---:|---|---|---|---|---|---|
+| 1 | flow view | 34.0 / 30.6 / 29.8 % | 0.1 %, 0.0 % | 76.2 / 72.4 / 72.6 % | 1.2 / 1.6 / 1.5 | a ahead |
+| 2 | + branch switch | 33.0 / 30.9 / 29.9 % | 2.6 %, 0.2 % | 74.7 / 73.3 / 72.8 % | 1.2 / 1.6 / 1.5 | a ahead |
+| 3 | + repo details | 32.5 / 30.7 / 29.2 % | 4.4 %, 0.1 % | 75.4 / 72.9 / 69.7 % | 1.2 / 1.6 / 1.4 | a ahead |
+| 4 | + repos | 31.2 / 30.7 / 30.3 % | 32.3 %, 20.7 % | 74.5 / 73.2 / 70.8 % | 1.2 / 1.6 / 1.5 | **tie** |
+
+Round 4 in full: b −1.6 % (−8.7 % to +5.4 %), c −2.9 % (−9.9 % to +4.1 %). Each round was closed with `rollout --variant a`, which only closes it.
+
+- **The baseline is four pieces off:** the flow view, the branch switch, repo details and the repos page. Guided's lead over Workbench and Canvas lives in those pieces, all of them after sign-in.
+- **Guided still causes fewer dead clicks in every round** (1.2 against 1.4 to 1.6), so the pieces still on (landing, sign-in, buttons, fonts, colours) differ there, but not in how many reviewers finish.
+
+## Stacking on the baseline (10,000 reviewers per round)
+
+Starting from the baseline (those four pieces off, `app_flow` split, the other seven pieces following the flow), each removed piece was added back as its own a/b/c experiment, biggest gap first, and the winner was pinned before the next round (`sim-bstack-01` to `sim-bstack-04`).
+
+| Round | Piece added back | Journey completed a / b / c | Win probability b, c vs a | Import completed a / b / c | Dead clicks a / b / c | Winner |
+|---:|---|---|---|---|---|---|
+| 1 | flow view | 33.3 / 30.3 / 31.8 % | 0.2 %, 8.0 % | 72.7 / 72.9 / 72.0 % | 1.5 / 1.4 / 1.5 | a |
+| 2 | branch switch | 33.7 / 33.6 / 34.9 % | 45.1 %, 84.2 % | 72.0 / 73.1 / 73.4 % | 1.4 / 1.4 / 1.5 | a |
+| 3 | repos | 33.7 / 33.2 / 34.8 % | 32.3 %, 82.2 % | 73.1 / 72.1 / 73.2 % | 1.4 / 1.5 / 1.4 | a |
+| 4 | repo details | 34.8 / 33.0 / 34.9 % | 5.3 %, 53.2 % | 75.7 / 71.9 / 73.9 % | 1.4 / 1.4 / 1.5 | a |
+
+Closest calls: round 2 c +3.5 % (−3.3 % to +10.4 %), round 3 c +3.2 % (−3.6 % to +10.1 %), round 4 b −5.2 % (−11.5 % to +1.1 %).
+
+- **Guided's flow view wins for the third time** (round 1 of stacking, the 30,000-reviewer check, and its share of the ablation gap). Workbench's is clearly worse.
+- **No Workbench or Canvas piece reached 95 %**, so Guided's version stays for the branch switch, the repos page and repo details. Our model does give Canvas's branch switch a very small edge (about 2 % at that step, under a point on completion), which fits round 2's +3.5 % but is too small for 10,000 reviewers to confirm.
+
+## Decision
+
+The whole method (best of three, ablation, stacking) lands on Guided wherever the flows differ in how many reviewers finish, and Guided causes the fewest dead clicks in every ablation round. **Flow A (Guided) is the pick for Production.** Development is pinned to Flow A: `app_flow` a and every `ui_*` piece a.

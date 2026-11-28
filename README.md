@@ -44,20 +44,26 @@ the diff, then switched to a second branch and reached its flow view.
 Every run used simulated reviewers in the Development environment, and every
 number is Flagsmith's own analysis:
 
-1. **Whole apps, 1,000 reviewers.** Workbench lost: 29.3% finished, against
+1. **Best of three, 1,000 reviewers.** Workbench lost: 29.3% finished, against
    36.0% for Guided (2% chance to beat it). Guided and Canvas (38.7%) were too
    close to call.
-2. **Each piece on its own, 11 rounds of 1,000 fresh reviewers.** Two pieces
-   crossed 95%, but both contradicted the simulator's own assumptions. With 22
-   comparisons, one or two lucky wins are expected, so we pinned both back to
-   Guided.
-3. **Confirmation, 30,000 reviewers, everything else fixed.** Guided's flow
-   view finished 36.0% of journeys, against 33.8% for Canvas and 31.2% for
-   Workbench, with both intervals below zero.
+2. **Ablation, 10,000 reviewers per round.** With the flows still split, we
+   switched one piece back to the earlier UI each round. The three flows tied
+   (31.2%, 30.7%, 30.3%) once four pieces were off: the flow view, the branch
+   switch, repo details and the repos page. That is where the difference lives.
+3. **Stacking, 10,000 reviewers per round.** We added those four pieces back one
+   at a time as a/b/c experiments. Guided's version won or held every one, and
+   Workbench's flow view was clearly worse.
 
-Guided is rolled out in Development. The lesson we kept: confirm a narrow win
-with a round sized for the gap before rolling it out.
-[Full results, all 11 rounds](docs/experiment-results.md#app_flow-experiment-which-whole-app-helps-reviewers-finish-simulated-reviewers) · [How the rounds run](docs/APP_FLOW_BUILD.md)
+Along the way, a quicker pass of eleven 1,000-reviewer rounds produced two
+"wins" at 98% that contradicted our own assumptions. A 30,000-reviewer check
+on the bigger one, the flow view, showed it was luck (Guided 36.0%, Canvas
+33.8%, Workbench 31.2%).
+The lesson we kept: size each round for the gap you need to see, and confirm a
+narrow win before rolling it out.
+
+**Flow A (Guided) is the pick**, and it is pinned in Development.
+[Full results, every round](docs/experiment-results.md#app_flow-experiment-which-whole-app-helps-reviewers-finish-simulated-reviewers) · [How the rounds run](docs/APP_FLOW_BUILD.md)
 
 | A Guided | B Workbench | C Canvas |
 | --- | --- | --- |
