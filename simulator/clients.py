@@ -160,5 +160,9 @@ def flagsmith_client(api_url: str, environment_key: str) -> Flagsmith:
         environment_key=environment_key,
         api_url=api_url + "/",
         enable_events=True,
-        event_processor_config=EventProcessorConfig(events_api_url=api_url.removesuffix("v1")),
+        # A run tracks about 15 events per visitor. With the SDK's 1,000-event buffer, events
+        # kept for a retry plus new ones overflowed and the oldest were dropped (27 of round 1's).
+        event_processor_config=EventProcessorConfig(
+            events_api_url=api_url.removesuffix("v1"), max_buffer_items=100_000
+        ),
     )
