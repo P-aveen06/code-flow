@@ -238,7 +238,7 @@ function Canvas({
         elementsSelectable={false}
         edgesFocusable={false}
       >
-        <Background gap={20} size={1} color="var(--color-border-strong)" />
+        <Background gap={20} size={1} color="var(--color-grid)" />
         {layout.nodes.length > 0 && (
           <Controls
             className="flow-controls"
