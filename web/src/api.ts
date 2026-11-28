@@ -3,7 +3,7 @@ import { waitFor } from "./waitFor";
 import type {
   CodeSnippet, CommitList, DiffViewModel, FunctionDiff, GitHubBranches, GitHubCommitList, GitHubRepoChoice,
   GraphSnapshot, ImportRequest,
-  ImportResponse, ImportStatus, Me, PickedImportRequest, Repo, RepoFlags,
+  ImportResponse, ImportStatus, Me, PickedImportRequest, Repo, RepoBranches, RepoFlags,
 } from "./types";
 
 // The server refuses session POSTs without this header, so other sites cannot forge them.
@@ -182,4 +182,22 @@ export function fetchCode(
 export function fetchFunctionDiff(repo: string, head: string, node: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ head, node });
   return requestJson<FunctionDiff>(`${repoPath(repo)}/function-diff?${query}`, signal);
+}
+
+// Branches of an imported GitHub repository, for the branch switch in a flow view.
+export function fetchRepoBranches(repoId: string, signal?: AbortSignal) {
+  return requestJson<RepoBranches>(`${repoPath(repoId)}/branches`, signal, { cache: "no-store" });
+}
+
+export function fetchRepoBranchCommits(repoId: string, branch: string, limit: number, signal?: AbortSignal) {
+  const query = new URLSearchParams({ branch, limit: String(limit) });
+  return requestJson<GitHubCommitList>(`${repoPath(repoId)}/branches/commits?${query}`, signal, { cache: "no-store" });
+}
+
+export function importRepoBranch(repoId: string, body: { branch: string; max_commits: number }, signal?: AbortSignal) {
+  return requestJson<ImportResponse>(`${repoPath(repoId)}/branches`, signal, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }

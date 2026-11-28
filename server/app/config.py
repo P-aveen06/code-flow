@@ -105,6 +105,8 @@ class Settings:
     snapshot_cache_size: int = DEFAULT_SNAPSHOT_CACHE_SIZE
     # A personal read-only token for private clones on a local machine only.
     github_token: str | None = field(default=None, repr=False)
+    # Optional read-only token that raises the rate limit of public branch lists and commits.
+    github_api_token: str | None = field(default=None, repr=False)
     github_app: GitHubAppSettings | None = None
     max_private_imports: int = DEFAULT_MAX_PRIVATE_IMPORTS
 
@@ -175,6 +177,7 @@ class Settings:
             max_import_commits=max_commits,
             snapshot_cache_size=cache_size,
             github_token=values.get("CODEFLOW_GITHUB_TOKEN") or None,
+            github_api_token=values.get("CODEFLOW_GITHUB_API_TOKEN") or None,
             github_app=_github_app(values),
             max_private_imports=max_private,
         )

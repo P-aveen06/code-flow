@@ -62,6 +62,19 @@ export interface GitHubCommitList {
   commits: GitHubCommit[];
 }
 
+// The branches of an imported GitHub repository, for the branch switch in a flow view.
+export interface RepoBranches {
+  repo: string;
+  full_name: string;
+  default_branch: string;
+  // This import's branch, or the default branch.
+  current_branch: string;
+  // The default branch first, then by name, at most 100.
+  branches: string[];
+  // Imports of the same repository and folder that this viewer can see, one per analyzed branch.
+  analyzed: { branch: string; id: string; status: RepoStatus }[];
+}
+
 export interface ImportResponse {
   id: string;
   status: RepoStatus;

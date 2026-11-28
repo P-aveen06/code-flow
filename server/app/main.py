@@ -6,23 +6,32 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import codeflow
-from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.access import can_read
-from app.auth import Auth
+from app.auth import DEFAULT_COMMIT_COUNT, Auth
+from app.branches import (
+    BranchesUnavailable,
+    ImportedBranches,
+    branch_listing,
+    branch_source,
+    import_settings,
+    known_imports,
+)
 from app.config import Settings
 from app.flag_findings import find_flags
 from app.flagsmith_client import FlagsmithClient
-from app.github import GitHubApp, GitHubError
+from app.github import GitHubApp, GitHubError, GitHubRest
 from app.import_analysis import ImportSource
 from app.importer import (
     RefreshUnavailable,
     RepoImporter,
     picked_source,
+    validate_branch,
     validate_import,
 )
 from app.sessions import SESSION_COOKIE, SessionStore
@@ -40,6 +49,7 @@ def create_app(
     executor: Executor | None = None,
     flagsmith_client: FlagsmithClient | None = None,
     github_app: GitHubApp | None = None,
+    github_rest: GitHubRest | None = None,
     sessions: SessionStore | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -50,6 +60,9 @@ def create_app(
     )
     github = github_app or (GitHubApp(settings.github_app) if settings.github_app else None)
     auth = Auth(settings, github, sessions or SessionStore())
+    github_branches = ImportedBranches(
+        github_rest or GitHubRest(), github, settings.github_api_token
+    )
 
     def clone_token(source: ImportSource) -> str | None:
         """Pick the token for a clone: none for public repos unless a local token is set."""
@@ -124,6 +137,17 @@ def create_app(
             and source.get("owner_uid") == uid
         )
 
+    def ensure_private_capacity(source: ImportSource) -> None:
+        """Refuse a private import past the limit per person. Re-importing a counted one is free."""
+        if source.visibility == "private" and (
+            private_import_count(source.owner_uid, source.id) >= settings.max_private_imports
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=f"You can import up to {settings.max_private_imports} private "
+                "repositories on this server",
+            )
+
     def start_picked_import(payload: dict, request: Request) -> dict[str, str]:
         repo_id, installation_id = payload.get("github_repo_id"), payload.get("installation_id")
         if type(repo_id) is not int or type(installation_id) is not int:
@@ -135,14 +159,7 @@ def create_app(
         if repo is None:
             raise NotFound("Repository not found, or code-flow has no access to it")
         source = picked_source(payload, repo, session.uid, limit=settings.max_import_commits)
-        if source.visibility == "private" and (
-            private_import_count(session.uid, source.id) >= settings.max_private_imports
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail=f"You can import up to {settings.max_private_imports} private "
-                "repositories on this server",
-            )
+        ensure_private_capacity(source)
         return importer.start(source)
 
     @app.exception_handler(NotFound)
@@ -153,9 +170,18 @@ def create_app(
     async def bad_request(request: Request, exc: BadRequest) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
+    @app.exception_handler(BranchesUnavailable)
+    async def branches_unavailable(request: Request, exc: BranchesUnavailable) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(GitHubError)
+    async def github_failed(request: Request, exc: GitHubError) -> JSONResponse:
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
+
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
-        if request.method == "POST" and request.url.path == "/api/repos":
+        is_import = request.url.path == "/api/repos" or request.url.path.endswith("/branches")
+        if request.method == "POST" and is_import:
             return JSONResponse(
                 status_code=400, content={"detail": "Import request must be valid JSON"}
             )
@@ -260,6 +286,35 @@ def create_app(
     ) -> dict:
         with store.lock:
             return store.code(repo, sha, file, start, end)
+
+    @repo_routes.get("/api/repos/{repo}/branches")
+    def list_branches(repo: str) -> dict:
+        metadata = import_settings(store, importer, repo)
+        default, names = github_branches.listing(metadata)
+        return branch_listing(repo, metadata, default, names, known_imports(store, importer))
+
+    @repo_routes.get("/api/repos/{repo}/branches/commits")
+    def branch_commits(
+        repo: str, branch: str = "", limit: Annotated[int, Query(ge=1)] = DEFAULT_COMMIT_COUNT
+    ) -> dict:
+        metadata = import_settings(store, importer, repo)
+        branch = validate_branch(branch)
+        # The server's import cap wins over a larger count from Flagsmith.
+        limit = min(limit, settings.max_import_commits)
+        name, commits = github_branches.commits(metadata, branch, limit)
+        return {
+            "branch": name,
+            "limit": limit,
+            "commits": [commit.response() for commit in commits],
+        }
+
+    @repo_routes.post("/api/repos/{repo}/branches", status_code=202)
+    def import_branch(repo: str, payload: Annotated[Any, Body()] = None) -> dict[str, str]:
+        metadata = import_settings(store, importer, repo)
+        default = github_branches.default_branch(metadata)
+        source = branch_source(metadata, payload, default, limit=settings.max_import_commits)
+        ensure_private_capacity(source)
+        return importer.start(source)
 
     app.include_router(repo_routes)
     return app
