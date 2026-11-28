@@ -152,7 +152,7 @@ web/src/appFlow/
 | `/github` | `repos_layout` | `pages/GitHubRepos` | `ReposA/B/C` |
 | `/github/:id` | `repo_details_layout` | `pages/GitHubRepo` | `RepoDetailsA/B/C` |
 | `/repo/:id` | `flow_view_layout` | `pages/Viewer` (RepoReview) | `FlowViewA/B/C` |
-| inside every flow view | `branch_switch` | link "Switch branch" to `/github/<githubId>?branch=` when the GitHub repo is known, else nothing | `BranchSwitchA/B/C` |
+| inside every flow view (today's too, while `app_flow` is on) | `branch_switch` | link "Switch branch" to the repos page (`/github`); the click starts the branch-switch clock | `BranchSwitchA/B/C` |
 
 Today's top bar (`App.tsx`) shows only when the current page's piece is `today`; flow screens
 render their own header from `flows/<x>/kit.tsx`.
@@ -163,9 +163,11 @@ render their own header from `flows/<x>/kit.tsx`.
   `today` scrolls to `#import`; `a` navigates to `/signin`; `b` scrolls to and focuses
   `#signin-panel`; `c` opens `SignInModalC` (rendered once at the app root by the provider).
 - Signed-in visitors see "Choose a repository" (to `/github`) instead, from `useMe()`.
-- `<SignInSlot today={...} placement="hero|section" />` sits where each landing would hold an inline
+- `<SignInSlot today={...} elsewhere={...} placement="hero|section" />` sits where each landing would hold an inline
   panel (B's hero; a section near the top in A and C; today's `#import` section). It renders
-  `today` for the today piece, `SignInPanelB` for `b`, nothing for `a`/`c`.
+  `today` for the today piece, `SignInPanelB` for `b`, and `elsewhere` for `a`/`c` (nothing on a
+  flow landing, whose own button calls `start()`; a small "Sign in with GitHub" card on today's).
+  `start()` from a page without `#import` or `#signin-panel` goes to the landing first.
 - A failed sign-in returns to `/?signin_error=…`. With piece `a` the landing forwards it to
   `/signin?signin_error=…`; with `c` it opens the modal showing the error; `b` shows it in the panel.
 - When `app_flow` is on, today's landing always offers sign-in (the `github_signin` variant), since
