@@ -107,7 +107,8 @@ function Crumbs({ id, name, subdir, branch }: { id: string; name: string; subdir
     <nav className="fb-flowview__crumbs" aria-label="Repository and branch">
       <span className="fb-flowview__divider" aria-hidden="true" />
       <Icon name="repo" />
-      <span className="fb-flowview__repo">{name}</span>
+      {/* An imported branch is named repo@branch; the branch switch beside it shows the branch. */}
+      <span className="fb-flowview__repo">{name.replace(/@.*$/, "")}</span>
       {subdir && (
         <>
           <span aria-hidden="true">/</span>

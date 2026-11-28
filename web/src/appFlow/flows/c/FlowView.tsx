@@ -141,7 +141,7 @@ function RepoReview({ id, initial, search, account }: {
 
               <FloatingPanel className="fc-flow__commit">
                 <div className="fc-flow__commit-head">
-                  <h1 className="fc-flow__repo" title={m.name}>{m.name}</h1>
+                  <h1 className="fc-flow__repo" title={m.name}>{m.name.replace(/@.*$/, "")}</h1>
                   <button
                     type="button"
                     className="fc-flow__icon"
