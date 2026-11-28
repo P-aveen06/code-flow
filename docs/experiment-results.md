@@ -216,3 +216,24 @@ Each cell after the control is: value, lift vs a (95 % credible interval), win p
 - **Two of the 22 comparisons crossed 95 %, and both contradict what we assumed.** In `app_flow.yaml`, the flow view layout helps a review most with a (×1.10), then c (×1.04), so c should not beat a. Colours b only makes the review about 1 % faster and changes nobody's chance of finishing, so it cannot truly win on completion. At 95 % per comparison, about one lucky win in 22 is expected by chance, and we got two.
 - **The rounds were too small for pieces this close.** The gaps we assumed between pieces are about 1 to 5 % relative. Telling those apart needs thousands of reviewers per variant, and each variant here had about 333.
 - **What we did:** pinned both pieces back to the control, then re-ran the flow view layout once with enough reviewers and everything else fixed. The confirmation round is below.
+
+## Confirmation: the flow view layout with 30,000 reviewers
+
+Both lucky pieces were pinned back to a. Then `app_flow` was set to a, so every other piece was fixed at Guided, and only `ui_flow_view_layout` was split as experiment "ui_flow_view_layout: a vs b vs c [confirm]". 30,000 fresh reviewers (`sim-confirm-1` to `sim-confirm-3`, 10,000 each, no dropped events) took 27 minutes to send.
+
+| Metric | a Guided (control), 10,175 | b Workbench, 9,898 | c Canvas, 9,927 |
+|---|---:|---:|---:|
+| Journey completed | 3,667, 36.0 % | 3,087, 31.2 %: −13.5 % (−16.8 % to −10.1 %), 0.0 % | 3,356, 33.8 %: −6.2 % (−9.7 % to −2.7 %), 0.0 % |
+| Diff understood | 60.3 % | 52.9 %: −12.3 %, 0.0 % | 56.9 %: −5.6 %, 0.0 % |
+| Import completed | 7,700, 75.7 % | 7,508, 75.9 %: +0.2 % (−1.3 % to +1.8 %), 61.6 % | 7,562, 76.2 %: +0.7 % (−0.9 % to +2.2 %), 79.6 % |
+| Dead clicks, mean per exposure | 1.2 | 1.2: −0.7 % (−3.2 % to +1.7 %), 72.3 % | 1.2: +0.8 % (−1.7 % to +3.3 %), 25.9 % |
+
+- **Guided's flow view is best**, 2.2 points ahead of Canvas and 4.8 ahead of Workbench, with both intervals well below zero. That matches the assumptions in `app_flow.yaml`, and it reverses the 1,000-reviewer round, where chance put Canvas first at 98.1 %.
+- **The sanity check passes:** Import completed happens before the flow view, so the layout can't change it, and it is level across the three versions.
+- **Decision:** completed with a rolled out. `app_flow` is a and every `ui_*` piece is a in Development, so the app is Guided throughout. Production is unchanged.
+
+## What we learned about the method
+
+- A 95 % bar per comparison is not enough when one round makes 22 comparisons: expect about one lucky win. Confirm any piece-level win with a round sized for the gap before rolling it out.
+- Size each round for the smallest gap that matters. 1,000 reviewers separate whole apps that differ by 7 points (Workbench lost clearly in round 1) but not pieces that differ by 2.
+- Give every round fresh identities. Flagsmith counts an identity's events in every experiment that identity is in, so reused reviewers mix rounds.
