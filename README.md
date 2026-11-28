@@ -88,6 +88,12 @@ load the keys. If setup requests warehouse configuration, enable **Flagsmith
 database** under **Environment Settings → Warehouse**. Development enables
 the view and direction previews. Preview reviews stay local.
 
+The app-flow test has its own flags: `app_flow` and eleven `ui_*` switches, tagged
+`app-flow`. Create them in Development with `make flagsmith-setup-app-flow-dry-run`,
+then `make flagsmith-setup-app-flow`. That command writes only these flags, and it
+writes Production only with `--environment Production --only app-flow`. A flag that
+already exists keeps its values and only gets the tag, so create them in Development first.
+
 The demo project has no repo flags, so the Flagsmith and OpenFeature checks in
 Flagsmith/flagsmith appear as **orphan** when connected with `flagsmith_mode`
 on. To see live, off, or stale findings and live-path highlighting, create a

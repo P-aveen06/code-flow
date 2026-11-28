@@ -307,6 +307,13 @@ also the web client key for Development. See `.env.example` for configuration.
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
 | `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 
+The app-flow test flags are not in this table. `make flagsmith-setup-app-flow` creates them
+in Development, tagged `app-flow`: `app_flow` (control `a`, variants `b` and `c` at 33%) and
+eleven `ui_*` switches (control `flow`, variants `a`, `b` and `c` at 0%). The full setup does
+not create them, and `--only app-flow` writes no keys or scope file. Setup creates a flag only
+when it is missing, so the first environment to create a flag sets its values: run Development
+first.
+
 The web app identifies each reviewer to Flagsmith (`flagsmith.identify(reviewerId)`),
 so variant allocation is sticky per reviewer. View outcome events include the
 assigned variant.
