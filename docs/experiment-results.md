@@ -163,4 +163,77 @@ The offline rehearsal (`make simulate-signin-dry-run`) split the panel 676 / 624
 - **Sign-in gets more visitors to a finished import:** +19.4 %, with the whole interval above zero. The gain comes from visitors who came for a private repository, which a public URL can't reach.
 - **It takes about twice as long:** visitors who saw a flow waited about 91 s with sign-in and 47 s without (mean, derived from Flagsmith's per-exposure numbers). The extra time is the trip to GitHub to authorize and choose repositories. Flagsmith's +129.7 % is larger than that because visitors with no flow count as 0, and sign-in has more visitors with a flow. The guardrail fails, as expected when we planned it.
 - **Abandonment is not conclusive:** the interval spans zero. Sign-in brings more visitors into the journey (583 against 471 started an import), and about the same share of those who start leave without finishing (29.0 % against 29.7 %). So the higher count reflects more starts, not a worse journey. The simulator's assumptions never made abandonment fall; the setup doc now says so.
-- **Decision:** the experiment is still running in Development and nothing was rolled out. Real visitors would also need the GitHub App to be set up on the hosted site first (see [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md)). If the time cost matters, the obvious lever is to cut a GitHub trip, for example by letting visitors choose repositories while they authorize.
+- **Decision:** completed in Development on 28 Nov 2026 with `github_signin` rolled out at 100 % (the cached numbers above; a later refresh mixed in events from the app_flow round, whose visitors reused the same panel identities, and left the winner unchanged). Real visitors would also need the GitHub App to be set up on the hosted site first (see [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md)). If the time cost matters, the obvious lever is to cut a GitHub trip, for example by letting visitors choose repositories while they authorize.
+
+# app_flow experiment: which whole app helps reviewers finish? (simulated reviewers)
+
+Run on 28 Nov 2026 in Paveen's self-hosted Flagsmith 2.295.2, project `code-flow`, environment **Development**. Production was not touched. Every number below is Flagsmith's own analysis (`python3 scripts/flagsmith_experiment.py --experiment <flag> --round <label> status`). How the rounds are run is in [APP_FLOW_BUILD.md](APP_FLOW_BUILD.md), "Running the rounds".
+
+**The reviewers are simulated.** Each piece's effect on each step of the journey is one assumption in [`simulator/experiments/app_flow.yaml`](../simulator/experiments/app_flow.yaml), so these runs test the method and Flagsmith's analysis, not real users. That file also lets us check each result against the truth we assumed, which is how we caught two lucky wins below.
+
+- **Hypothesis:** one of three complete designs, A Guided, B Workbench or C Canvas, gets more reviewers through the whole journey than the others.
+- **Flags:** `app_flow` (multivariate): `a` (control) 34 %, `b` 33 %, `c` 33 %, plus 11 `ui_*` switches, one per piece (flow view layout, branch switch, repo details, repos, sign-in, landing, colours, font family, line spacing, font weight, buttons). Each switch follows `app_flow` by default, or is pinned to a, b or c, or split on its own.
+- **Exposure:** `getExperimentFlag("app_flow")` on the landing page. In a per-piece round, the piece's own `getExperimentFlag("ui_<piece>")` exposes the visitor.
+- **Main metric:** Journey completed: the reviewer answered "I understand it", then switched to a second branch and reached its flow view (`journey_completed`, higher is better). Supporting: Import completed, Diff understood, Journey clicks and Dead clicks (lower is better). Supporting metrics explain a result but never decide it.
+- **Tie rule:** a round has a winner only when a flow has at least 95 % win probability against the control.
+
+## Round 1: three whole apps (1,000 reviewers)
+
+| Metric | a Guided (control), 342 | b Workbench, 351 | c Canvas, 305 |
+|---|---:|---:|---:|
+| Journey completed | 123, 36.0 % | 103, 29.3 %: −18.4 % (−36.0 % to −0.8 %), 2.0 % | 118, 38.7 %: +7.6 % (−14.0 % to +29.1 %), 75.5 % |
+| Diff understood | 211, 61.7 % | 168, 47.9 %: −22.4 % (−33.1 % to −11.7 %), 0.0 % | 188, 61.6 %: −0.1 % (−12.3 % to +12.1 %), 49.4 % |
+| Import completed | 266, 77.8 % | 262, 74.6 %: −4.0 % (−12.0 % to +4.0 %), 16.2 % | 237, 77.7 %: −0.1 % (−8.4 % to +8.2 %), 49.1 % |
+| Journey clicks, mean per exposure | 3.8 | 3.0: −20.7 % (−38.0 % to −3.5 %), 99.1 % | 4.3: +12.5 % (−10.2 % to +35.2 %), 14.1 % |
+| Dead clicks, mean per exposure | 1.2 | 1.6: +35.5 % (+18.6 % to +52.3 %), 0.0 % | 1.7: +47.7 % (+29.1 % to +66.3 %), 0.0 % |
+
+Each cell after the control is: value, lift vs a (95 % credible interval), win probability vs a. For clicks, better means lower. At the first 500 reviewers c led on Journey completed with 92 %, short of the bar; the next 500 brought it to 75.5 %.
+
+- **Workbench loses:** fewer reviewers finish and fewer understand the diff, both with intervals below zero. Its lower click count only reflects fewer reviewers reaching the end.
+- **Guided and Canvas tie** by our rule. Canvas causes clearly more dead clicks (+47.7 %).
+- So the ablation step had nothing to remove, and we moved straight to testing each piece on its own. The round was closed without a winner (`rollout --variant a` only closes it).
+
+## Each piece on its own (11 rounds, 1,000 fresh reviewers each)
+
+`app_flow` stayed split 34/33/33 while one `ui_*` switch at a time was split as its own experiment. Each round used new identities (`sim-stack-01` to `sim-stack-11`), and its winner was pinned before the next round.
+
+| Round | Piece | Journey completed a / b / c | Win probability b, c vs a | Dead clicks a / b / c | Flagsmith's pick |
+|---:|---|---|---|---|---|
+| 1 | flow view layout | 30.2 / 30.4 / 38.8 % | 52.9 %, 98.1 % | 1.4 / 1.5 / 1.5 | c (lucky, see below) |
+| 2 | branch switch | 33.1 / 34.9 / 33.2 % | 68.6 %, 51.9 % | 1.5 / 1.5 / 1.4 | a |
+| 3 | repo details | 32.5 / 30.3 / 35.6 % | 26.1 %, 79.2 % | 1.4 / 1.4 / 1.6 | a |
+| 4 | repos | 32.2 / 35.4 / 33.4 % | 79.4 %, 63.3 % | 1.4 / 1.6 / 1.5 | a |
+| 5 | sign-in | 35.2 / 35.6 / 32.2 % | 54.2 %, 20.1 % | 1.4 / 1.4 / 1.4 | a |
+| 6 | landing | 35.1 / 32.5 / 31.8 % | 22.7 %, 16.6 % | 1.4 / 1.4 / 1.4 | a |
+| 7 | colours | 29.1 / 38.9 / 35.0 % | 98.8 %, 93.3 % | 1.3 / 1.5 / 1.4 | b (lucky, see below) |
+| 8 | font family | 31.9 / 34.0 / 36.4 % | 71.1 %, 87.1 % | 1.4 / 1.4 / 1.5 | a |
+| 9 | line spacing | 37.3 / 29.8 / 34.6 % | 1.2 %, 23.1 % | 1.5 / 1.3 / 1.4 | a |
+| 10 | font weight | 35.0 / 33.3 / 36.4 % | 32.0 %, 63.6 % | 1.4 / 1.4 / 1.5 | a |
+| 11 | buttons | 38.0 / 33.3 / 31.4 % | 9.5 %, 2.5 % | 1.2 / 1.5 / 1.4 | a |
+
+## Reading it
+
+- **Two of the 22 comparisons crossed 95 %, and both contradict what we assumed.** In `app_flow.yaml`, the flow view layout helps a review most with a (×1.10), then c (×1.04), so c should not beat a. Colours b only makes the review about 1 % faster and changes nobody's chance of finishing, so it cannot truly win on completion. At 95 % per comparison, about one lucky win in 22 is expected by chance, and we got two.
+- **The rounds were too small for pieces this close.** The gaps we assumed between pieces are about 1 to 5 % relative. Telling those apart needs thousands of reviewers per variant, and each variant here had about 333.
+- **What we did:** pinned both pieces back to the control, then re-ran the flow view layout once with enough reviewers and everything else fixed. The confirmation round is below.
+
+## Confirmation: the flow view layout with 30,000 reviewers
+
+Both lucky pieces were pinned back to a. Then `app_flow` was set to a, so every other piece was fixed at Guided, and only `ui_flow_view_layout` was split as experiment "ui_flow_view_layout: a vs b vs c [confirm]". 30,000 fresh reviewers (`sim-confirm-1` to `sim-confirm-3`, 10,000 each, no dropped events) took 27 minutes to send.
+
+| Metric | a Guided (control), 10,175 | b Workbench, 9,898 | c Canvas, 9,927 |
+|---|---:|---:|---:|
+| Journey completed | 3,667, 36.0 % | 3,087, 31.2 %: −13.5 % (−16.8 % to −10.1 %), 0.0 % | 3,356, 33.8 %: −6.2 % (−9.7 % to −2.7 %), 0.0 % |
+| Diff understood | 60.3 % | 52.9 %: −12.3 %, 0.0 % | 56.9 %: −5.6 %, 0.0 % |
+| Import completed | 7,700, 75.7 % | 7,508, 75.9 %: +0.2 % (−1.3 % to +1.8 %), 61.6 % | 7,562, 76.2 %: +0.7 % (−0.9 % to +2.2 %), 79.6 % |
+| Dead clicks, mean per exposure | 1.2 | 1.2: −0.7 % (−3.2 % to +1.7 %), 72.3 % | 1.2: +0.8 % (−1.7 % to +3.3 %), 25.9 % |
+
+- **Guided's flow view is best**, 2.2 points ahead of Canvas and 4.8 ahead of Workbench, with both intervals well below zero. That matches the assumptions in `app_flow.yaml`, and it reverses the 1,000-reviewer round, where chance put Canvas first at 98.1 %.
+- **The sanity check passes:** Import completed happens before the flow view, so the layout can't change it, and it is level across the three versions.
+- **Decision:** completed with a rolled out. `app_flow` is a and every `ui_*` piece is a in Development, so the app is Guided throughout. Production is unchanged.
+
+## What we learned about the method
+
+- A 95 % bar per comparison is not enough when one round makes 22 comparisons: expect about one lucky win. Confirm any piece-level win with a round sized for the gap before rolling it out.
+- Size each round for the smallest gap that matters. 1,000 reviewers separate whole apps that differ by 7 points (Workbench lost clearly in round 1) but not pieces that differ by 2.
+- Give every round fresh identities. Flagsmith counts an identity's events in every experiment that identity is in, so reused reviewers mix rounds.
