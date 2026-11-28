@@ -284,9 +284,10 @@ Flags are defined in the `code-flow` project and have a state in each
 environment. The setup script selects Production by default and accepts
 `--environment` for Development or another simulation environment.
 On creation, `variant_preview` starts off in Production and on in the
-simulation environments. Reruns report state differences for all five app
-flags in Production and for `flagsmith_mode` and `ai_summary` in simulation
-environments. Setup manages the five flags below under the `code-flow` tag.
+simulation environments. Reruns report state differences for all eight app
+flags in Production and for `flagsmith_mode`, `ai_summary`, `live_flag_panel`,
+and `branch_commit_count` in simulation environments. Setup manages the eight
+flags below under the `code-flow` tag.
 The retired `sync_mode` flag remains in the project after its Development
 experiment completed with the manual button as control and no rollout. The
 app uses the manual refresh button without reading that flag.
@@ -303,8 +304,9 @@ also the web client key for Development. See `.env.example` for configuration.
 | `flow_direction` | multivariate string | The long-flow layout experiment. Control `horizontal` (ELK RIGHT) and variant `vertical` (ELK DOWN), split 50/50. |
 | `branch_commit_count` | standard, integer value | Remote config for how many recent commits of a branch the GitHub repo details page lists and analyzes. Default 20. See [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md). |
 | `github_signin` | multivariate string | The import experiment. Control `url_import` (public URL form) and variant `github_signin` (Sign in with GitHub and a repo picker), split 50/50. See [GITHUB_SIGNIN.md](GITHUB_SIGNIN.md). |
-| `flagsmith_mode` | boolean | Toggles flag findings and live colouring. The Flagsmith section always shows the active flow settings. |
+| `flagsmith_mode` | boolean | Enables flag checks and live diagram colouring. The viewer shows findings when `live_flag_panel` is also on. |
 | `ai_summary` | boolean (optional) | Kill switch for calling an LLM for the summary; when off the rule-based summary is used. |
+| `live_flag_panel` | boolean | Shows the viewer's “Live from Flagsmith” findings section. Defaults off and stays off when Flagsmith is unavailable. “This review” always shows. |
 | `variant_preview` | boolean | Enables the view and direction preview controls and URL overrides in Development and simulation environments. Defaults off in Production and when Flagsmith is unavailable. |
 
 The web app identifies each reviewer to Flagsmith (`flagsmith.identify(reviewerId)`),
@@ -381,7 +383,8 @@ Detects Flagsmith flag checks in the analyzed Python code and overlays live
 flag state from Flagsmith.
 
 The `code-flow` Flagsmith project currently has no repo flags, so detected
-checks in Flagsmith/flagsmith appear as **orphan** when the server is connected.
+checks in Flagsmith/flagsmith appear as **orphan** when the server is connected
+and both `flagsmith_mode` and `live_flag_panel` are on.
 To see live, off, or stale findings and live-path highlighting, create a flag
 with the exact name of a detected check in your Flagsmith project and tag it
 `repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.

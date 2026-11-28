@@ -100,10 +100,11 @@ database** under **Environment Settings → Warehouse**. Development enables
 the view and direction previews. Preview reviews stay local.
 
 The demo project has no repo flags, so the Flagsmith and OpenFeature checks in
-Flagsmith/flagsmith appear as **orphan** when connected with `flagsmith_mode`
-on. To see live, off, or stale findings and live-path highlighting, create a
-flag with the exact name of a detected check in your Flagsmith project and tag
-it `repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.
+Flagsmith/flagsmith appear as **orphan** when connected with both
+`flagsmith_mode` and `live_flag_panel` on. To see live, off, or stale findings
+and live-path highlighting, create a flag with the exact name of a detected
+check in your Flagsmith project and tag it `repo:flagsmith-api`. Rerun
+`make flagsmith-setup` to refresh the scope file.
 
 [Earlier demo with repo flags configured](docs/screenshots/m3-flagsmith-orphan-and-stale.png)
 

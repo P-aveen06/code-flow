@@ -20,6 +20,8 @@ const mockFetch = vi.fn<typeof fetch>();
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubEnv("VITE_HOSTED_DEMO", "");
+  vi.stubEnv("VITE_FLAGSMITH_API_URL", "");
+  vi.stubEnv("VITE_CODEFLOW_FLAGSMITH_ENV_KEY", "");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", mockFetch);
   mockFetch.mockReset().mockImplementation(async () => Response.json([demo]));
