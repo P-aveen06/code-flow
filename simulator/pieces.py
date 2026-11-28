@@ -224,15 +224,18 @@ def read_visitor(client: PieceClient, identifier: str, traits: TraitMapping) -> 
     app_flag = client.get_experiment_flag(APP_FLOW, identifier=identifier, traits=traits)
     flow = flow_from_flag(app_flag)
     flags = client.get_identity_flags(identifier=identifier, traits=traits)
+    exposed = _in_experiment(app_flag)
     pieces = {}
     for switch in SWITCHES:
         name = switch_flag(switch)
         flag: Flag | DefaultFlag | None = _present(flags, name)
-        if flag is not None and flag.experiment is not None:
-            # A stacking round: the ui flag is its own experiment, so record its exposure.
+        if flow is not None and flag is not None and flag.experiment is not None:
+            # A stacking round: the ui flag is its own experiment, so record its exposure. It runs
+            # after the app_flow round is completed, so it exposes the visitor on its own.
             flag = client.get_experiment_flag(name, identifier=identifier, traits=traits)
+            exposed = exposed or _in_experiment(flag)
         pieces[switch] = resolve_piece(flow, flag)
-    return VisitorFlags(_in_experiment(app_flag), flow, pieces)
+    return VisitorFlags(exposed, flow, pieces)
 
 
 def parse_piece_overrides(text: str) -> dict[str, str]:
