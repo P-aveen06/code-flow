@@ -1,0 +1,450 @@
+/* Flow B repositories page and repo details. Layout and sizes only: every colour, font, weight,
+   line height and button size comes from the tokens (docs/APP_FLOW_BUILD.md, "Token vocabulary"). */
+
+/* Both pages fill the window: the header stays put and the panes scroll inside them. */
+.fb-repos,
+.fb-repo-details {
+  height: 100dvh;
+}
+
+.fb-repos .fb-shell,
+.fb-repo-details .fb-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+/* The page header: 16 px above and below, 24 px at the sides, no fixed height. The sidebar
+   already carries the logo, so the logo inside the header is hidden on these pages. */
+.fb-repos .fb-header,
+.fb-repo-details .fb-header {
+  flex: none;
+  height: auto;
+  padding: var(--space-4) var(--space-5);
+}
+
+.fb-repos .fb-header .fb-brand,
+.fb-repo-details .fb-header .fb-brand {
+  display: none;
+}
+
+/* The account block in the sidebar: avatar beside the login and the sign-out link. */
+.fb-repos .fb-sidebar__account,
+.fb-repo-details .fb-sidebar__account {
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+}
+
+.fb-repos__account {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-repos__account-text {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+}
+
+.fb-repos__login {
+  font-weight: var(--weight-heading);
+  overflow-wrap: anywhere;
+}
+
+.fb-repos .fb-repos__sign-out,
+.fb-repo-details .fb-repos__sign-out {
+  height: var(--btn-height-sm);
+  padding: 0;
+}
+
+/* Repositories page */
+
+.fb-repos__title {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fb-repos__hint {
+  color: var(--color-text-muted);
+}
+
+.fb-repos__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4) var(--space-5);
+}
+
+.fb-repos__card {
+  flex: none;
+  overflow: hidden;
+  border: var(--border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.fb-repos__state {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.fb-repos__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fb-repos__failure {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-danger);
+}
+
+.fb-repos__table .fb-table__row {
+  position: relative;
+  min-height: 48px;
+}
+
+/* Rows alternate, and the whole row is clickable: the name link covers it. */
+.fb-repos__table .fb-table__row:nth-child(odd) {
+  background: var(--color-sunken);
+}
+
+.fb-repos__table .fb-table__row:hover {
+  background: var(--color-accent-soft);
+}
+
+.fb-repos__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-repos__link {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: var(--weight-heading);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-repos__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.fb-repos__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--color-text-muted);
+}
+
+.fb-repos__select {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  color: var(--color-accent);
+  font-weight: var(--weight-label);
+}
+
+/* Small label chips: visibility, and the default branch */
+.fb-repos__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  min-height: 20px;
+  padding: 1px var(--space-2);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--btn-secondary-bg);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+}
+
+.fb-repos__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Repo details: the branches on the left, the commits on the right */
+
+.fb-repo-details__title {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fb-repo-details .fb-repo-details__back {
+  height: var(--btn-height-sm);
+  padding: 0;
+}
+
+.fb-repo-details__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fb-repo-details__note,
+.fb-repo-details__hint,
+.fb-repo-details__field-hint,
+.fb-repo-details__muted {
+  color: var(--color-text-muted);
+}
+
+.fb-repo-details__hint,
+.fb-repo-details__field-hint {
+  font-size: var(--text-small);
+}
+
+.fb-repo-details__body {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fb-repo-details__branches {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: var(--border);
+}
+
+.fb-repo-details__branches .fb-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.fb-repo-details__pane-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fb-repo-details__status {
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.fb-repo-details__branch-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+}
+
+.fb-repo-details__branch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--btn-height);
+  padding: 0 var(--space-3);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fb-repo-details__branch code {
+  font-size: var(--text-mono);
+}
+
+.fb-repo-details__branch:hover {
+  background: var(--color-accent-soft);
+}
+
+.fb-repo-details__branch[aria-pressed="true"] {
+  border-color: var(--color-selection-soft);
+  background: var(--color-selection-soft);
+  color: var(--color-accent-hover);
+}
+
+.fb-repo-details__commits {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-surface);
+}
+
+.fb-repo-details__commits > .fb-toolbar {
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.fb-repo-details__heading-block {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The subfolder field and the button share a grid: the button sits level with the field. */
+.fb-repo-details .fb-repo-details__form {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-repo-details__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fb-repo-details__label {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: var(--weight-label);
+}
+
+.fb-repo-details__input {
+  grid-column: 1;
+  grid-row: 2;
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--btn-height);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+}
+
+.fb-repo-details__input:disabled {
+  background: var(--color-sunken);
+  color: var(--color-text-muted);
+}
+
+.fb-repo-details__field-hint {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.fb-repo-details .fb-repo-details__submit {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
+}
+
+.fb-repo-details__form-error {
+  color: var(--color-danger);
+}
+
+.fb-repo-details__commits > .fb-status {
+  flex: none;
+}
+
+.fb-repo-details__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fb-repo-details__progress-main {
+  display: grid;
+  flex: 1 1 auto;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fb-repo-details__progress-text {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fb-repo-details .fb-repo-details__open {
+  flex: none;
+}
+
+/* The commits list scrolls inside the pane, and its header stays in view. */
+.fb-repo-details__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.fb-repo-details__table .fb-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.fb-repo-details__table .fb-table__row {
+  min-height: 36px;
+}
+
+.fb-repo-details__table .fb-table__row:hover {
+  background: var(--color-accent-soft);
+}
+
+.fb-repo-details__table .fb-table__cell {
+  font-size: var(--text-body);
+}
+
+.fb-repo-details__table a {
+  text-decoration: none;
+}
+
+.fb-repo-details__table a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1023px) {
+  .fb-repo-details__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .fb-repo-details__branches {
+    max-height: 40vh;
+    overflow: auto;
+    border-right: 0;
+    border-bottom: var(--border);
+  }
+}

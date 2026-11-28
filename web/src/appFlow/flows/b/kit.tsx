@@ -10,38 +10,48 @@ import "./kit.css";
 export type IconName =
   | "github"
   | "arrow-right"
+  | "arrow-left"
   | "branch"
   | "check"
   | "chevron-down"
   | "close"
   | "external"
+  | "globe"
+  | "graph"
   | "lock"
+  | "play"
   | "plus"
+  | "repo"
+  | "sign-out"
   | "search"
   | "info"
   | "commit"
-  | "repo"
   | "refresh"
   | "list"
   | "code"
   | "flag";
 
-// Stroke paths on a 24 x 24 grid, copied from the flow B designs. search, commit, repo, refresh,
-// list, code and flag are not in the designs, so they use the same stroke style.
+// Stroke paths on a 24 x 24 grid, copied from the flow B designs. search, commit, refresh, list,
+// code and flag are not in the designs, so they use the same stroke style.
 const ICON_PATHS: Record<IconName, readonly string[]> = {
   github: ["M9 19c-4 1-4-2-6-2m12 5v-3.9a3.4 3.4 0 0 0-.9-2.5c3-.3 6.1-1.5 6.1-6.7a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6S17.7 1.4 15 3a13.4 13.4 0 0 0-6 0C6.3 1.4 5.3 1.7 5.3 1.7a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3.8 9c0 5.1 3.1 6.3 6.1 6.7a3.4 3.4 0 0 0-.9 2.7V22"],
   "arrow-right": ["M4 12h15m-6-6 6 6-6 6"],
+  "arrow-left": ["M20 12H5m6-6-6 6 6 6"],
   branch: ["M6 6v10m12-10v2a4 4 0 0 1-4 4H6m0-9a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 13a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"],
   check: ["m5 12 4 4L19 6"],
   "chevron-down": ["m6 9 6 6 6-6"],
   close: ["m6 6 12 12M18 6 6 18"],
   external: ["M14 4h6v6m0-6-9 9m-1-7H5v13h13v-5"],
+  globe: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "M12 3a4 9 0 1 0 0 18 4 9 0 0 0 0-18Z", "M3 12h18"],
+  graph: ["M3 3h6v6H3zM15 15h6v6h-6zM3 15h6v6H3z", "M6 9v6m3-9h9v9"],
   lock: ["M6 10h12v10H6zM8 10V8a4 4 0 0 1 8 0v2m-4 4v2"],
+  play: ["m8 5 11 7-11 7z"],
   plus: ["M12 5v14M5 12h14"],
+  repo: ["M5 19a2 2 0 0 1 2-2h12M7 3h12v18H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 4h6m-6 4h4"],
+  "sign-out": ["M10 5H5v14h5m-1-7h11m-4-4 4 4-4 4"],
   search: ["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z", "m20 20-4-4"],
   info: ["M12 11v5m0-8h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
   commit: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M3 12h5m8 0h5"],
-  repo: ["M5 4a2 2 0 0 1 2-2h12v16H7a2 2 0 0 0-2 2V4Z", "M5 18a2 2 0 0 1 2-2h12"],
   refresh: ["M20 12a8 8 0 1 1-2.34-5.66", "M20 4v5h-5"],
   list: ["M9 6h11M9 12h11M9 18h11", "M4.5 6h.01M4.5 12h.01M4.5 18h.01"],
   code: ["m8 7-5 5 5 5", "m16 7 5 5-5 5"],
