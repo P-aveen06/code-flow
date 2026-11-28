@@ -71,17 +71,23 @@ export function symbolSize(symbol: OverlayNode) {
 }
 
 const statusColors: Record<NodeStatus, string> = {
-  added: "var(--color-success)",
-  removed: "var(--color-danger)",
-  changed: "var(--color-warning)",
-  context: "var(--color-text-subtle)",
+  added: "var(--diagram-added)",
+  removed: "var(--diagram-removed)",
+  changed: "var(--diagram-changed)",
+  context: "var(--diagram-context)",
+};
+
+const statusFills: Record<NodeStatus, string> = {
+  added: "var(--diagram-added-fill)",
+  removed: "var(--diagram-removed-fill)",
+  changed: "var(--diagram-changed-fill)",
+  context: "var(--diagram-context-fill)",
 };
 
 export function nodeStyle(status: NodeStatus): CSSProperties {
-  const color = statusColors[status];
   return {
-    backgroundColor: `color-mix(in srgb, ${color} 9%, var(--color-surface))`,
-    borderColor: color,
+    backgroundColor: statusFills[status],
+    borderColor: statusColors[status],
     borderStyle: status === "removed" ? "dashed" : "solid",
   };
 }

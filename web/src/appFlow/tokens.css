@@ -1,0 +1,222 @@
+/*
+ * app_flow token overrides, one block per style switch. A block sets only the variables of its
+ * switch. AppFlowProvider sets the data-cf-* attribute on <html>; no attribute means today's
+ * values from :root in styles.css. Values come from docs/APP_FLOW_BUILD.md and flags-app-flow.md.
+ */
+
+/* ui_font_family: font families and the type scale */
+:root[data-cf-font="a"] {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-display: 56px;
+  --text-h1: 36px;
+  --text-h2: 24px;
+  --text-h3: 18px;
+  --text-body: 14px;
+  --text-small: 12px;
+  --text-mono: 14px;
+}
+
+:root[data-cf-font="b"] {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-display: 44px;
+  --text-h1: 28px;
+  --text-h2: 20px;
+  --text-h3: 16px;
+  --text-body: 14px;
+  --text-small: 12px;
+  --text-mono: 13px;
+}
+
+:root[data-cf-font="c"] {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --text-display: 56px;
+  --text-h1: 48px;
+  --text-h2: 28px;
+  --text-h3: 20px;
+  --text-body: 14px;
+  --text-small: 12px;
+  --text-mono: 14px;
+}
+
+/* ui_font_weight */
+:root[data-cf-weight="a"] {
+  --weight-body: 400;
+  --weight-label: 600;
+  --weight-heading: 700;
+  --weight-display: 700;
+  --weight-mono: 400;
+}
+
+:root[data-cf-weight="b"] {
+  --weight-body: 400;
+  --weight-label: 500;
+  --weight-heading: 600;
+  --weight-display: 600;
+  --weight-mono: 500;
+}
+
+:root[data-cf-weight="c"] {
+  --weight-body: 400;
+  --weight-label: 500;
+  --weight-heading: 400;
+  --weight-display: 300;
+  --weight-mono: 400;
+}
+
+/* ui_line_spacing */
+:root[data-cf-leading="a"] {
+  --leading-body: 1.65;
+  --leading-heading: 1.2;
+  --leading-code: 1.6;
+}
+
+:root[data-cf-leading="b"] {
+  --leading-body: 1.4;
+  --leading-heading: 1.2;
+  --leading-code: 1.45;
+}
+
+:root[data-cf-leading="c"] {
+  --leading-body: 1.5;
+  --leading-heading: 1.15;
+  --leading-code: 1.5;
+}
+
+/* ui_buttons: shape and size. Secondary is the plain .btn look. */
+:root[data-cf-buttons="a"] {
+  --btn-height: 44px;
+  --btn-height-sm: 36px;
+  --btn-pad-x: 20px;
+  --btn-pad-x-sm: 14px;
+  --btn-radius: 999px;
+  --btn-border-width: 1.5px;
+  --btn-shadow: none;
+  --btn-secondary-bg: var(--color-surface);
+  --btn-secondary-text: var(--color-accent);
+  --btn-secondary-border: var(--color-accent);
+  --btn-tertiary-decoration: none;
+}
+
+:root[data-cf-buttons="b"] {
+  --btn-height: 32px;
+  --btn-height-sm: 28px;
+  --btn-pad-x: 12px;
+  --btn-pad-x-sm: 8px;
+  --btn-radius: 4px;
+  --btn-border-width: 1px;
+  --btn-shadow: none;
+  --btn-secondary-bg: #f1f3f5;
+  --btn-secondary-text: var(--color-text);
+  --btn-secondary-border: var(--color-border);
+  --btn-tertiary-decoration: none;
+}
+
+:root[data-cf-buttons="c"] {
+  --btn-height: 40px;
+  --btn-height-sm: 32px;
+  --btn-pad-x: 16px;
+  --btn-pad-x-sm: 12px;
+  --btn-radius: 12px;
+  --btn-border-width: 0px;
+  --btn-shadow: none;
+  --btn-secondary-bg: #eeeef0;
+  --btn-secondary-text: var(--color-text);
+  --btn-secondary-border: transparent;
+  --btn-tertiary-decoration: underline;
+}
+
+/* ui_colours: surfaces, text, accent, canvas and the diagram's status colours */
+:root[data-cf-colours="a"] {
+  --color-bg: #fafafc;
+  --color-surface: #ffffff;
+  --color-sunken: #f5f3fa;
+  --color-border: #e6e3f0;
+  --color-border-strong: #d5ceeb;
+  --color-text: #17151f;
+  --color-text-muted: #5a5670;
+  --color-accent: #5b3df5;
+  --color-accent-hover: #4a2fd6;
+  --color-accent-soft: #efebff;
+  --color-accent-text: #ffffff;
+  --color-canvas: var(--color-bg);
+  --color-grid: #ddd8ec;
+  --color-panel-header: var(--color-surface);
+  --color-selection: var(--color-accent);
+  --color-selection-soft: var(--color-accent-soft);
+  --shadow-card: 0 2px 4px #24164908, 0 8px 24px #24164907;
+  --diagram-added: #21804f;
+  --diagram-removed: #b33443;
+  --diagram-changed: #9d6012;
+  --diagram-context: #817a92;
+  --diagram-added-fill: #ebf4ef;
+  --diagram-removed-fill: #f8edef;
+  --diagram-changed-fill: #f6f0e9;
+  --diagram-added-text: var(--diagram-added);
+  --diagram-removed-text: var(--diagram-removed);
+  --diagram-changed-text: var(--diagram-changed);
+}
+
+:root[data-cf-colours="b"] {
+  --color-bg: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-sunken: #f8fafb;
+  --color-border: #dde2e8;
+  --color-border-strong: #8794a4;
+  --color-text: #111418;
+  --color-text-muted: #4b5563;
+  --color-accent: #1f5fd6;
+  --color-accent-hover: #184cb0;
+  --color-accent-soft: #e8f0fd;
+  --color-accent-text: #ffffff;
+  --color-canvas: var(--color-bg);
+  --color-grid: #dce3ec;
+  --color-panel-header: #f8fafb;
+  --color-selection: var(--color-accent);
+  --color-selection-soft: var(--color-accent-soft);
+  --shadow-card: none;
+  --diagram-added: #32734b;
+  --diagram-removed: #ac4249;
+  --diagram-changed: #a46b21;
+  --diagram-context: #6b7788;
+  --diagram-added-fill: #edf6f0;
+  --diagram-removed-fill: #fcf0f1;
+  --diagram-changed-fill: #fff5e6;
+  --diagram-context-fill: #f1f3f5;
+  --diagram-added-text: #245539;
+  --diagram-removed-text: #8e303a;
+  --diagram-changed-text: #785019;
+}
+
+:root[data-cf-colours="c"] {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-sunken: #eeeef0;
+  --color-border: #e8e8ec;
+  --color-border-strong: #e8e8ec;
+  --color-text: #0e0e10;
+  --color-text-muted: #5c5c66;
+  --color-accent: #0e0e10;
+  --color-accent-hover: #323236;
+  --color-accent-soft: #eeeef0;
+  --color-accent-text: #ffffff;
+  --color-canvas: #f6f6f4;
+  --color-grid: #d9d9d7;
+  --color-panel-header: var(--color-surface);
+  --color-selection: #2f6bff;
+  --color-selection-soft: #edf2ff;
+  --shadow-card: 0 8px 24px rgb(0 0 0 / 8%);
+  --diagram-added: #16a34a;
+  --diagram-removed: #dc2626;
+  --diagram-changed: #d97706;
+  --diagram-context: #9c9a93;
+  --diagram-added-fill: #eaf7ef;
+  --diagram-removed-fill: #fcecec;
+  --diagram-changed-fill: #fcf3e9;
+  --diagram-context-fill: #f4f4f2;
+  --diagram-added-text: #176439;
+  --diagram-removed-text: #9f1e1e;
+  --diagram-changed-text: #85500b;
+}

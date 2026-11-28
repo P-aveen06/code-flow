@@ -9,17 +9,25 @@ const symbol: OverlayNode = {
 };
 
 describe("flow styles", () => {
-  it("uses status colors for symbols, with a dashed border for removals", () => {
-    expect(nodeStyle("added")).toMatchObject({ borderColor: "var(--color-success)", borderStyle: "solid" });
-    expect(nodeStyle("removed")).toMatchObject({ borderColor: "var(--color-danger)", borderStyle: "dashed" });
-    expect(nodeStyle("changed")).toMatchObject({ borderColor: "var(--color-warning)", borderStyle: "solid" });
-    expect(nodeStyle("context")).toMatchObject({ borderColor: "var(--color-text-subtle)", borderStyle: "solid" });
+  it("uses diagram colors and fills for symbols, with a dashed border for removals", () => {
+    expect(nodeStyle("added")).toMatchObject({
+      backgroundColor: "var(--diagram-added-fill)", borderColor: "var(--diagram-added)", borderStyle: "solid",
+    });
+    expect(nodeStyle("removed")).toMatchObject({
+      backgroundColor: "var(--diagram-removed-fill)", borderColor: "var(--diagram-removed)", borderStyle: "dashed",
+    });
+    expect(nodeStyle("changed")).toMatchObject({
+      backgroundColor: "var(--diagram-changed-fill)", borderColor: "var(--diagram-changed)", borderStyle: "solid",
+    });
+    expect(nodeStyle("context")).toMatchObject({
+      backgroundColor: "var(--diagram-context-fill)", borderColor: "var(--diagram-context)", borderStyle: "solid",
+    });
   });
 
-  it("uses status colors for arrows, with a dashed stroke for removals", () => {
-    expect(edgeStyle("added")).toMatchObject({ stroke: "var(--color-success)", strokeDasharray: undefined });
-    expect(edgeStyle("removed")).toMatchObject({ stroke: "var(--color-danger)", strokeDasharray: "6 4" });
-    expect(edgeStyle("context")).toMatchObject({ stroke: "var(--color-text-subtle)", strokeDasharray: undefined });
+  it("uses diagram colors for arrows, with a dashed stroke for removals", () => {
+    expect(edgeStyle("added")).toMatchObject({ stroke: "var(--diagram-added)", strokeDasharray: undefined });
+    expect(edgeStyle("removed")).toMatchObject({ stroke: "var(--diagram-removed)", strokeDasharray: "6 4" });
+    expect(edgeStyle("context")).toMatchObject({ stroke: "var(--diagram-context)", strokeDasharray: undefined });
   });
 
   it("labels guarded calls with the flag and branch", () => {
