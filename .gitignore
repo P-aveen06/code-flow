@@ -17,7 +17,6 @@ dist/
 
 # code-flow output and demo repos
 data/
-examples/shop-demo/
 examples/flagsmith/
 
 # OS / editors

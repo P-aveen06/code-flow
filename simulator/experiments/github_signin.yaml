@@ -1,0 +1,73 @@
+# Journey assumptions for the github_signin experiment. These are hypotheses, not user data.
+# Control url_import keeps the public URL form. Variant github_signin leads with
+# "Sign in with GitHub" and a repo picker, and keeps "or paste a public URL" as a link.
+mode: funnel
+flag: github_signin
+
+# The web app sends the same events (web/src/signinEvents.ts).
+start_event: import_started
+# Sent with the milliseconds from landing to the finished import.
+success_event: import_completed
+# Sent with the milliseconds from landing to the first flow diagram on screen.
+time_event: first_flow_viewed
+# Sent when a visitor who started an import leaves before it completes.
+abandon_event: import_abandoned
+
+# Share of each role who came to look at a private repository (work code).
+# A public URL cannot reach it, so the control mostly loses these visitors.
+private_share:
+  junior_dev: 0.20
+  senior_dev: 0.45
+  pr_reviewer: 0.50
+  solution_architect: 0.60
+  new_joiner: 0.50
+
+# Time from a finished import to the first flow on screen.
+first_flow: {median_ms: 4000, sigma: 0.4}
+
+# Each audience lists routes with the share of visitors who take them. Any share left
+# over leaves without starting. A step sends its events once the visitor gets through
+# it; probability is the chance they do. The step without events is the analysis run.
+# Times are lognormal: median_ms with sigma on the log scale (default 0.5).
+variants:
+  url_import:
+    control: true
+    allocation: 50
+    public:
+      - share: 0.85
+        steps:
+          - {events: [import_started], median_ms: 9000}
+          - {probability: 0.94, median_ms: 30000, sigma: 0.4}
+    private:
+      # They paste the private URL, get "no access", and a few pick a public repo instead.
+      - share: 0.60
+        steps:
+          - {events: [import_started], median_ms: 12000}
+          - {probability: 0.25, median_ms: 30000, sigma: 0.4}
+  github_signin:
+    allocation: 50
+    public:
+      - share: 0.70
+        steps:
+          - {events: [import_started, signin_started], median_ms: 6000}
+          - {events: [signin_completed], probability: 0.88, median_ms: 15000}
+          - {events: [app_installed], probability: 0.85, median_ms: 25000}
+          - {events: [repo_selected], probability: 0.95, median_ms: 8000}
+          - {probability: 0.94, median_ms: 30000, sigma: 0.4}
+      # Someone else's public repo is not in the picker, so they paste its URL.
+      - share: 0.15
+        steps:
+          - {events: [import_started], median_ms: 10000}
+          - {probability: 0.94, median_ms: 30000, sigma: 0.4}
+    private:
+      - share: 0.85
+        steps:
+          - {events: [import_started, signin_started], median_ms: 5000}
+          - {events: [signin_completed], probability: 0.92, median_ms: 15000}
+          - {events: [app_installed], probability: 0.90, median_ms: 25000}
+          - {events: [repo_selected], probability: 0.97, median_ms: 8000}
+          - {probability: 0.94, median_ms: 30000, sigma: 0.4}
+      - share: 0.05
+        steps:
+          - {events: [import_started], median_ms: 12000}
+          - {probability: 0.25, median_ms: 30000, sigma: 0.4}

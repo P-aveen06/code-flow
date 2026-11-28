@@ -1,0 +1,47 @@
+# Behaviour assumptions for the flow_view experiment.
+flag: flow_view
+success_event: diff_understood
+failure_event: diff_confusing
+
+# Keys are Flagsmith variant values. Allocations here are for dry runs.
+variants:
+  side_by_side:
+    control: true
+    allocation: 34
+    success_probability: 0.55
+    median_ms: 48000
+    sigma: 0.5
+  overlay:
+    allocation: 33
+    success_probability: 0.66
+    median_ms: 36000
+    sigma: 0.5
+  overlay_summary:
+    allocation: 33
+    success_probability: 0.72
+    median_ms: 30000
+    sigma: 0.5
+
+# Size is the number of added, removed, or changed nodes in a real flow diff.
+size_effects:
+  # Subtract this from the base probability per ln(1 + size) and floor at zero.
+  success_penalty: 0.04
+  # Multiply the median by 1.06 for every changed function (1.06 ** size).
+  time_increase: 0.06
+
+# Variant interactions apply only in the hypothesis model.
+persona_interactions:
+  overlay:
+    reading_style:
+      visual: {probability_delta: 0.012, time_multiplier: 0.98}
+  overlay_summary:
+    reading_style:
+      visual: {probability_delta: 0.012, time_multiplier: 0.98}
+      textual: {probability_delta: 0.016, time_multiplier: 0.97}
+
+# Shared base probability and lognormal parameters for all three variants.
+# Sigma is the standard deviation on the log scale.
+"null":
+  success_probability: 0.66
+  median_ms: 36000
+  sigma: 0.5

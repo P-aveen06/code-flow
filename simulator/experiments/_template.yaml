@@ -1,0 +1,44 @@
+# These are assumptions, not user data. Copy to <experiment-name>.yaml and edit.
+flag: example_feature
+success_event: example_completed
+failure_event: example_abandoned
+
+# Optional. Sample only long flows or omit the time value from failure events.
+# long_flows_only: true
+# record_failure_time: false
+
+# Use the flag's exact string values and mark exactly one as the control.
+# Allocations are whole percentages for offline runs. Set the live split in Flagsmith.
+# The time model is lognormal. Sigma is the standard deviation on the log scale.
+variants:
+  baseline:
+    control: true
+    allocation: 50
+    success_probability: 0.60
+    median_ms: 40000
+    sigma: 0.5
+  treatment:
+    allocation: 50
+    success_probability: 0.65
+    median_ms: 36000
+    sigma: 0.5
+    # Optional assumption for each call layer above the long-flow threshold.
+    # per_extra_layer: {probability_delta: 0.005, time_multiplier: 0.985}
+
+# Set both to zero if diff size is irrelevant to the outcome.
+size_effects:
+  success_penalty: 0.0  # Subtracted from probability per ln(1 + diff size).
+  time_increase: 0.0    # Increases median by this fraction per changed node.
+
+# Optional. Add effects by variant, then role, codebase_familiarity or reading_style.
+# Base effects come from simulator/personas.yaml.
+# persona_interactions:
+#   treatment:
+#     reading_style:
+#       visual: {probability_delta: 0.02, time_multiplier: 0.95}
+
+# Equal assumptions across variants, with shared persona and diff-size effects.
+"null":
+  success_probability: 0.60
+  median_ms: 40000
+  sigma: 0.5
