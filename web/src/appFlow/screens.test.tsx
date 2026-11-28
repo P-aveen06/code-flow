@@ -116,7 +116,8 @@ describe("branch switch screen", () => {
   it("shows the flow's own trigger for a flow", async () => {
     await show(<BranchSwitchScreen repoId="repo" currentBranch="main" />, appState({ branch_switch: "b" }));
     expect(container.querySelector("a")).toBeNull();
-    expect(container.querySelector("button")?.textContent).toBe("Switch branch");
+    // Each flow's trigger is a button that shows the current branch.
+    expect(container.querySelector("button")?.textContent).toContain("main");
   });
 });
 

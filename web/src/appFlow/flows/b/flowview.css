@@ -1,0 +1,905 @@
+/* Flow B "Workbench": the flow view and the branch switch. Layout only. Every colour, font, weight,
+   line height, shadow and button size reads a token (docs/APP_FLOW_BUILD.md, "Token vocabulary"). */
+
+/* The screen fills the window. The top bar and the commit bar sit above the body, and each panel
+   scrolls inside itself, so the page does not scroll at 1440 x 900. */
+.fb-flowview {
+  --fb-commits-width: 300px;
+  --fb-inspector-width: 280px;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+/* The flow view's top bar is 48 px in the design. The kit header is 64 px for the other screens. */
+.fb-flowview > .fb-header { height: 48px; }
+
+.fb-flowview__message {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: var(--space-5);
+  text-align: center;
+}
+
+/* Top bar: repo / subfolder / branch */
+
+.fb-flowview__crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__divider {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin-inline: var(--space-1);
+  background: var(--color-border);
+}
+
+.fb-flowview__repo {
+  color: var(--color-text);
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+  white-space: nowrap;
+}
+
+.fb-flowview__crumbs code {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+}
+
+.fb-flowview__account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+}
+
+/* Commit bar: the title and its meta, then the neighbours control and Check for new commits */
+
+.fb-flowview__commitbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex: none;
+  height: 60px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fb-flowview__commit {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fb-flowview__commit h1 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-flowview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__meta code { font-family: var(--font-mono); }
+
+.fb-flowview__counts { color: var(--color-text); }
+
+.fb-flowview__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+}
+
+.fb-flowview__neighbours {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-sunken);
+}
+
+.fb-flowview__segment[aria-pressed="true"] {
+  background: var(--color-selection-soft);
+  color: var(--color-accent-hover);
+}
+
+.fb-flowview__refresh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+/* Body: the commits panel, the centre workspace and the inspector */
+
+.fb-flowview__body {
+  display: grid;
+  grid-template-columns: var(--fb-commits-width) minmax(0, 1fr) var(--fb-inspector-width);
+  flex: 1;
+  min-height: 0;
+}
+
+/* Commits panel */
+
+.fb-flowview__commits {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* The branch switch in the sidebar: the same control as the header's, full width under the title. */
+.fb-flowview__commits-branch {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.fb-flowview__commits-branch .fb-branch,
+.fb-flowview__commits-branch .fb-branch__trigger {
+  width: 100%;
+  max-width: none;
+}
+
+.fb-flowview__commits-branch .fb-branch__trigger {
+  justify-content: space-between;
+}
+
+.fb-flowview__commits-branch .fb-branch__trigger code {
+  flex: 1;
+  text-align: start;
+}
+
+.fb-flowview__commits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-header);
+}
+
+.fb-flowview__commits-head h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-flowview__count {
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__filter label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.fb-flowview__filter input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.fb-flowview__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.fb-flowview__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  height: 37px;
+  padding: 0 var(--space-2) 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: var(--text-small);
+  text-decoration: none;
+}
+
+.fb-flowview__row:hover { background: var(--color-sunken); }
+
+/* The 3 px rail is an inset shadow, so the rows without it keep the same text position. */
+.fb-flowview__row--selected,
+.fb-flowview__row--selected:hover {
+  box-shadow: inset 3px 0 0 var(--color-selection);
+  background: var(--color-selection-soft);
+}
+
+.fb-flowview__sha {
+  flex: none;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-label);
+}
+
+.fb-flowview__row--selected .fb-flowview__sha { color: var(--color-accent-hover); }
+
+.fb-flowview__subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-flowview__badges {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.fb-flowview__badge {
+  min-width: 22px;
+  padding: 1px 2px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  text-align: center;
+}
+
+.fb-flowview__badge--added { background: var(--diagram-added-fill); color: var(--diagram-added-text); }
+.fb-flowview__badge--removed { background: var(--diagram-removed-fill); color: var(--diagram-removed-text); }
+.fb-flowview__badge--changed { background: var(--diagram-changed-fill); color: var(--diagram-changed-text); }
+.fb-flowview__badge--zero { background: var(--diagram-context-fill); color: var(--color-text-muted); }
+
+.fb-flowview__keys {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview kbd {
+  min-width: 16px;
+  padding: 0 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  text-align: center;
+}
+
+.fb-flowview__empty {
+  margin: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+/* Centre workspace: the flow, the divider and the source dock. The divider writes --source-height. */
+
+.fb-flowview__workspace {
+  display: grid;
+  grid-template-areas: "flow" "divider" "code";
+  grid-template-rows: minmax(0, 1fr) var(--space-3) var(--source-height, 30%);
+  min-width: 0;
+  min-height: 0;
+}
+
+.fb-flowview__workspace--collapsed {
+  grid-template-areas: "flow" "code";
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.fb-flowview__flow {
+  display: flex;
+  flex-direction: column;
+  grid-area: flow;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-surface);
+}
+
+/* Full screen without the browser's own mode: the flow fills the window. */
+.fb-flowview__flow--maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--color-bg);
+}
+
+.fb-flowview__flow:fullscreen { background: var(--color-bg); }
+
+body:has(.fb-flowview__flow--maximized) { overflow: hidden; }
+
+.fb-flowview__canvas {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fb-flowview__comparison {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Today's diagram asks for a 420 px minimum height. The centre of a 900 px window cannot give that. */
+.fb-flowview .flow-canvas { min-height: 0; }
+
+.fb-flowview__notice {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  min-height: 0;
+  padding: var(--space-5);
+}
+
+.fb-flowview__card {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.fb-flowview__card h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-flowview__card p { margin: 0; }
+
+/* The guide strip */
+
+.fb-flowview__guide {
+  display: grid;
+  flex: none;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__guide-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-flowview__guide h3 {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fb-flowview__guide p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-flowview__guide-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.fb-flowview__guide ul {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.fb-flowview__guide li + li { margin-top: var(--space-1); }
+
+/* Toolbar under the diagram: the legend, then the context and guide controls */
+
+.fb-flowview__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-sunken);
+}
+
+.fb-flowview__toolbar .flow-legend {
+  padding: 0;
+  border-top: 0;
+}
+
+.fb-flowview__toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+}
+
+/* Source dock: the tabs over today's source pane */
+
+.fb-flowview__dock {
+  display: flex;
+  flex-direction: column;
+  grid-area: code;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-surface);
+}
+
+.fb-flowview__dock .fb-tabs {
+  height: 43px;
+  padding: 0 var(--space-2);
+}
+
+.fb-flowview__dock .panel-heading {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* The Source tab already names this pane, so the pane's own title is read by assistive technology only. */
+.fb-flowview__dock .panel-heading h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.fb-flowview__functions {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Inspector: the review question, the previews and This review */
+
+.fb-flowview__inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-sunken);
+}
+
+.fb-flowview__inspector .panel-heading {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+}
+
+.fb-flowview__inspector .flagsmith-panel {
+  flex: none;
+  border-left: 0;
+  background: none;
+}
+
+/* The shared panels contain their size from 1200 px, which needs a grid area to give them a height.
+   Here they sit in flexible columns, so they take the height of their content, and the source body scrolls. */
+.fb-flowview .flagsmith-panel,
+.fb-flowview .code-pane__body {
+  contain: none;
+}
+
+.fb-flowview__dock > .code-pane {
+  flex: 1;
+  min-height: 0;
+  border-top: 0;
+}
+
+.fb-flowview .code-pane__body {
+  overflow: auto;
+}
+
+.fb-flowview__review {
+  display: grid;
+  flex: none;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fb-flowview__review h2 {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-flowview__answers {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fb-flowview__answer {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.fb-flowview__thanks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--btn-height);
+  margin: 0;
+  padding: 0 var(--space-2);
+  border-radius: 4px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+  font-weight: var(--weight-label);
+}
+
+.fb-flowview__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-flowview__previews {
+  display: grid;
+  flex: none;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* Branch switch: the trigger in the top bar, and the 416 px dropdown under it */
+
+.fb-branch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-branch__trigger {
+  max-width: 260px;
+  min-width: 0;
+}
+
+.fb-branch__trigger code {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-branch__busy {
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  white-space: nowrap;
+}
+
+.fb-branch__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 416px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 80px);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+}
+
+.fb-branch__panel:focus { outline: none; }
+
+.fb-branch__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 44px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel-header);
+}
+
+.fb-branch__head h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-branch__list {
+  display: grid;
+  flex: none;
+  gap: 3px;
+  max-height: 240px;
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  list-style: none;
+}
+
+.fb-branch__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text);
+  font-size: var(--text-small);
+  text-align: start;
+  cursor: pointer;
+}
+
+.fb-branch__row:hover { background: var(--color-sunken); }
+
+.fb-branch__row[aria-current="true"] { background: var(--color-accent-soft); }
+
+.fb-branch__row[aria-pressed="true"] {
+  background: var(--color-selection-soft);
+  box-shadow: inset 3px 0 0 var(--color-selection);
+}
+
+.fb-branch__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fb-branch__name code {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-branch__chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--diagram-context-fill);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+}
+
+.fb-branch__chip--analyzed {
+  border-color: var(--color-accent-soft);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+}
+
+.fb-branch__status,
+.fb-branch__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fb-branch__status { padding: var(--space-3) var(--space-4); }
+
+.fb-branch__error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-small);
+}
+
+.fb-branch__preview {
+  display: grid;
+  flex: none;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-sunken);
+}
+
+.fb-branch__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.fb-branch__title h3 {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fb-branch__title code {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+
+.fb-branch__commits {
+  display: grid;
+  max-height: 180px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  list-style: none;
+  font-size: var(--text-small);
+}
+
+.fb-branch__commits li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.fb-branch__commits li:last-child { border-bottom: 0; }
+
+.fb-branch__commits code {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.fb-branch__commits span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-branch__commits time {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.fb-branch__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fb-branch__preview .fb-status {
+  padding: var(--space-3);
+  border-radius: 4px;
+}
+
+.fb-branch__progress {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fb-branch__progress span { font-weight: var(--weight-label); }
+
+/* Narrower desktop windows: the side panels give up some width. */
+@media (width < 1280px) {
+  .fb-flowview {
+    --fb-commits-width: 260px;
+    --fb-inspector-width: 240px;
+  }
+}
