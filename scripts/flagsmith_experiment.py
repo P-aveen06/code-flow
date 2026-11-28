@@ -428,7 +428,8 @@ def show_metric(
             missing_treatments.append(label)
         display_name = f"{label} (control)" if label == control else label
         rows.append((display_name, f"{exposures:,}", outcome, lift, interval, win))
-    outcome_title = "Conversions / rate" if occurrence else "Mean ms / exposure"
+    unit = "ms " if "(ms)" in name else ""
+    outcome_title = "Conversions / rate" if occurrence else f"Mean {unit}/ exposure"
     print_table(
         (
             "Variant",
