@@ -234,10 +234,10 @@ on the selected environment's `variant_preview` flag, which is off in
 Production. [Flagsmith SDK API](https://docs.flagsmith.com/integrating-with-flagsmith/flagsmith-api-overview) · [Self-hosted events](https://docs.flagsmith.com/experimentation/self-hosting)
 
 The current Flagsmith project has no repo flags, so the Flagsmith/flagsmith
-checks appear as **orphan** once connected with `flagsmith_mode` on. To see
-live, off, or stale findings and live-path highlighting, create a flag with
-the exact name of a detected check and tag it `repo:flagsmith-api`. Rerun
-`make flagsmith-setup` to refresh the scope file.
+checks appear as **orphan** once connected with both `flagsmith_mode` and
+`live_flag_panel` on. To see live, off, or stale findings and live-path
+highlighting, create a flag with the exact name of a detected check and tag it
+`repo:flagsmith-api`. Rerun `make flagsmith-setup` to refresh the scope file.
 
 Upload the refreshed scope JSON as a Render secret file named
 `flagsmith_scopes.json` and set `CODEFLOW_FLAGSMITH_SCOPES_PATH` to

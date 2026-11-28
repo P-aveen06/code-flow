@@ -15,6 +15,7 @@ interface FlagsmithPanelProps extends FlagFindingsProps {
   view: { value: string; source: string };
   direction: { value: string; source: string };
   enabled: boolean;
+  showFindings: boolean;
 }
 
 const groupDescriptions = {
@@ -22,7 +23,7 @@ const groupDescriptions = {
   unused: "In Flagsmith with no checks in this commit",
 };
 
-export function FlagsmithPanel({ view, direction, enabled, ...findings }: FlagsmithPanelProps) {
+export function FlagsmithPanel({ view, direction, enabled, showFindings, ...findings }: FlagsmithPanelProps) {
   return (
     <section className="flagsmith-panel" aria-labelledby="flagsmith-title">
       <div className="panel-heading"><h2 id="flagsmith-title">Flagsmith</h2></div>
@@ -36,9 +37,9 @@ export function FlagsmithPanel({ view, direction, enabled, ...findings }: Flagsm
             <dd>{direction.value}<small>{direction.source}</small></dd>
           </dl>
         </div>
-        {enabled ? <FlagFindings {...findings} /> : (
+        {showFindings && (enabled ? <FlagFindings {...findings} /> : (
           <p className="flagsmith-panel__findings muted">Flag checks are off (flagsmith_mode)</p>
-        )}
+        ))}
       </div>
     </section>
   );

@@ -10,7 +10,8 @@ vi.mock("../config", () => ({ apiUrl: "https://flow.test" }));
 vi.mock("../flags", async (importOriginal) => ({
   ...await importOriginal<typeof import("../flags")>(),
   useCodeFlowFlags: () => ({
-    ready: true, flowView: "overlay", flagsmithMode: false, variantPreview: false, reviewerId: "demo",
+    ready: true, flowView: "overlay", flagsmithMode: false, liveFlagPanel: false,
+    variantPreview: false, reviewerId: "demo",
     viewOverride: null, directionOverride: null,
   }),
 }));

@@ -134,7 +134,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
   const { name, subdir, url, hasNodes, commits } = review;
   const {
     flowView: view, reviewerId, viewOverride, directionOverride, variantPreview, flagsmithMode,
-    ready: flagsReady, assignedView, reviewEventClient, directionFlag,
+    liveFlagPanel, ready: flagsReady, assignedView, reviewEventClient, directionFlag,
   } = useCodeFlowFlags(search);
   const selected = resolveCommit(commits, new URLSearchParams(search).get("commit"));
   const head = selected?.sha;
@@ -148,7 +148,8 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
   const [flagSelection, setFlagSelection] = useState<{
     head: string | undefined; finding: FlagFinding;
   }>();
-  const selectedFlag = flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
+  const selectedFlag = liveFlagPanel
+    && flags?.flags.some((flag) => flag.name === flagSelection?.finding.name)
     && flagSelection?.head === head ? flagSelection?.finding : undefined;
   const checkIds = useMemo(() => selectedFlag?.checks.map((check) => check.function), [selectedFlag]);
   const [hops, setHops] = useState<Hops>(1);
@@ -442,6 +443,7 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
           view={{ value: flowViewLabels[view], source: viewSource }}
           direction={{ value: flowDirectionLabels[direction], source: directionSource }}
           enabled={flagsmithMode}
+          showFindings={liveFlagPanel}
           data={flags}
           error={findings.status === "error" ? findings.message : undefined}
           loading={Boolean(head) && findings.status === "loading"}

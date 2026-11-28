@@ -644,6 +644,7 @@ def setup(
         BRANCH_COMMIT_COUNT_FLAG,
         Flag("flagsmith_mode", True),
         Flag("ai_summary", False),
+        Flag("live_flag_panel", False),
         Flag(VARIANT_PREVIEW, not app_environment),
     ]
     scope_file = scope_file.resolve()
