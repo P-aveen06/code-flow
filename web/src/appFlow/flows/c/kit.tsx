@@ -19,10 +19,13 @@ export type IconName =
   | "plus"
   | "search"
   | "info"
-  | "commit";
+  | "commit"
+  | "chevron-right"
+  | "help"
+  | "refresh";
 
-// Stroke paths on a 24 x 24 grid, copied from the flow C designs. search and commit are not in
-// the designs, so they use the same stroke style.
+// Stroke paths on a 24 x 24 grid, copied from the flow C designs. search, commit, help and refresh
+// are not in the designs, so they use the same stroke style.
 const ICON_PATHS: Record<IconName, readonly string[]> = {
   github: ["M9 19c-4 1.2-4-2-5.5-2.5M15 22v-3a2.6 2.6 0 0 0-.7-2c2.5-.3 5.2-1.2 5.2-5.6 0-1.2-.4-2.2-1.2-3 .1-.3.5-1.4-.1-3-1 0-2.5.6-3.2 1.1a13 13 0 0 0-6 0c-.7-.5-2.2-1.1-3.2-1.1-.6 1.6-.2 2.7-.1 3-.8.8-1.2 1.8-1.2 3 0 4.4 2.7 5.3 5.2 5.6-.5.5-.7 1.2-.7 2v3"],
   "arrow-right": ["M4 12h15m-6-6 6 6-6 6"],
@@ -36,6 +39,9 @@ const ICON_PATHS: Record<IconName, readonly string[]> = {
   search: ["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z", "m20 20-4-4"],
   info: ["M12 11v5m0-8h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
   commit: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M3 12h5m8 0h5"],
+  "chevron-right": ["m9 6 6 6-6 6"],
+  help: ["M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6", "M12 17h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
+  refresh: ["M20 12a8 8 0 1 1-2.3-5.6", "M20 4v5h-5"],
 };
 
 /** A decorative stroke icon. Name it with the text or aria-label next to it. */
