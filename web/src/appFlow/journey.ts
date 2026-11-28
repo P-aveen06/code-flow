@@ -141,9 +141,8 @@ export function recordReviewAnswer(
 ): void {
   const journey = readJourney(store);
   if (!journey) return;
-  const afterOutcome = sendOnce(journey, client, outcome, ms);
-  // Moves go out with every answer, so each flow view reports its own moves.
-  if (afterOutcome.exposed) sendEvent(afterOutcome, client, "diagram_moves", afterOutcome.diagramMoves);
+  // Moves go out once, with the first answer, like the answer events themselves.
+  const afterOutcome = sendOnce(sendOnce(journey, client, outcome, ms), client, "diagram_moves", journey.diagramMoves);
   // The first understood answer decides which repo a later branch switch has to match.
   const understoodRepo = afterOutcome.understoodRepo ?? (outcome === "diff_understood" ? repoId : null);
   saveJourney({ ...afterOutcome, diagramMoves: 0, understoodRepo }, store);
@@ -185,6 +184,16 @@ function repoFamily(repoId: string): string {
   return repoId.split("@")[0];
 }
 
+// signinEvents.markRedirecting sets this flag on its own journey before a GitHub round trip.
+function leavingForGitHub(store = storage()): boolean {
+  try {
+    const signin = store?.getItem("code-flow:signin-journey");
+    return Boolean(signin && (JSON.parse(signin) as { redirecting?: boolean }).redirecting);
+  } catch {
+    return false;
+  }
+}
+
 let removeListeners: (() => void) | null = null;
 
 /** Install the click listener and the pagehide handler once, from main.tsx. Returns a cleanup. */
@@ -193,7 +202,8 @@ export function installJourneyTracking(): () => void {
   const onClick = (event: MouseEvent) => recordClick(event.target);
   const onPageHide = () => {
     const journey = readJourney();
-    if (!journey || journey.completed) return;
+    // Leaving for GitHub's sign-in or install page is part of the journey, not the end of it.
+    if (!journey || journey.completed || leavingForGitHub()) return;
     saveJourney(sendOnce(journey, flagsmith, "dead_clicks", journey.deadClicks));
     void flagsmith.flushEvents?.();
   };

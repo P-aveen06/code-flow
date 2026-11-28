@@ -235,17 +235,17 @@ Each event name is sent at most once per journey. The journey lives in `sessionS
 |---|---|---|
 | `signin_completed`, `repo_selected`, `import_completed`, `first_flow_viewed`, `import_abandoned` | as today (`signinEvents.trackSignin` forwards them via `forwardJourneyEvent`) | as today |
 | `diff_understood` / `diff_confusing` | review answered (also sent today for `flow_view` visitors; never twice) | ms to answer |
-| `diagram_moves` | with the review answer | user pans + zooms + node drags since the diagram showed |
+| `diagram_moves` | with the first review answer | user pans + zooms + node drags on that flow view before the answer |
 | `branch_switched` | flow view of a second branch of the same repo opens, after an "understood" answer | ms since the branch switch opened (0 if unknown) |
 | `journey_completed` (main metric) | same moment as `branch_switched` | ms since landing |
 | `journey_clicks` | with `journey_completed` | clicks since landing |
-| `dead_clicks` | with `journey_completed`, or on `pagehide` if not completed | clicks on things that do not respond |
+| `dead_clicks` | with `journey_completed`, or on `pagehide` if not completed (not while leaving for GitHub's sign-in or install page) | clicks on things that do not respond |
 
 - "Same repo, second branch": import ids look like `owner__name`, `owner__name@feature~x`,
   `p_<uid>__owner__name@x`; the family is the part before `@`. Completed when the family matches the
   understood import's family and the id differs.
 - Dead click: a click whose target has no ancestor among `a, button, input, select, textarea, label,
-  summary, [role=button], [role=tab], [role=option], [tabindex], .react-flow` and no text selection.
+  summary, [role=button], [role=tab], [role=option], [role=menuitem], [tabindex], .react-flow` and no text selection.
 - Diagram moves: `onMoveEnd` with a real event (user pan/zoom) and `onNodeDragStop` in `FlowCanvas`.
 
 ## Build order

@@ -133,7 +133,7 @@ describe("clicks", () => {
 });
 
 describe("diagram moves", () => {
-  it("sends each flow view's moves with its review answer, counting from zero on each view", () => {
+  it("sends the moves once, with the first answer, counting from the flow view it was given on", () => {
     const store = memoryStorage();
     const client = { trackEvent: vi.fn() };
     beginAppFlowJourney("reviewer-1", "a", true, 0, store);
@@ -149,8 +149,21 @@ describe("diagram moves", () => {
       ["diff_confusing", { identifier: "reviewer-1", value: 500, metadata: { flow: "a" } }],
       ["diagram_moves", { identifier: "reviewer-1", value: 2, metadata: { flow: "a" } }],
       ["diff_understood", { identifier: "reviewer-1", value: 300, metadata: { flow: "a" } }],
-      ["diagram_moves", { identifier: "reviewer-1", value: 1, metadata: { flow: "a" } }],
     ]);
+  });
+});
+
+describe("leaving the page", () => {
+  it("does not send dead clicks while leaving for GitHub", () => {
+    sessionStorage.clear();
+    flagsmith.trackEvent.mockClear();
+    beginAppFlowJourney("reviewer-1", "a", true, 0);
+    sessionStorage.setItem("code-flow:signin-journey", JSON.stringify({ redirecting: true }));
+    const cleanup = installJourneyTracking();
+    window.dispatchEvent(new Event("pagehide"));
+    cleanup();
+    expect(flagsmith.trackEvent).not.toHaveBeenCalledWith("dead_clicks", expect.anything());
+    sessionStorage.clear();
   });
 });
 
