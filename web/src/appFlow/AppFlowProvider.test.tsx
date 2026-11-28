@@ -163,6 +163,15 @@ describe("exposure", () => {
     expect(experiment.mock.calls.map(([name]) => name)).toEqual(["app_flow", "ui_colours"]);
   });
 
+  it("exposes a stacking-round visitor through the ui experiment alone", async () => {
+    // The app_flow round is completed, so app_flow is a plain split with no experiment.
+    experiment.mockImplementation((name) => (name === "app_flow" ? flag(true, "b") : flag(true, "a", true)));
+    snapshot.current = answered({ appFlow: flag(true, "b"), ui: { colours: flag(true, "a", true) } });
+    const state = await renderApp(nextVisitor(), "/");
+    expect(state).toMatchObject({ ready: true, flow: "b", exposed: true });
+    expect(experiment.mock.calls.map(([name]) => name)).toEqual(["app_flow", "ui_colours"]);
+  });
+
   it("records no ui experiment while app_flow is off", async () => {
     snapshot.current = answered({ ui: { colours: flag(true, "a", true) } });
     const state = await renderApp(nextVisitor(), "/");

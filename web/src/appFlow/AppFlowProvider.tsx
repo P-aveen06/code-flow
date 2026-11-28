@@ -78,12 +78,16 @@ export function AppFlowProvider({ search, children }: { search: string; children
 
   useEffect(() => {
     if (!exposeAppFlow) return;
-    const exposed = recordExposure(
+    let exposed = recordExposure(
       reviewerId, APP_FLOW_FLAG, exposures, () => flagsmith.getExperimentFlag(APP_FLOW_FLAG),
     );
     for (const name of exposeSwitches) {
       const flagName = switchFlagName(name);
-      recordExposure(reviewerId, flagName, exposures, () => flagsmith.getExperimentFlag(flagName));
+      // A stacking round runs after the app_flow round is completed, so its ui experiment
+      // exposes the visitor on its own.
+      if (recordExposure(reviewerId, flagName, exposures, () => flagsmith.getExperimentFlag(flagName))) {
+        exposed = true;
+      }
     }
     setExposure((current) => (
       current?.reviewerId === reviewerId && current.exposed === exposed ? current : { reviewerId, exposed }

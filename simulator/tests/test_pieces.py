@@ -227,6 +227,30 @@ def test_only_exposed_visitors_send_events(app_flow: PiecesExperiment, personas)
     assert sum(stats.visitors for stats in summary.values()) == 20
 
 
+class StackingRound(DryRunPiecesClient):
+    """app_flow is a plain split after its round is completed; only ui_colours is an experiment."""
+
+    def _flag(self, name, identifier):
+        flag = super()._flag(name, identifier)
+        if name == APP_FLOW:
+            return Flag(enabled=True, value=flag.value, feature_id=1, feature_name=name)
+        return flag
+
+
+def test_a_stacking_round_exposes_visitors_through_its_ui_experiment(
+    app_flow: PiecesExperiment, personas
+) -> None:
+    panel = generate_panel(personas, n=30, prefix="stack", seed=3)
+    client = StackingRound(dry_run_flags(app_flow, {"ui_colours": "split"}))
+    summary = run_pieces(
+        client, app_flow, reviewers=panel, model_name="hypothesis", rate=None, seed=5
+    )
+    exposures = [identifier for event, identifier, _ in client.events if event == "$flag_exposure"]
+    assert sorted(exposures) == sorted(panel)
+    assert {identifier for event, identifier, _ in client.events if event != "$flag_exposure"}
+    assert sum(stats.visitors for stats in summary.values()) == 30
+
+
 def test_every_visitor_is_exposed_to_app_flow_once(app_flow: PiecesExperiment, personas) -> None:
     panel = generate_panel(personas, n=60, prefix="expo", seed=4)
     client = DryRunPiecesClient(dry_run_flags(app_flow, {}))

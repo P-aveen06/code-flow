@@ -297,11 +297,18 @@ python3 scripts/flagsmith_experiment.py --experiment app_flow --round "round 2" 
 # ... refresh, status, rollout --variant a as above
 
 # Stacking: split one switch 34/33/33 as its own experiment, then pin the winner.
-python3 scripts/flagsmith_app_flow.py set ui_branch_switch=split
+# Complete the app_flow round first (rollout --variant a), then put its split back.
+python3 scripts/flagsmith_app_flow.py set app_flow=split ui_branch_switch=split
 python3 scripts/flagsmith_experiment.py --experiment ui_branch_switch --round "round 14" create
-# ... simulate, refresh, status, then rollout --variant <winner> and
+(cd simulator && uv run python simulate.py --experiment app_flow --panel generated --prefix sim-stack-14 --n 1000)
+# ... refresh, status, then rollout --variant <winner> and
 python3 scripts/flagsmith_app_flow.py set ui_branch_switch=<winner>
 ```
+
+A stacking round runs while no app_flow experiment does, so its ui experiment exposes each visitor
+on its own (in the app and in the simulator). Give every round fresh identities
+(`--panel generated --prefix <round>`): Flagsmith counts an identity's events in every experiment
+that identity is in, so reusing reviewers mixes rounds.
 
 Completing a round with `rollout --variant a` only closes it (Flagsmith serves the control to
 everyone until the next `set app_flow=split`). The round order and the tie rule are in the
