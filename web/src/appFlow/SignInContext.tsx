@@ -65,7 +65,8 @@ export function SignInProvider({ piece, ready, children }: {
   const [failed, setFailed] = useState(() => readFailedSignIn(window.location.search));
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const panelFocusPending = useRef(false);
+  // The element to focus once the landing page has rendered it (after start() navigated there).
+  const focusPending = useRef<string | null>(null);
 
   const openModal = useCallback((message?: string | null) => {
     setError(message ?? null);
@@ -75,21 +76,24 @@ export function SignInProvider({ piece, ready, children }: {
   const closeModal = useCallback(() => setModalOpen(false), []);
 
   const start = useCallback(() => {
+    // Today's #import section and B's panel live on the landing page: go there first if needed.
+    const focusOnLanding = (id: string) => {
+      if (document.getElementById(id)) {
+        focusElement(id);
+      } else {
+        focusPending.current = id;
+        navigate("/");
+      }
+    };
     switch (piece) {
       case "today":
-        focusElement("import");
+        focusOnLanding("import");
         return;
       case "a":
         navigate("/signin");
         return;
       case "b":
-        if (document.getElementById("signin-panel")) {
-          focusElement("signin-panel");
-        } else {
-          // The panel is on the landing page: go there, then focus it once it renders.
-          panelFocusPending.current = true;
-          navigate("/");
-        }
+        focusOnLanding("signin-panel");
         return;
       case "c":
         openModal();
@@ -111,9 +115,10 @@ export function SignInProvider({ piece, ready, children }: {
   }, [ready, piece, failed]);
 
   useEffect(() => {
-    if (!panelFocusPending.current || !document.getElementById("signin-panel")) return;
-    panelFocusPending.current = false;
-    focusElement("signin-panel");
+    const id = focusPending.current;
+    if (id === null || !document.getElementById(id)) return;
+    focusPending.current = null;
+    focusElement(id);
   });
 
   const value: SignInState = { piece, start, modalOpen, openModal, closeModal, error };

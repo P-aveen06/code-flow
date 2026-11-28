@@ -1,0 +1,522 @@
+/* Flow A repos page (step 2 of 4), repo details (step 3 of 4) and its analyzing state (A4b).
+   Layout and sizes only: every colour, font, weight, line height and shadow reads a token
+   (docs/APP_FLOW_BUILD.md, "Token vocabulary"). Headings and the page column come from the kit. */
+
+.fa-hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-section-title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-section-title--large {
+  font-size: var(--text-h2);
+}
+
+/* Repos page */
+
+/* The kit draws the line after a done step in accent. The designs keep every line grey. */
+.fa-repos .fa-stepper__step--done:not(:last-child)::after,
+.fa-repo-details__page .fa-stepper__step--done:not(:last-child)::after {
+  background: var(--color-border-strong);
+}
+
+/* 720 px on desktop; below that the column keeps a 16 px gutter on each side. */
+.fa-page.fa-repos,
+.fa-page.fa-repo-details__page {
+  max-width: calc(100% - 32px);
+  align-content: start;
+}
+
+.fa-repos__head {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fa-repos__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fa-repos__lead {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.fa-repos__body {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.fa-repos__panel {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.fa-repos__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fa-repos__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-repos__body .btn.fa-repos__more {
+  justify-self: start;
+}
+
+.fa-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fa-account__login {
+  font-weight: var(--weight-label);
+}
+
+.fa-repo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.fa-repo-row:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.fa-repo-row__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-repo-row__body {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fa-repo-row__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fa-repo-row__title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  overflow-wrap: anywhere;
+}
+
+.fa-repo-row__meta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-repo-row__go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* Repo details: the page, the branch card and the commits */
+
+.fa-repo-details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fa-page.fa-repo-details__page {
+  flex: 1 0 auto;
+  gap: var(--space-4);
+  padding-top: var(--space-5);
+}
+
+.fa-repo-details__head {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fa-repo-details__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn.fa-repo-details__back {
+  justify-self: start;
+  padding-inline: 0;
+}
+
+.fa-card.fa-repo-details__card {
+  display: grid;
+  gap: 20px;
+  padding: 20px 24px;
+}
+
+.fa-repo-details__section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fa-branches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.fa-branch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.fa-branch:hover {
+  border-color: var(--color-accent);
+}
+
+.fa-branch:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.fa-branch--selected {
+  background: var(--color-accent-soft);
+}
+
+.fa-branch input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.fa-branch__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: var(--text-mono);
+}
+
+.fa-commits {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-commit {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 120px;
+  align-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  min-height: 43px;
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.fa-commit__sha {
+  justify-self: start;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fa-commit__message {
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.fa-commit__who {
+  display: grid;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  text-align: right;
+}
+
+.fa-commit__who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Disclosures: "Show all" and "Advanced" */
+
+.fa-disclosure summary {
+  min-height: 32px;
+  padding: var(--space-1) 0;
+  box-sizing: border-box;
+  color: var(--color-accent);
+  font-weight: var(--weight-label);
+  cursor: pointer;
+}
+
+.fa-advanced__body {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 400px;
+  padding-top: var(--space-2);
+}
+
+.fa-field__label {
+  font-weight: var(--weight-label);
+}
+
+.fa-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+}
+
+/* Sticky bar with Analyze */
+
+.fa-repo-details__bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-repo-details__bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 720px;
+  max-width: calc(100% - 32px);
+  margin: 0 auto;
+  padding: var(--space-3) 0;
+}
+
+.fa-repo-details__bar-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fa-repo-details__bar-repo {
+  font-weight: var(--weight-label);
+}
+
+.fa-repo-details__bar-action {
+  display: grid;
+  justify-items: end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fa-repo-details__bar-action .fa-callout {
+  max-width: 360px;
+  box-sizing: border-box;
+}
+
+/* Analyzing state (A4b): a centred progress card */
+
+.fa-card.fa-analyzing {
+  display: grid;
+  gap: var(--space-6);
+  box-sizing: border-box;
+  width: 600px;
+  max-width: 100%;
+  margin: var(--space-7) auto 0;
+  padding: var(--space-6) 40px;
+}
+
+.fa-analyzing__head {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.fa-analyzing__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-analyzing__steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-analyzing__steps::before {
+  content: "";
+  position: absolute;
+  top: 17px;
+  left: 12.5%;
+  right: 12.5%;
+  height: 1px;
+  background: var(--color-border-strong);
+}
+
+.fa-analyzing__step {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.fa-analyzing__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-heading);
+}
+
+.fa-analyzing__step--done .fa-analyzing__marker {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-analyzing__step--current .fa-analyzing__marker {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.fa-analyzing__label {
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fa-analyzing__status {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fa-analyzing__line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fa-analyzing__text {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-label);
+}
+
+.fa-analyzing__percent {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fa-analyzing__bar {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  overflow: hidden;
+}
+
+.fa-analyzing__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.fa-analyzing__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fa-analyzing__failed {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.fa-analyzing__failed > .fa-callout {
+  box-sizing: border-box;
+  width: 100%;
+}

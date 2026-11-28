@@ -23,6 +23,7 @@ export type IconName =
   | "lock"
   | "plus"
   | "refresh"
+  | "repo"
   | "search"
   | "info"
   | "commit";
@@ -50,6 +51,7 @@ const ICON_PATHS: Record<IconName, readonly string[]> = {
   search: ["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z", "m20 20-4-4"],
   info: ["M12 11v5m0-8h.01", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"],
   commit: ["M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z", "M3 12h5m8 0h5"],
+  repo: ["M7 4h12v16H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm-2 13h14M9 8h6m-6 4h4"],
 };
 
 /** A decorative stroke icon. Name it with the text or aria-label next to it. */
