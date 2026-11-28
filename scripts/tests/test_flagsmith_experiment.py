@@ -100,6 +100,41 @@ class FakeClient:
                 ],
             )
 
+        if flag == "app_flow":
+            self.feature.update(
+                name=flag,
+                multivariate_options=[
+                    {"id": 21, "type": "unicode", "key": "b", "string_value": "b"},
+                    {"id": 22, "type": "unicode", "key": "c", "string_value": "c"},
+                ],
+            )
+            self.flag_state.update(
+                feature_state_value="a",
+                multivariate_feature_state_values=[
+                    {"multivariate_feature_option": 21, "percentage_allocation": 33},
+                    {"multivariate_feature_option": 22, "percentage_allocation": 33},
+                ],
+            )
+        if flag == "ui_buttons":
+            # A ui_* switch has an option for every flow; a stacking split gives "a" 0% and
+            # serves it as the control value.
+            self.feature.update(
+                name=flag,
+                multivariate_options=[
+                    {"id": 23, "type": "unicode", "key": "a", "string_value": "a"},
+                    {"id": 24, "type": "unicode", "key": "b", "string_value": "b"},
+                    {"id": 25, "type": "unicode", "key": "c", "string_value": "c"},
+                ],
+            )
+            self.flag_state.update(
+                feature_state_value="a",
+                multivariate_feature_state_values=[
+                    {"multivariate_feature_option": 23, "percentage_allocation": 0},
+                    {"multivariate_feature_option": 24, "percentage_allocation": 33},
+                    {"multivariate_feature_option": 25, "percentage_allocation": 33},
+                ],
+            )
+
     @property
     def writes(self):
         return [call for call in self.calls if call[0] != "GET"]
@@ -759,3 +794,72 @@ def test_cli_rejects_a_rollout_variant_from_another_experiment(monkeypatch, caps
         script.main()
     assert error.value.code == 2
     assert "must be one of horizontal, vertical" in capsys.readouterr().err
+
+
+JOURNEY_METRIC_ROWS = [
+    ("Journey completed", "journey_completed", "occurrence", "up"),
+    ("Import completed", "import_completed", "occurrence", "up"),
+    ("Diff understood", "diff_understood", "occurrence", "up"),
+    ("Journey clicks", "journey_clicks", "mean", "down"),
+    ("Dead clicks", "dead_clicks", "mean", "down"),
+]
+
+
+def test_app_flow_round_creates_a_named_experiment_with_journey_metrics(capsys):
+    client = FakeClient("app_flow")
+    api = script.ExperimentAPI(client, dry_run=False)
+
+    script.run(api, "create", experiment_flag="app_flow", round_label="round 1")
+
+    metric_bodies = [body for _, path, body in client.writes if path == METRICS]
+    assert [
+        (body["name"], body["definition"]["event"], body["aggregation"], body["direction"])
+        for body in metric_bodies
+    ] == JOURNEY_METRIC_ROWS
+    created = next(body for _, path, body in client.writes if path == EXPERIMENTS)
+    assert created["name"] == "app_flow: Guided vs Workbench vs Canvas [round 1]"
+    # journey_completed comes first, so Flagsmith's dashboard shows it as the primary metric.
+    assert created["metrics"][0]["metric"] == client.metrics[0]["id"]
+    assert created["experiment_rollout"]["feature_state_value"] == {"type": "string", "value": "a"}
+    assert created["experiment_rollout"]["multivariate_feature_state_values"] == [
+        {"multivariate_feature_option": 21, "percentage_allocation": 33},
+        {"multivariate_feature_option": 22, "percentage_allocation": 33},
+    ]
+    assert "a 34%, b 33%, c 33%" in capsys.readouterr().out
+    assert client.writes[-1] == ("POST", f"{DETAIL}start/", {})
+
+
+def test_next_round_needs_the_previous_one_completed(capsys):
+    client = FakeClient("app_flow")
+    api = script.ExperimentAPI(client, dry_run=False)
+    script.run(api, "create", experiment_flag="app_flow", round_label="round 1")
+
+    with pytest.raises(script.SetupError, match="already has a different active experiment"):
+        script.run(api, "create", experiment_flag="app_flow", round_label="round 2")
+
+    script.run(api, "rollout", "a", experiment_flag="app_flow", round_label="round 1")
+    client.experiments[0]["name"] = "app_flow: Guided vs Workbench vs Canvas [round 1]"
+    client.calls.clear()
+    # Flagsmith answers the search with every app_flow experiment; round 2 is a new one.
+    script.run(api, "create", experiment_flag="app_flow", round_label="round 2")
+    created = [body for _, path, body in client.writes if path == EXPERIMENTS]
+    assert [body["name"] for body in created] == [
+        "app_flow: Guided vs Workbench vs Canvas [round 2]"
+    ]
+
+
+def test_ui_switch_stacking_split_serves_a_as_control_with_its_option_at_zero(capsys):
+    client = FakeClient("ui_buttons")
+    api = script.ExperimentAPI(client, dry_run=False)
+
+    script.run(api, "create", experiment_flag="ui_buttons", round_label="round 14")
+
+    created = next(body for _, path, body in client.writes if path == EXPERIMENTS)
+    assert created["name"] == "ui_buttons: a vs b vs c [round 14]"
+    assert created["experiment_rollout"]["feature_state_value"] == {"type": "string", "value": "a"}
+    assert created["experiment_rollout"]["multivariate_feature_state_values"] == [
+        {"multivariate_feature_option": 24, "percentage_allocation": 33},
+        {"multivariate_feature_option": 25, "percentage_allocation": 33},
+        {"multivariate_feature_option": 23, "percentage_allocation": 0},
+    ]
+    assert "a 34%, b 33%, c 33%" in capsys.readouterr().out

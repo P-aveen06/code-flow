@@ -7,11 +7,12 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from flagsmith_setup import (
+    APP_FLOW_FLAG,
     DEFAULT_API_URL,
     DEFAULT_SIM_ENVIRONMENT,
     FLOW_DIRECTION_FLAG,
@@ -19,6 +20,7 @@ from flagsmith_setup import (
     PRODUCTION_ENVIRONMENT,
     PROJECT_NAME,
     SIM_ENVIRONMENT_SETTING,
+    UI_SWITCH_NAMES,
     AdminClient,
     AdminError,
     Record,
@@ -111,6 +113,40 @@ EXPERIMENTS = {
     ),
 }
 
+# The app_flow rounds: the same journey metrics for the flow experiment (round 1 and the ablation
+# rounds) and for each ui_* switch when a stacking round splits it 34/33/33. The first metric is
+# the primary one in Flagsmith's dashboard. Metrics with the same name as an earlier experiment's
+# (Import completed, Diff understood) are reused, so their definitions must stay identical.
+JOURNEY_METRICS = (
+    MetricDefinition("Journey completed", "journey_completed", "occurrence", "up", "increase"),
+    MetricDefinition("Import completed", "import_completed", "occurrence", "up", "increase"),
+    MetricDefinition("Diff understood", "diff_understood", "occurrence", "up", "increase"),
+    MetricDefinition("Journey clicks", "journey_clicks", "mean", "down", "decrease"),
+    MetricDefinition("Dead clicks", "dead_clicks", "mean", "down", "decrease"),
+)
+EXPERIMENTS[APP_FLOW_FLAG.name] = ExperimentDefinition(
+    name="app_flow: Guided vs Workbench vs Canvas",
+    hypothesis=(
+        "One of the three end-to-end flows gets more visitors from the landing page through "
+        "sign-in, a repo, an understood diff and a second branch than the other two."
+    ),
+    control=str(APP_FLOW_FLAG.value),
+    treatments={str(option.value): int(option.allocation) for option in APP_FLOW_FLAG.variants},
+    metrics=JOURNEY_METRICS,
+)
+for _switch in UI_SWITCH_NAMES:
+    # A stacking round serves a 34%, b 33%, c 33% of this one switch with everything else fixed.
+    EXPERIMENTS[_switch] = ExperimentDefinition(
+        name=f"{_switch}: a vs b vs c",
+        hypothesis=(
+            f"With every other piece fixed, one version of {_switch.removeprefix('ui_')} gets "
+            "more visitors through the whole journey than the other two."
+        ),
+        control="a",
+        treatments={"b": 33, "c": 33},
+        metrics=JOURNEY_METRICS,
+    )
+
 
 class ExperimentAPI:
     """Preview known requests without exposing the environment key in their paths."""
@@ -148,10 +184,13 @@ def experiment_state(experiment: Record) -> str:
 
 def variant_options(feature: Record, definition: ExperimentDefinition) -> dict[str, Record]:
     options = {option["string_value"]: option for option in feature["multivariate_options"]}
+    # A ui_* switch also has an option for its control value (a), which gets 0% in a split.
+    extra = options.keys() - definition.treatments.keys()
     if (
         feature["type"] != "MULTIVARIATE"
-        or len(feature["multivariate_options"]) != len(definition.treatments)
-        or options.keys() != definition.treatments.keys()
+        or len(options) != len(feature["multivariate_options"])
+        or not definition.treatments.keys() <= options.keys()
+        or not extra <= {definition.control}
         or any(option["type"] != "unicode" or not option.get("key") for option in options.values())
     ):
         names = ", ".join(definition.treatments)
@@ -160,7 +199,12 @@ def variant_options(feature: Record, definition: ExperimentDefinition) -> dict[s
 
 
 def variant_weights(rows: list[Record]) -> dict[int, float]:
-    return {row["multivariate_feature_option"]: row["percentage_allocation"] for row in rows}
+    """Option id -> weight, leaving out 0% options (the control's own option on ui_* switches)."""
+    return {
+        row["multivariate_feature_option"]: row["percentage_allocation"]
+        for row in rows
+        if row["percentage_allocation"]
+    }
 
 
 def create(
@@ -175,6 +219,7 @@ def create(
         print(f"{definition.name} is already {state}.")
         return
 
+    unused_options: list[int] = []
     if feature is None:
         feature_id = f"<new feature ID for {definition.name.partition(':')[0]}>"
         weights = {
@@ -184,6 +229,9 @@ def create(
         feature_id = feature["id"]
         options = variant_options(feature, definition)
         weights = {options[name]["id"]: weight for name, weight in definition.treatments.items()}
+        unused_options = [
+            option["id"] for name, option in options.items() if name not in definition.treatments
+        ]
 
     control_value = {"type": "string", "value": definition.control}
     if experiment is None and feature is not None:
@@ -257,7 +305,10 @@ def create(
                     "feature_state_value": control_value,
                     "multivariate_feature_state_values": [
                         {"multivariate_feature_option": option_id, "percentage_allocation": weight}
-                        for option_id, weight in weights.items()
+                        for option_id, weight in (
+                            *weights.items(),
+                            *((option_id, 0) for option_id in unused_options),
+                        )
                     ],
                 },
             },
@@ -488,8 +539,12 @@ def run(
     environment_name: str = DEFAULT_SIM_ENVIRONMENT,
     experiment_flag: str = "flow_view",
     wait_seconds: int = 0,
+    round_label: str | None = None,
 ) -> None:
     definition = EXPERIMENTS[experiment_flag]
+    if round_label:
+        # Each app_flow round is its own experiment on the same flag, named after the round.
+        definition = replace(definition, name=f"{definition.name} [{round_label}]")
     organisations = api.list("organisations/")
     if len(organisations) != 1:
         raise SetupError("The admin API key must identify exactly one Flagsmith organisation.")
@@ -562,6 +617,12 @@ def main() -> int:
         default="flow_view",
         help="Experiment flag (default flow_view).",
     )
+    parser.add_argument(
+        "--round",
+        dest="round_label",
+        metavar="LABEL",
+        help="Name a repeat experiment on the same flag, such as 'round 2' (app_flow rounds).",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("create", "Create the metrics and start the experiment."),
@@ -573,6 +634,9 @@ def main() -> int:
         subcommand.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS)
         subcommand.add_argument("--environment", default=argparse.SUPPRESS)
         subcommand.add_argument("--experiment", choices=EXPERIMENTS, default=argparse.SUPPRESS)
+        subcommand.add_argument(
+            "--round", dest="round_label", metavar="LABEL", default=argparse.SUPPRESS
+        )
         if name == "rollout":
             subcommand.add_argument("--variant", required=True)
         if name == "refresh":
@@ -612,6 +676,7 @@ def main() -> int:
             "environment_name": environment,
             "experiment_flag": args.experiment,
             "wait_seconds": wait_seconds,
+            "round_label": (args.round_label or "").strip() or None,
         }
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
         api = ExperimentAPI(client, args.dry_run)
