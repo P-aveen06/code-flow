@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useAppFlow } from "../appFlow/AppFlowProvider";
 import { useRepoReview } from "../appFlow/hooks/useRepoReview";
 import { useReviewData } from "../appFlow/hooks/useReviewData";
 import type { ReviewData } from "../appFlow/hooks/useReviewData";
+import { BranchSwitchScreen } from "../appFlow/screens";
 import { AppLink } from "../AppLink";
 import { replaceDirectionOverride, replaceViewOverride } from "../view";
 import { CodePane } from "../views/CodePane";
@@ -68,8 +70,10 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
     expandModule, layoutPositions, fullscreen, markRendered, guideOpen, setGuide, guideButton, reviewContext,
     sendsReviewEvents, onReview, reviewKey, diff, selectedNode, selectNode, selectedCheck, openCheck,
     clearSelection, sourceOpen, setSourceOpen, workspace, sourceHeading, findings, flags, flagsmithMode,
-    liveStates, selectedFlag, selectFlag,
+    liveStates, selectedFlag, selectFlag, branch,
   } = useRepoReview(id, search, initial);
+  // With app_flow on, today's flow view also carries the branch_switch piece. Off, it stays as today.
+  const appFlowOn = useAppFlow().flow !== null;
   const View = view === "side_by_side" ? SideBySide : Overlay;
 
   return (
@@ -82,6 +86,11 @@ function RepoReview({ id, initial, search }: { id: string; initial: ReviewData; 
               <p className="viewer-header__subdir" title={displaySubdir(subdir)}>
                 Subfolder <code>{displaySubdir(subdir)}</code>
               </p>
+            )}
+            {appFlowOn && (
+              <div className="viewer-header__branch">
+                <BranchSwitchScreen repoId={id} currentBranch={branch} />
+              </div>
             )}
           </div>
           {selected && (

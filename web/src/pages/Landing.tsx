@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSignIn } from "../appFlow/SignInContext";
 import { SignInSlot } from "../appFlow/SignInSlot";
 import { useLandingJourney } from "../appFlow/hooks/useLandingJourney";
 import { useLandingRepos } from "../appFlow/hooks/useLandingRepos";
@@ -11,6 +12,23 @@ import { LandingRepositories } from "./LandingRepositories";
 import { SignInImport } from "./SignInImport";
 
 export { readSigninError } from "../appFlow/hooks/useLandingJourney";
+
+// Today's landing with Flow A's or C's sign-in: the button opens that flow's sign-in page or modal.
+function SignInElsewhere() {
+  const { start } = useSignIn();
+  return (
+    <section className="card import-card signin-card" aria-labelledby="signin-title">
+      <h2 id="signin-title">Analyze a repo from your GitHub</h2>
+      <p className="signin-card__lead">
+        Sign in to pick any repo you allow, including private ones. code-flow can only read the
+        code of the repos you choose, and only you can see your private imports.
+      </p>
+      <div className="signin-card__actions">
+        <button type="button" className="btn btn--primary" onClick={start}>Sign in with GitHub</button>
+      </div>
+    </section>
+  );
+}
 
 export function Landing() {
   const hosted = import.meta.env.VITE_HOSTED_DEMO === "1";
@@ -36,6 +54,7 @@ export function Landing() {
           <SignInSlot
             placement="section"
             today={<SignInImport onSignedOut={reload} onUseUrl={() => setUrlFormChosen(true)} />}
+            elsewhere={<SignInElsewhere />}
           />
         )}
         {signin.ready && !showSignin && (
