@@ -13,7 +13,63 @@ Built for the WeMakeDevs × Flagsmith Toggle Wars hackathon, Track 01
 
 ![code-flow landing page with a Flagsmith demo preview and the How Flagsmith is used section](docs/screenshots/landing.png)
 
-## Main experiment · `flow_view`
+## How code-flow uses Flagsmith
+
+- **Experiments decide the product.** Four experiments ran through Flagsmith
+  Experimentation, each with a hypothesis, a multivariate flag, exposure from
+  `getExperimentFlag`, and metrics from the app's own events: the whole app
+  (`app_flow` plus eleven `ui_*` switches), the diff style (`flow_view`), the
+  layout for long flows (`flow_direction`), and Sign in with GitHub
+  (`github_signin`). Each winner was rolled out from Flagsmith.
+- **Flagsmith mode reads your flags.** The analyzer finds Flagsmith and
+  OpenFeature checks in the analyzed code, and the viewer asks Flagsmith which
+  of those flags are on, so it can highlight live paths and mark checks with
+  no matching flag as orphans (`flagsmith_mode`, `live_flag_panel`).
+- **Flags run the app.** `variant_preview` lets the team preview any variant,
+  `branch_commit_count` sets how many commits a branch import analyzes, and
+  each `ui_*` switch can be turned off to fall back to the earlier UI.
+- **Without Flagsmith,** code-flow falls back to the earlier UI with fixed
+  defaults, no experiment runs, and the diagrams lose their live paths.
+
+## Which whole app helps reviewers finish? · `app_flow`
+
+We built three complete versions of the reviewer journey (landing, sign-in,
+repositories, repository, flow view, branch switch): **A Guided**, **B
+Workbench** and **C Canvas**. One multivariate flag, `app_flow`, picks the
+version (34/33/33). Eleven `ui_*` switches let each piece (each screen's
+layout, colours, fonts, buttons) follow the flow, be pinned, or be split as its
+own experiment. The main metric is Journey completed: the reviewer understood
+the diff, then switched to a second branch and reached its flow view.
+
+Every run used simulated reviewers in the Development environment, and every
+number is Flagsmith's own analysis:
+
+1. **Best of three, 1,000 reviewers.** Workbench lost: 29.3% finished, against
+   36.0% for Guided (2% chance to beat it). Guided and Canvas (38.7%) were too
+   close to call.
+2. **Ablation, 10,000 reviewers per round.** With the flows still split, we
+   switched one piece back to the earlier UI each round. The three flows tied
+   (31.2%, 30.7%, 30.3%) once four pieces were off: the flow view, the branch
+   switch, repo details and the repos page. That is where the difference lives.
+3. **Stacking, 10,000 reviewers per round.** We added those four pieces back one
+   at a time as a/b/c experiments. Guided's version won or held every one, and
+   Workbench's flow view was clearly worse.
+
+Along the way, a quicker pass of eleven 1,000-reviewer rounds produced two
+"wins" at 98% that contradicted our own assumptions. A 30,000-reviewer check
+on the bigger one, the flow view, showed it was luck (Guided 36.0%, Canvas
+33.8%, Workbench 31.2%).
+The lesson we kept: size each round for the gap you need to see, and confirm a
+narrow win before rolling it out.
+
+**Flow A (Guided) is the pick**, and it is pinned in Development.
+[Full results, every round](docs/experiment-results.md#app_flow-experiment-which-whole-app-helps-reviewers-finish-simulated-reviewers) · [How the rounds run](docs/APP_FLOW_BUILD.md)
+
+| A Guided | B Workbench | C Canvas |
+| --- | --- | --- |
+| ![Flow A's flow view: story column on the left, diagram on the right](docs/screenshots/app-flow-a-flow-view.png) | ![Flow B's flow view: commit list, diagram and review panel side by side](docs/screenshots/app-flow-b-flow-view.png) | ![Flow C's flow view: the diagram fills the screen with floating panels](docs/screenshots/app-flow-c-flow-view.png) |
+
+## Diff style · `flow_view`
 
 We hypothesized that reviewers would understand changes more often and faster
 with an overlay and a one-line summary than with side-by-side diagrams.
@@ -49,7 +105,7 @@ pasting a public URL. With 1,300 simulated visitors in the Development
 environment, Flagsmith reported 62.3% completed imports with sign-in and 52.1%
 without, a 19.4% lift (95% credible interval 8.1% to 30.8%). The cost is time:
 visitors who reached a flow waited about twice as long, because of the trip to
-GitHub. Abandonment was inconclusive. Nothing is rolled out yet.
+GitHub. Abandonment was inconclusive. Sign-in is rolled out in Development.
 [Full results](docs/experiment-results.md#github_signin-experiment-results-simulated-visitors)
 
 ## Run locally
