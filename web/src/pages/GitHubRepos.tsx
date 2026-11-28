@@ -1,51 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
-import { fetchGitHubRepos, fetchMe, signInUrl, signOut } from "../api";
 import { AppLink } from "../AppLink";
-import { githubRepoPath, navigate } from "../router";
-import { markRedirecting, resumeJourney, trackSignin, watchForAbandon } from "../signinEvents";
-import type { Me } from "../types";
-import { useRequest } from "../useRequest";
+import { useGitHubRepoList } from "../appFlow/hooks/useGitHubRepoList";
+import { signInUrl } from "../api";
+import { githubRepoPath } from "../router";
+import { markRedirecting } from "../signinEvents";
+import type { GitHubRepoChoice, Me } from "../types";
+import type { RequestState } from "../useRequest";
 import { startSignIn } from "./SignInImport";
 
 type SignedIn = Extract<Me, { signed_in: true }>;
 
-// GitHub returns here after sign-in (signed_in) and after the app install page (the rest).
-const returnParams = ["signed_in", "github", "installation_id", "setup_action"];
-
-export function readGitHubReturn(search: string) {
-  const params = new URLSearchParams(search);
-  return { signedIn: params.get("signed_in") === "1", installed: params.get("github") === "installed" };
-}
-
 export function GitHubRepos({ search }: { search: string }) {
-  const [returned] = useState(() => readGitHubReturn(search));
-  const [revision, setRevision] = useState(0);
-  const loadMe = useCallback((signal: AbortSignal) => fetchMe(signal), [revision]);
-  const me = useRequest(loadMe);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!returnParams.some((name) => params.has(name))) return;
-    returnParams.forEach((name) => params.delete(name));
-    const query = params.toString();
-    navigate(`${window.location.pathname}${query ? `?${query}` : ""}`, { replace: true });
-  }, []);
-
-  useEffect(() => {
-    resumeJourney();
-    if (returned.signedIn) trackSignin("signin_completed");
-  }, [returned.signedIn]);
-
-  useEffect(() => watchForAbandon(), []);
-
-  async function leave() {
-    try {
-      await signOut();
-    } finally {
-      setRevision((value) => value + 1);
-      navigate("/");
-    }
-  }
+  const { me, repos, signOut } = useGitHubRepoList(search);
 
   return (
     <main className="github-page">
@@ -66,20 +31,19 @@ export function GitHubRepos({ search }: { search: string }) {
           </>
         )}
         {me.status === "ready" && me.data.signed_in && (
-          <RepoList me={me.data} installed={returned.installed} onSignOut={() => void leave()} />
+          <RepoList me={me.data} repos={repos} onSignOut={signOut} />
         )}
       </section>
     </main>
   );
 }
 
-function RepoList({ me, installed, onSignOut }: { me: SignedIn; installed: boolean; onSignOut: () => void }) {
-  const repos = useRequest(fetchGitHubRepos);
+function RepoList({ me, repos, onSignOut }: {
+  me: SignedIn;
+  repos: RequestState<GitHubRepoChoice[]>;
+  onSignOut: () => void;
+}) {
   const choices = repos.status === "ready" ? repos.data : [];
-
-  useEffect(() => {
-    if (installed && choices.length > 0) trackSignin("app_installed");
-  }, [installed, choices.length]);
 
   const chooseRepos = (
     <a className="btn" href={me.install_url} onClick={() => markRedirecting()}>

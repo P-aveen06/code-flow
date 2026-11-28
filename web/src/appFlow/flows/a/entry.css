@@ -1,0 +1,985 @@
+/* Flow A "Guided" entry screens: the landing (design A1) and the sign-in page (A2, A2b, A2c).
+   Layout and sizes only. Every colour, font, weight and line height reads a token variable
+   (docs/APP_FLOW_BUILD.md, "Token vocabulary"), so the same layout takes another flow's look. */
+
+/* Callouts keep the text colour (the design's error text is not red); today's [role=alert] rule is overridden here */
+
+.fa-landing .fa-callout,
+.fa-signin .fa-callout {
+  color: var(--color-text);
+}
+
+/* Focus ring for every control on the two screens */
+
+.fa-landing :focus-visible,
+.fa-signin :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+/* Shared: the paste-a-public-URL form and the import progress */
+
+.fa-entry__form {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.fa-entry__fields {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fa-entry__field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fa-entry__row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.fa-entry__field--grow {
+  flex: 1;
+}
+
+.fa-entry__field--limit {
+  flex: none;
+  width: 104px;
+}
+
+.fa-entry__label {
+  font-weight: var(--weight-label);
+}
+
+.fa-entry__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.fa-entry__input--mono {
+  font-family: var(--font-mono);
+}
+
+.fa-entry__submit {
+  justify-self: start;
+}
+
+.fa-entry__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-card.fa-entry__progress {
+  display: grid;
+  gap: var(--space-3);
+  padding: 20px;
+}
+
+.fa-entry__progress-title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-entry__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-entry__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-entry__step--done,
+.fa-entry__step--current {
+  color: var(--color-text);
+}
+
+.fa-entry__step--current {
+  color: var(--color-accent);
+  font-weight: var(--weight-label);
+}
+
+.fa-entry__step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+.fa-entry__step--done .fa-entry__step-dot {
+  background: var(--color-accent);
+}
+
+.fa-entry__step--current .fa-entry__step-dot {
+  background: var(--color-accent);
+  outline: 3px solid var(--color-accent-soft);
+}
+
+.fa-entry__progress-text {
+  margin: 0;
+}
+
+.fa-entry__progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--color-accent);
+}
+
+.fa-entry__progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* Landing (A1): one centred column, then the picture, the steps, Flagsmith and the repos */
+
+.fa-landing {
+  display: grid;
+  gap: var(--space-6);
+  box-sizing: border-box;
+  width: min(1120px, calc(100% - 2 * var(--space-4)));
+  margin: 0 auto;
+  padding: 0 0 var(--space-8);
+}
+
+.fa-landing__hero {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 64px 0 var(--space-2);
+  text-align: center;
+}
+
+.fa-landing__title {
+  margin: 0;
+  font-size: var(--text-display);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.052em;
+}
+
+.fa-landing__lead {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-h3);
+}
+
+.fa-landing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.fa-landing__url {
+  width: 100%;
+}
+
+.fa-landing__url-summary {
+  box-sizing: border-box;
+  width: max-content;
+  min-height: 32px;
+  margin: 0 auto;
+  padding: 5px 6px;
+  color: var(--color-accent);
+  font-weight: var(--weight-label);
+  cursor: pointer;
+}
+
+.fa-card.fa-landing__url-card {
+  box-sizing: border-box;
+  width: min(408px, 100%);
+  margin: var(--space-3) auto 0;
+  padding: 20px;
+  text-align: left;
+}
+
+.fa-landing__account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fa-landing__login {
+  font-weight: var(--weight-label);
+}
+
+/* The picture of the flow view (a drawing of commit 10483a0) */
+
+.fa-landing__preview {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+  background: linear-gradient(135deg, var(--color-accent-soft), var(--color-surface) 55%, var(--color-accent-soft));
+}
+
+.fa-landing__window {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-landing__window-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fa-landing__window-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__mono-small,
+.fa-landing__mono-small code {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+}
+
+.fa-landing__window-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 346px;
+}
+
+.fa-landing__story {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 12px;
+  flex: none;
+  box-sizing: border-box;
+  width: 305px;
+  padding: 22px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.fa-landing__story-repo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.fa-landing__branch {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__story-title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.028em;
+}
+
+.fa-landing__story-meta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-landing__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fa-landing__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  white-space: nowrap;
+}
+
+.fa-landing__count--added {
+  border-color: var(--diagram-added);
+  background: var(--diagram-added-fill);
+  color: var(--diagram-added-text);
+}
+
+.fa-landing__count--removed {
+  border-style: dashed;
+  border-color: var(--diagram-removed);
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+}
+
+.fa-landing__count--changed {
+  border-color: var(--diagram-changed);
+  background: var(--diagram-changed-fill);
+  color: var(--diagram-changed-text);
+}
+
+.fa-landing__summary {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--color-accent-soft);
+}
+
+.fa-landing__summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__sparkle {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.fa-landing__summary > p {
+  margin: 0;
+  font-size: var(--text-small);
+}
+
+.fa-landing__summary code {
+  overflow-wrap: anywhere;
+}
+
+.fa-landing__diagram {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(var(--color-grid) 1px, var(--color-canvas) 1px);
+  background-size: 18px 18px;
+}
+
+/* The diagram is drawn on a 1000 x 500 canvas scaled to 78%, as in the design */
+
+.fa-landing__canvas {
+  position: absolute;
+  left: 10px;
+  top: -87px;
+  width: 1000px;
+  height: 500px;
+  transform: scale(0.78);
+  transform-origin: top left;
+}
+
+.fa-landing__edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1000px;
+  height: 500px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.fa-landing__edge {
+  fill: none;
+  stroke: var(--diagram-context);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fa-landing__head {
+  fill: var(--diagram-context);
+}
+
+.fa-landing__group {
+  position: absolute;
+  left: 250px;
+  top: 160px;
+  box-sizing: border-box;
+  width: 526px;
+  height: 326px;
+  padding: 13px 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 16px;
+  background: var(--color-sunken);
+}
+
+.fa-landing__group-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+}
+
+.fa-landing__node {
+  position: absolute;
+  display: grid;
+  gap: 2px;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--diagram-context);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-card);
+  font-size: var(--text-small);
+}
+
+.fa-landing__node--neighbour {
+  border-color: var(--diagram-context);
+}
+
+.fa-landing__node--changed,
+.fa-landing__node--added {
+  min-height: 56px;
+  padding: 9px 12px;
+  border-width: 1.5px;
+}
+
+.fa-landing__node--changed {
+  left: 274px;
+  top: 245px;
+  width: 336px;
+  border-color: var(--diagram-changed);
+  background: var(--diagram-changed-fill);
+}
+
+.fa-landing__node--added {
+  left: 366px;
+  top: 363px;
+  width: 386px;
+  border-color: var(--diagram-added);
+  background: var(--diagram-added-fill);
+}
+
+.fa-landing__node--views {
+  left: 24px;
+  top: 259px;
+  width: 198px;
+}
+
+.fa-landing__node--three {
+  left: 816px;
+  top: 207px;
+  width: 148px;
+}
+
+.fa-landing__node--core {
+  left: 816px;
+  top: 324px;
+  width: 174px;
+}
+
+.fa-landing__node-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__node-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-small);
+}
+
+.fa-landing__node-kind,
+.fa-landing__node-path,
+.fa-landing__node-name,
+.fa-landing__node-delta {
+  font-family: var(--font-mono);
+}
+
+.fa-landing__node-kind {
+  color: var(--color-text-muted);
+}
+
+.fa-landing__node-status {
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__node-status--added {
+  color: var(--diagram-added-text);
+}
+
+.fa-landing__node-status--changed {
+  color: var(--diagram-changed-text);
+}
+
+.fa-landing__node-delta {
+  margin-left: auto;
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+}
+
+.fa-landing__node-delta--added {
+  color: var(--diagram-added-text);
+}
+
+.fa-landing__node-delta--changed {
+  color: var(--diagram-changed-text);
+}
+
+.fa-landing__node-name {
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+}
+
+.fa-landing__node-path {
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
+.fa-landing__legend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-small);
+}
+
+.fa-landing__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.fa-landing__swatch {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 3px;
+  background: var(--color-surface);
+}
+
+.fa-landing__swatch--added {
+  border-color: var(--diagram-added);
+  background: var(--diagram-added-fill);
+}
+
+.fa-landing__swatch--removed {
+  border-style: dashed;
+  border-color: var(--diagram-removed);
+  background: var(--diagram-removed-fill);
+}
+
+.fa-landing__swatch--changed {
+  border-color: var(--diagram-changed);
+  background: var(--diagram-changed-fill);
+}
+
+.fa-landing__swatch--neighbour {
+  border-color: var(--diagram-context);
+}
+
+/* The three steps */
+
+.fa-landing__steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0 var(--space-2);
+  list-style: none;
+}
+
+.fa-landing__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fa-landing__step-num {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-landing__step-label {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+/* How Flagsmith is used */
+
+.fa-landing__flags {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fa-landing__section-title {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.028em;
+}
+
+.fa-landing__flag-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.fa-card.fa-landing__flag {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 20px;
+}
+
+.fa-landing__flag-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fa-landing__flag-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-landing__flag-title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-landing__flag-text {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.fa-landing__flag-text strong {
+  color: var(--color-text);
+  font-weight: var(--weight-heading);
+}
+
+/* Analyzed repositories */
+
+.fa-card.fa-landing__repos {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+.fa-landing__repos-title {
+  margin: 0;
+  padding: var(--space-4);
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.028em;
+}
+
+.fa-landing__repo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-landing__repo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 13px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.fa-landing__repo-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-landing__repo-body {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fa-landing__repo-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fa-landing__repo-meta,
+.fa-landing__repo-note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+}
+
+.fa-landing__loading {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.fa-landing__loading progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--color-accent);
+}
+
+.fa-landing__empty {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-4);
+  color: var(--color-text-muted);
+}
+
+/* Sign-in page (A2, A2b, A2c): four steps and one card */
+
+.fa-signin {
+  display: grid;
+  gap: 56px;
+  box-sizing: border-box;
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 40px var(--space-4) var(--space-8);
+}
+
+.fa-signin .fa-signin__card {
+  display: grid;
+  gap: 28px;
+  box-sizing: border-box;
+  width: min(520px, 100%);
+  margin: 0 auto;
+  padding: 36px 40px;
+}
+
+.fa-signin .fa-signin__card--status {
+  gap: 20px;
+  padding: 36px;
+  justify-items: center;
+  text-align: center;
+}
+
+.fa-signin__head {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+}
+
+.fa-signin__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-signin__title {
+  margin: 0;
+  font-size: var(--text-h1);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.028em;
+  text-align: center;
+}
+
+.fa-signin__body {
+  display: grid;
+  gap: 20px;
+}
+
+.fa-signin__lead {
+  margin: 0;
+  text-align: center;
+}
+
+.fa-signin__points {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-signin__points li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.fa-signin__check {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-signin__primary {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Each step takes its own width and the rules between the steps share the rest, as in the design */
+
+.fa-signin .fa-stepper__step:not(:last-child) {
+  flex: 1 1 auto;
+}
+
+.fa-signin__account {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.fa-signin__account .fa-avatar {
+  width: 40px;
+  height: 40px;
+  font-size: var(--text-h3);
+}
+
+.fa-signin__url {
+  width: 100%;
+  text-align: center;
+}
+
+.fa-signin__url-summary {
+  box-sizing: border-box;
+  width: max-content;
+  min-height: 32px;
+  margin: 0 auto;
+  padding: 5px 6px;
+  color: var(--color-accent);
+  font-weight: var(--weight-label);
+  cursor: pointer;
+}
+
+.fa-signin__url-form {
+  box-sizing: border-box;
+  width: min(408px, 100%);
+  margin: var(--space-3) auto 0;
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+}
+
+/* Narrower screens: stack the columns (the desktop target is 1440 px wide) */
+
+@media (max-width: 860px) {
+  .fa-landing__steps,
+  .fa-landing__flag-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fa-landing__window-body {
+    flex-direction: column;
+  }
+
+  .fa-landing__story {
+    width: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+}

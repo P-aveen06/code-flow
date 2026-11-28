@@ -25,6 +25,7 @@ PRODUCTION_ENVIRONMENT = "Production"
 DEFAULT_SIM_ENVIRONMENT = "Development"
 SIM_ENVIRONMENT_SETTING = "CODEFLOW_SIM_ENVIRONMENT"
 CODE_FLOW_TAG = "code-flow"
+APP_FLOW_TAG = "app-flow"
 VARIANT_PREVIEW = "variant_preview"
 REPO_ID_BY_TAG = {
     "repo:flagsmith-api": "Flagsmith__flagsmith",
@@ -176,6 +177,33 @@ GITHUB_SIGNIN_FLAG = Flag(
 )
 # How many recent commits the repo details page lists and analyzes for a chosen branch.
 BRANCH_COMMIT_COUNT_FLAG = Flag("branch_commit_count", True, 20)
+# The app_flow experiment: visitors get a (control, 34%), b or c (33% each).
+APP_FLOW_FLAG = Flag(
+    "app_flow",
+    True,
+    "a",
+    "MULTIVARIATE",
+    (Variant("b", 33, "b"), Variant("c", 33, "c")),
+)
+# Each ui_* switch follows app_flow ("flow") until a round pins or splits it, so a, b and c are 0%.
+UI_SWITCH_VARIANTS = (Variant("a", 0, "a"), Variant("b", 0, "b"), Variant("c", 0, "c"))
+UI_SWITCH_NAMES = (
+    "ui_font_family",
+    "ui_font_weight",
+    "ui_line_spacing",
+    "ui_buttons",
+    "ui_colours",
+    "ui_landing_layout",
+    "ui_signin_layout",
+    "ui_repos_layout",
+    "ui_repo_details_layout",
+    "ui_flow_view_layout",
+    "ui_branch_switch",
+)
+APP_FLOW_FLAGS = (
+    APP_FLOW_FLAG,
+    *(Flag(name, True, "flow", "MULTIVARIATE", UI_SWITCH_VARIANTS) for name in UI_SWITCH_NAMES),
+)
 
 
 def same_value(left: FlagValue, right: FlagValue) -> bool:
@@ -316,6 +344,10 @@ def show_value(value: FlagValue) -> str:
         "vertical",
         "url_import",
         "github_signin",
+        "flow",
+        "a",
+        "b",
+        "c",
     ):
         return "<redacted>"
     return json.dumps(value)
@@ -635,6 +667,7 @@ def setup(
     *,
     environment_name: str = PRODUCTION_ENVIRONMENT,
     scope_file: Path = DEFAULT_SCOPE_FILE,
+    only: str | None = None,
 ) -> None:
     app_environment = environment_name == PRODUCTION_ENVIRONMENT
     app_flags = [
@@ -647,6 +680,10 @@ def setup(
         Flag("live_flag_panel", False),
         Flag(VARIANT_PREVIEW, not app_environment),
     ]
+    tag_label = CODE_FLOW_TAG
+    if only is not None:
+        app_flags = list(APP_FLOW_FLAGS)
+        tag_label = APP_FLOW_TAG
     scope_file = scope_file.resolve()
     if scope_file == env_file.resolve():
         raise SetupError("Use different paths for the environment and scope files.")
@@ -676,7 +713,7 @@ def setup(
             for experiment in client.list(experiments_path)
             if experiment["status"] not in ("completed", "created", "draft")
         }
-    tag_id = ensure_tag(client, tags_path, project_tags, CODE_FLOW_TAG, dry_run)
+    tag_id = ensure_tag(client, tags_path, project_tags, tag_label, dry_run)
     for flag in app_flags:
         name = flag.name.casefold()
         if feature := features.get(name):
@@ -689,7 +726,7 @@ def setup(
                 simulation_environment=not app_environment,
                 dry_run=dry_run,
             )
-            add_tag_to_flag(client, feature_path, feature, CODE_FLOW_TAG, tag_id, dry_run)
+            add_tag_to_flag(client, feature_path, feature, tag_label, tag_id, dry_run)
         else:
             verb = "Would create" if dry_run else "Created"
             if tag_id is not None and not dry_run:
@@ -701,9 +738,13 @@ def setup(
                     ]
                 create_flag(client, feature_path, flag, tag_id, environment_defaults)
             print(
-                f"{verb} flag {flag.name} with tag {CODE_FLOW_TAG} "
+                f"{verb} flag {flag.name} with tag {tag_label} "
                 f"({show_state(flag.enabled, flag.value, flag.variants)})."
             )
+
+    if only is not None:
+        # Keys, the warehouse and the scope file belong to the full setup, not to these flags.
+        return
 
     if app_environment:
         keys = {
@@ -752,8 +793,12 @@ def main() -> int:
     parser.add_argument(
         "--environment",
         metavar="NAME",
-        default=PRODUCTION_ENVIRONMENT,
-        help="Choose an existing environment (default Production).",
+        help="Choose an existing environment (default Production, or Development with --only).",
+    )
+    parser.add_argument(
+        "--only",
+        choices=[APP_FLOW_TAG],
+        help="Set up only the app-flow flags (tag app-flow). Writes no keys or scope file.",
     )
     parser.add_argument(
         "--scope-file",
@@ -762,13 +807,22 @@ def main() -> int:
         help="Scope file to generate (default data/flagsmith_scopes.json).",
     )
     args = parser.parse_args()
+    environment_name = args.environment
+    if environment_name is None:
+        # The app-flow experiment defaults to Development, as the experiment CLI does, so
+        # Production is written only with an explicit --environment Production.
+        environment_name = DEFAULT_SIM_ENVIRONMENT if args.only else PRODUCTION_ENVIRONMENT
     try:
         settings = read_env(args.env_file)
         admin_key = settings.get("FLAGSMITH_ADMIN_API_KEY")
         if not admin_key:
             raise SetupError("Set FLAGSMITH_ADMIN_API_KEY in the environment file.")
         client = AdminClient(settings.get("FLAGSMITH_API_URL") or DEFAULT_API_URL, admin_key)
-        options = {"environment_name": args.environment, "scope_file": args.scope_file}
+        options = {
+            "environment_name": environment_name,
+            "scope_file": args.scope_file,
+            "only": args.only,
+        }
         if args.dry_run:
             print("Dry run.")
             setup(client, args.env_file, dry_run=True, **options)

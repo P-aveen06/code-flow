@@ -1,0 +1,264 @@
+/* Flow A "Guided" kit. Layout and sizes only: every colour, font, weight, line height and
+   button size comes from the tokens (docs/APP_FLOW_BUILD.md, "Token vocabulary"). */
+
+.fa-icon {
+  flex: none;
+  vertical-align: middle;
+}
+
+.fa-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Top bar */
+
+.fa-header {
+  box-sizing: border-box;
+  height: 64px;
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fa-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 100%;
+  max-width: 1280px;
+  margin-inline: auto;
+}
+
+.fa-header__start,
+.fa-header__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fa-header__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.fa-header__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-h2);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+}
+
+.fa-header__name {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.045em;
+}
+
+/* Avatar */
+
+.fa-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--text-body);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fa-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Four-step indicator: each step is a list item, the rule after it is a flex item */
+
+.fa-stepper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 664px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.fa-stepper__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.fa-stepper__step:last-child {
+  flex: none;
+}
+
+.fa-stepper__step:not(:last-child)::after {
+  content: "";
+  flex: 1;
+  min-width: var(--space-3);
+  height: 1px;
+  background: var(--color-border-strong);
+}
+
+.fa-stepper__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  line-height: var(--leading-heading);
+}
+
+.fa-stepper__step--done .fa-stepper__marker {
+  border-color: transparent;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-stepper__step--current .fa-stepper__marker {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.fa-stepper__label {
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.fa-stepper__step--done .fa-stepper__label {
+  color: var(--color-text);
+}
+
+.fa-stepper__step--current .fa-stepper__label {
+  color: var(--color-accent);
+}
+
+/* Card: 16 px radius, card shadow */
+
+.fa-card {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fa-card--compact {
+  padding: var(--space-4) 20px;
+}
+
+.fa-card--roomy {
+  padding: 36px 40px;
+}
+
+/* Centred 720 px column */
+
+.fa-page {
+  display: grid;
+  gap: var(--space-6);
+  width: 720px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 40px 0 var(--space-8);
+}
+
+/* Chips */
+
+.fa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+}
+
+.fa-chip--accent {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.fa-chip--added {
+  background: var(--diagram-added-fill);
+  color: var(--diagram-added-text);
+  font-family: var(--font-mono);
+}
+
+.fa-chip--removed {
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+  font-family: var(--font-mono);
+}
+
+.fa-chip--changed {
+  background: var(--diagram-changed-fill);
+  color: var(--diagram-changed-text);
+  font-family: var(--font-mono);
+}
+
+/* Callout: sunken box with an accent edge */
+
+.fa-callout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 14px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 10px;
+  background: var(--color-sunken);
+  color: var(--color-text);
+  font-size: var(--text-body);
+  font-weight: var(--weight-label);
+}
+
+.fa-callout .fa-icon {
+  color: var(--color-accent);
+}

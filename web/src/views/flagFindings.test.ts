@@ -53,8 +53,8 @@ describe("guarded calls", () => {
       expect(activity).toBe(expected);
       expect(guardLabel(guard, activity)).toBe(`checkout: ${when} · ${expected.toUpperCase()}`);
       expect(edgeStyle("removed", activity)).toMatchObject(expected === "live"
-        ? { stroke: "var(--color-success)", strokeWidth: 3.5 }
-        : { stroke: "var(--color-text-subtle)", strokeDasharray: "6 4" });
+        ? { stroke: "var(--diagram-added)", strokeWidth: 3.5 }
+        : { stroke: "var(--diagram-context)", strokeDasharray: "6 4" });
     },
   );
 

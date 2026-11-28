@@ -1,25 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchGitHubBranches, fetchGitHubCommits, importPickedRepo } from "../api";
 import { AppLink } from "../AppLink";
-import { useBranchCommitCount } from "../flags";
-import { pollRepoStatus } from "../pollRepoStatus";
-import { githubRepoPath, githubReposPath, navigate, repoPath } from "../router";
-import { resumeJourney, trackSignin, watchForAbandon } from "../signinEvents";
-import type { GitHubCommitList, GitHubRepoChoice, ImportResponse, ImportStatus, PickedImportRequest } from "../types";
-import { useRequest } from "../useRequest";
-import { validateImport } from "./importHelpers";
+import { useRepoDetails } from "../appFlow/hooks/useRepoDetails";
+import { githubReposPath } from "../router";
+import type { GitHubRepoChoice } from "../types";
 import { ImportProgress } from "./ImportProgress";
 
-type Job = ImportResponse & { body: PickedImportRequest };
+type RepoDetails = ReturnType<typeof useRepoDetails>;
 
 export function GitHubRepoPage({ repoId, search }: { repoId: number; search: string }) {
-  const commitCount = useBranchCommitCount(search);
-  const loadBranches = useCallback((signal: AbortSignal) => fetchGitHubBranches(repoId, signal), [repoId]);
-  const branches = useRequest(loadBranches);
-  const requested = new URLSearchParams(search).get("branch");
-
-  useEffect(() => resumeJourney(), []);
-  useEffect(() => watchForAbandon(), []);
+  const details = useRepoDetails(repoId, search);
+  const { branches } = details;
 
   return (
     <main className="github-page">
@@ -27,28 +16,18 @@ export function GitHubRepoPage({ repoId, search }: { repoId: number; search: str
       {branches.status === "loading" && <p role="status" className="card">Loading the repository…</p>}
       {branches.status === "error" && <p role="alert" className="card">{branches.message}</p>}
       {branches.status === "ready" && (
-        <RepoDetails
-          repo={branches.data.repo}
-          branches={branches.data.branches}
-          branch={requested && branches.data.branches.includes(requested) ? requested : branches.data.repo.default_branch}
-          commitCount={commitCount}
-        />
+        <RepoDetailsCard repo={branches.data.repo} branches={branches.data.branches} details={details} />
       )}
     </main>
   );
 }
 
-function RepoDetails({ repo, branches, branch, commitCount }: {
+function RepoDetailsCard({ repo, branches, details }: {
   repo: GitHubRepoChoice;
   branches: string[];
-  branch: string;
-  commitCount: { count: number; ready: boolean };
+  details: RepoDetails;
 }) {
-  const { count, ready } = commitCount;
-  const loadCommits = useCallback(
-    (signal: AbortSignal) => fetchGitHubCommits(repo.id, branch, count, signal),
-    [repo.id, branch, count],
-  );
+  const { branch, setBranch, commitCount } = details;
 
   return (
     <section className="card github-card" aria-labelledby="github-repo-title">
@@ -61,96 +40,22 @@ function RepoDetails({ repo, branches, branch, commitCount }: {
         <label className="field__label" htmlFor="github-branch">Branch</label>
         <select
           id="github-branch" className="input" value={branch}
-          onChange={(event) => navigate(githubRepoPath(repo.id, event.target.value), { replace: true })}
+          onChange={(event) => setBranch(event.target.value)}
         >
           {branches.map((name) => (
             <option key={name} value={name}>{name}{name === repo.default_branch ? " (default)" : ""}</option>
           ))}
         </select>
       </div>
-      {ready
-        ? <BranchCommits key={`${branch}:${count}`} repo={repo} branch={branch} loadCommits={loadCommits} />
+      {commitCount.ready
+        ? <BranchCommits details={details} />
         : <p role="status">Loading…</p>}
     </section>
   );
 }
 
-function BranchCommits({ repo, branch, loadCommits }: {
-  repo: GitHubRepoChoice;
-  branch: string;
-  loadCommits: (signal: AbortSignal) => Promise<GitHubCommitList>;
-}) {
-  const commits = useRequest(loadCommits);
-  const [subdir, setSubdir] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
-  const [update, setUpdate] = useState<ImportStatus>();
-  const [pollError, setPollError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const submission = useRef<AbortController | null>(null);
-  const busy = submitting || Boolean(job && !pollError && update?.status !== "error");
-
-  useEffect(() => () => submission.current?.abort(), []);
-
-  useEffect(() => {
-    if (!job) return;
-    const { id } = job;
-    const controller = new AbortController();
-    let navigationTimer: number | undefined;
-    void pollRepoStatus(id, controller.signal, setUpdate).then(
-      (status) => {
-        if (controller.signal.aborted || status.status !== "ready") return;
-        trackSignin("import_completed");
-        navigationTimer = window.setTimeout(() => navigate(repoPath(id)), 2000);
-      },
-      (error: unknown) => {
-        if (!controller.signal.aborted) {
-          setPollError(error instanceof Error ? error.message : "Could not check the import status.");
-        }
-      },
-    );
-    return () => {
-      controller.abort();
-      window.clearTimeout(navigationTimer);
-    };
-  }, [job]);
-
-  async function start(body: PickedImportRequest) {
-    if (submission.current) return;
-    const controller = new AbortController();
-    submission.current = controller;
-    setSubmitting(true);
-    setFormError(null);
-    setJob(null);
-    setUpdate(undefined);
-    setPollError(null);
-    try {
-      const response = await importPickedRepo(body, controller.signal);
-      if (!controller.signal.aborted) setJob({ ...response, body });
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setFormError(error instanceof Error ? error.message : "Could not start the analysis.");
-      }
-    } finally {
-      if (!controller.signal.aborted) {
-        submission.current = null;
-        setSubmitting(false);
-      }
-    }
-  }
-
-  function analyze(limit: number) {
-    const result = validateImport({ url: `https://github.com/${repo.full_name}`, subdir, maxCommits: String(limit) });
-    if (!("body" in result)) {
-      setFormError(result.message);
-      return;
-    }
-    trackSignin("repo_selected");
-    void start({
-      github_repo_id: repo.id, installation_id: repo.installation_id, branch,
-      subdir: result.body.subdir, max_commits: result.body.max_commits,
-    });
-  }
+function BranchCommits({ details }: { details: RepoDetails }) {
+  const { commits, subdir, setSubdir, formError, analyze, busy, submitting, job, update, pollError, retry } = details;
 
   if (commits.status === "loading") return <p role="status">Loading the latest commits…</p>;
   if (commits.status === "error") return <p role="alert">{commits.message}</p>;
@@ -176,13 +81,13 @@ function BranchCommits({ repo, branch, loadCommits }: {
           ))}
         </ol>
       )}
-      <form noValidate onSubmit={(event) => { event.preventDefault(); if (!busy) analyze(limit); }}>
+      <form noValidate onSubmit={(event) => { event.preventDefault(); analyze(); }}>
         <fieldset disabled={busy || list.length === 0}>
           <div className="github-card__field">
             <label className="field__label" htmlFor="github-subdir">Subfolder (optional)</label>
             <input
               id="github-subdir" className="input" type="text" value={subdir}
-              onChange={(event) => { setSubdir(event.target.value); setFormError(null); }}
+              onChange={(event) => setSubdir(event.target.value)}
             />
             <p className="muted field__hint">Only commits that change this folder are analyzed.</p>
           </div>
@@ -192,17 +97,7 @@ function BranchCommits({ repo, branch, loadCommits }: {
           </button>
         </fieldset>
       </form>
-      {job && (
-        <ImportProgress
-          job={job} update={update} pollError={pollError}
-          onRetry={() => {
-            if (pollError) {
-              setPollError(null);
-              setJob({ ...job });
-            } else void start(job.body);
-          }}
-        />
-      )}
+      {job && <ImportProgress job={job} update={update} pollError={pollError} onRetry={retry} />}
     </>
   );
 }

@@ -9,6 +9,11 @@ describe("parsePath", () => {
     expect(parsePath(repoPath("review fixture"))).toEqual({ page: "viewer", id: "review fixture" });
   });
 
+  it("matches the sign-in page", () => {
+    expect(parsePath("/signin")).toEqual({ page: "signin" });
+    expect(parsePath("/signin/")).toEqual({ page: "signin" });
+  });
+
   it("matches the GitHub repos and repo details paths", () => {
     expect(parsePath("/github")).toEqual({ page: "github-repos" });
     expect(parsePath("/github/")).toEqual({ page: "github-repos" });
@@ -18,7 +23,7 @@ describe("parsePath", () => {
   });
 
   it.each([
-    "/unknown", "/repo/", "/repo/x/extra", "/repo/x%2Fy", "/repo/%", "/repo/..",
+    "/unknown", "/signin/x", "/repo/", "/repo/x/extra", "/repo/x%2Fy", "/repo/%", "/repo/..",
     "/github/0", "/github/x", "/github/1/2", "/github/12345678901234567",
   ])("rejects %s", (path) => {
     expect(parsePath(path)).toEqual({ page: "not-found" });

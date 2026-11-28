@@ -770,6 +770,247 @@ def test_dry_run_has_no_api_or_file_writes(env_file, scope_file, capsys, existin
     assert "secret" not in output.out + output.err
 
 
+APP_FLOW_NAMES = [
+    "app_flow",
+    "ui_font_family",
+    "ui_font_weight",
+    "ui_line_spacing",
+    "ui_buttons",
+    "ui_colours",
+    "ui_landing_layout",
+    "ui_signin_layout",
+    "ui_repos_layout",
+    "ui_repo_details_layout",
+    "ui_flow_view_layout",
+    "ui_branch_switch",
+]
+
+
+def allocations_by_key(feature, state):
+    keys = {option["id"]: option["key"] for option in feature["multivariate_options"]}
+    return {
+        keys[row["multivariate_feature_option"]]: row["percentage_allocation"]
+        for row in state["multivariate_feature_state_values"]
+    }
+
+
+def test_app_flow_flags_are_created_only_in_the_chosen_environment(env_file, scope_file):
+    client = FakeAdminClient()
+    project = client.add_project()
+    production = client.add_environment(project, "Production")
+    development = client.add_environment(project, "Development")
+    before_env = env_file.read_bytes()
+
+    setup_script.setup(
+        client,
+        env_file,
+        dry_run=False,
+        environment_name="Development",
+        scope_file=scope_file,
+        only="app-flow",
+    )
+
+    (tag,) = client.tags
+    assert tag["label"] == "app-flow"
+    assert sorted(row["name"] for row in client.features) == sorted(APP_FLOW_NAMES)
+    assert client.keys == {}
+    assert client.warehouses == {}
+    assert env_file.read_bytes() == before_env
+    assert not scope_file.exists()
+    for name in APP_FLOW_NAMES:
+        feature, state = client.project_flag(development, name)
+        assert feature["type"] == "MULTIVARIATE"
+        assert feature["tags"] == [tag["id"]]
+        assert state["enabled"] is True
+        if name == "app_flow":
+            assert state["feature_state_value"] == "a"
+            allocations = {"b": 33, "c": 33}
+            assert 100 - sum(allocations.values()) == 34
+        else:
+            assert state["feature_state_value"] == "flow"
+            allocations = {"a": 0, "b": 0, "c": 0}
+        assert allocations_by_key(feature, state) == allocations
+        values = {
+            option["key"]: option["string_value"] for option in feature["multivariate_options"]
+        }
+        assert values == {key: key for key in allocations}
+        defaults = {
+            option["default_percentage_allocation"] for option in feature["multivariate_options"]
+        }
+        assert defaults == {0}
+        _, untouched = client.project_flag(production, name)
+        assert untouched["enabled"] is False
+        assert untouched["feature_state_value"] is None
+        assert set(allocations_by_key(feature, untouched).values()) == {0}
+
+
+def test_app_flow_rerun_only_reads(env_file, scope_file, capsys):
+    client = FakeAdminClient()
+    project = client.add_project()
+    client.add_environment(project, "Production")
+    client.add_environment(project, "Development")
+    options = {"environment_name": "Development", "scope_file": scope_file, "only": "app-flow"}
+    setup_script.setup(client, env_file, dry_run=False, **options)
+    features = copy.deepcopy(client.features)
+    states = copy.deepcopy(client.states)
+    client.calls.clear()
+    capsys.readouterr()
+
+    setup_script.setup(client, env_file, dry_run=False, **options)
+
+    assert client.calls and all(method == "GET" for method, _ in client.calls)
+    assert client.features == features
+    assert client.states == states
+    output = capsys.readouterr().out
+    assert "differs from defaults" not in output
+    assert "Created" not in output and "Added" not in output
+
+
+def test_app_flow_dry_run_previews_values_without_writes(env_file, scope_file, capsys):
+    client = FakeAdminClient()
+    project = client.add_project()
+    client.add_environment(project, "Production")
+    client.add_environment(project, "Development")
+    before_env = env_file.read_bytes()
+
+    setup_script.setup(
+        client,
+        env_file,
+        dry_run=True,
+        environment_name="Development",
+        scope_file=scope_file,
+        only="app-flow",
+    )
+
+    assert client.calls and all(method == "GET" for method, _ in client.calls)
+    assert client.tags == []
+    assert client.features == []
+    assert env_file.read_bytes() == before_env
+    assert not scope_file.exists()
+    lines = capsys.readouterr().out.splitlines()
+    assert "Would create tag app-flow." in lines
+    assert sum(line.startswith("Would create flag ") for line in lines) == len(APP_FLOW_NAMES)
+    assert "Would create tag code-flow." not in lines
+    assert not any("with tag code-flow" in line for line in lines)
+    assert 'Would create flag app_flow with tag app-flow (on, "a" 34%, "b" 33%, "c" 33%).' in lines
+    assert (
+        "Would create flag ui_branch_switch with tag app-flow "
+        '(on, "flow" 100%, "a" 0%, "b" 0%, "c" 0%).'
+    ) in lines
+
+
+def test_app_flow_leaves_an_existing_flag_alone_and_adds_its_tag(env_file, scope_file, capsys):
+    client = FakeAdminClient()
+    project = client.add_project()
+    client.add_environment(project, "Production")
+    development = client.add_environment(project, "Development")
+    tags_path = f"projects/{project}/tags/"
+    features_path = f"projects/{project}/features/"
+    other_tag = client.request("POST", tags_path, {"label": "other"})
+    existing = client.request(
+        "POST",
+        features_path,
+        {
+            "name": "app_flow",
+            "type": "MULTIVARIATE",
+            "initial_value": "c",
+            "tags": [other_tag["id"]],
+        },
+    )
+    client.request(
+        "POST",
+        f"{features_path}{existing['id']}/mv-options/",
+        {
+            "feature": existing["id"],
+            "key": "d",
+            "type": "unicode",
+            "string_value": "d",
+            "default_percentage_allocation": 50,
+        },
+    )
+    feature, state = client.project_flag(development, "app_flow")
+    old_feature = copy.deepcopy(feature)
+    old_state = copy.deepcopy(state)
+    client.calls.clear()
+    capsys.readouterr()
+
+    setup_script.setup(
+        client,
+        env_file,
+        dry_run=False,
+        environment_name="Development",
+        scope_file=scope_file,
+        only="app-flow",
+    )
+
+    tag_id = next(tag["id"] for tag in client.tags if tag["label"] == "app-flow")
+    assert feature == {**old_feature, "tags": [other_tag["id"], tag_id]}
+    assert state == old_state
+    assert ("PATCH", f"{features_path}{existing['id']}/") in client.calls
+    assert sorted(row["name"] for row in client.features) == sorted(APP_FLOW_NAMES)
+    output = capsys.readouterr().out
+    assert "app_flow differs from defaults" in output
+    assert "Added tag app-flow to app_flow." in output
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "chosen"),
+    [
+        ([], "Development"),
+        (["--environment", "Development"], "Development"),
+        (["--environment", "Production"], "Production"),
+    ],
+)
+def test_app_flow_cli_defaults_to_development_and_writes_one_environment(
+    extra_args, chosen, env_file, scope_file, monkeypatch, capsys
+):
+    client = FakeAdminClient()
+    project = client.add_project()
+    environments = {
+        name: client.add_environment(project, name) for name in ("Production", "Development")
+    }
+    monkeypatch.setattr(setup_script, "AdminClient", lambda *_: client)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "flagsmith_setup.py",
+            "--env-file",
+            str(env_file),
+            "--scope-file",
+            str(scope_file),
+            "--only",
+            "app-flow",
+            *extra_args,
+        ],
+    )
+    before_env = env_file.read_bytes()
+
+    assert setup_script.main() == 0
+
+    assert f"Using Flagsmith environment code-flow/{chosen}." in capsys.readouterr().out
+    assert len(client.features) == len(APP_FLOW_NAMES)
+    for name, environment in environments.items():
+        _, state = client.project_flag(environment, "app_flow")
+        assert state["enabled"] is (name == chosen)
+        assert state["feature_state_value"] == ("a" if name == chosen else None)
+    assert env_file.read_bytes() == before_env
+    assert not scope_file.exists()
+
+
+def test_only_accepts_only_the_app_flow_group(monkeypatch, capsys):
+    monkeypatch.setattr(
+        setup_script, "AdminClient", lambda *_: pytest.fail("Unexpected Admin API call")
+    )
+    monkeypatch.setattr(sys, "argv", ["flagsmith_setup.py", "--only", "ui-flags"])
+
+    with pytest.raises(SystemExit) as error:
+        setup_script.main()
+
+    assert error.value.code == 2
+    assert "invalid choice: 'ui-flags'" in capsys.readouterr().err
+
+
 def test_env_update_preserves_other_bytes_and_inline_comments(tmp_path):
     path = tmp_path / ".env"
     path.write_bytes(

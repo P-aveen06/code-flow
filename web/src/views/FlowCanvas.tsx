@@ -7,6 +7,7 @@ import { useEffect, useEffectEvent, useId, useMemo, useRef } from "react";
 import type { ChipNode, FlowEdge, FlowLayout, FlowNode, ModuleNode, SymbolNode } from "../layout/elk";
 import type { FlagFinding, NodeStatus, OverlayNode } from "../types";
 import type { FlowDirection } from "../view";
+import { recordDiagramMove } from "../appFlow/journey";
 import { contextLabel } from "./collapse";
 import { guardActivity, highlightedPaths } from "./flagFindings";
 import { diagramFit, includeLabelBounds } from "./fit";
@@ -216,9 +217,13 @@ function Canvas({
         edgeTypes={edgeTypes}
         onInit={onInit}
         onMove={onMove}
+        onMoveEnd={(event) => { if (event) recordDiagramMove(); }}
         onNodesChange={layoutPositions.onNodesChange}
         onNodeDragStart={() => { dragged.current = true; }}
-        onNodeDragStop={(_, _node, movedNodes) => layoutPositions.finishDrag(movedNodes)}
+        onNodeDragStop={(_, _node, movedNodes) => {
+          recordDiagramMove();
+          layoutPositions.finishDrag(movedNodes);
+        }}
         onNodeClick={(event, node) => {
           if (dragged.current && event.detail !== 0) return;
           if (node.type === "symbol") onNodeClick(node.data.symbol);
@@ -233,7 +238,7 @@ function Canvas({
         elementsSelectable={false}
         edgesFocusable={false}
       >
-        <Background gap={20} size={1} color="var(--color-border-strong)" />
+        <Background gap={20} size={1} color="var(--color-grid)" />
         {layout.nodes.length > 0 && (
           <Controls
             className="flow-controls"

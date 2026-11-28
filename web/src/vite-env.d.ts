@@ -7,6 +7,8 @@ interface ImportMetaEnv {
   readonly VITE_HOSTED_DEMO?: string;
   // Variant shown when Flagsmith is unreachable: url_import (default) or github_signin.
   readonly VITE_GITHUB_SIGNIN_FALLBACK?: string;
+  // Flow used when Flagsmith is unavailable: a, b or c (default: today's UI).
+  readonly VITE_APP_FLOW_FALLBACK?: string;
 }
 
 interface ImportMeta {
