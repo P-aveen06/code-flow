@@ -8,6 +8,7 @@ import { Landing } from "../pages/Landing";
 import { Viewer } from "../pages/Viewer";
 import { githubReposPath, navigate } from "../router";
 import { usePiece } from "./AppFlowProvider";
+import { markBranchSwitchOpened } from "./journey";
 import { BranchSwitchA } from "./flows/a/BranchSwitch";
 import { BranchSwitchB } from "./flows/b/BranchSwitch";
 import { BranchSwitchC } from "./flows/c/BranchSwitch";
@@ -76,9 +77,10 @@ export function FlowViewScreen({ id, search }: FlowViewProps) {
   return <Screen key={id} id={id} search={search} />;
 }
 
-// Today has no branch switch inside the flow view. This link reaches the repo picker instead.
+// Today has no branch switch inside the flow view. This link reaches the repo picker instead,
+// and opening it starts the branch switch's clock like the flows' own switches do.
 function TodayBranchLink() {
-  return <AppLink href={githubReposPath}>Switch branch</AppLink>;
+  return <AppLink href={githubReposPath} onClick={() => markBranchSwitchOpened()}>Switch branch</AppLink>;
 }
 
 const branchSwitchScreens: Record<Piece, ComponentType<BranchSwitchProps>> = {
