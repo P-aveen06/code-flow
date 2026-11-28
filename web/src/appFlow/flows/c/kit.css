@@ -1,0 +1,255 @@
+/* Flow C "Canvas" kit. Layout and sizes only: every colour, font, weight, line height and
+   button size comes from the tokens (docs/APP_FLOW_BUILD.md, "Token vocabulary"). */
+
+.fc-icon {
+  flex: none;
+  vertical-align: middle;
+}
+
+/* Top bar */
+
+.fc-header {
+  box-sizing: border-box;
+  position: relative;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: 64px;
+  padding: 0 var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.fc-header__start,
+.fc-header__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fc-header__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.fc-header__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  font-size: var(--text-h3);
+  line-height: var(--leading-heading);
+}
+
+.fc-header__name {
+  font-size: var(--text-h3);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  letter-spacing: -0.02em;
+}
+
+/* Avatar */
+
+.fc-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+}
+
+.fc-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Account menu: a details element whose popover sits under the summary */
+
+.fc-menu {
+  position: relative;
+}
+
+.fc-menu__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--btn-height);
+  padding: 0 var(--space-1);
+  border-radius: var(--btn-radius);
+  color: var(--color-text);
+  font-size: var(--text-body);
+  cursor: pointer;
+  list-style: none;
+}
+
+.fc-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
+.fc-menu__login {
+  font-weight: var(--weight-label);
+}
+
+.fc-menu__popover {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  width: 184px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fc-menu__who {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-small);
+  line-height: var(--leading-body);
+}
+
+/* Canvas: the page colour with a dot grid every 16 px */
+
+.fc-canvas {
+  position: relative;
+  min-height: 100%;
+  overflow: hidden;
+  background: radial-gradient(circle, var(--color-grid) 1px, transparent 1.15px) 0 0 / 16px 16px var(--color-canvas);
+}
+
+/* Floating panel: 16 px radius, panel shadow */
+
+.fc-panel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fc-panel__title {
+  margin: 0;
+  font-size: var(--text-h3);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+/* Pills */
+
+.fc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  font-size: var(--text-small);
+  font-weight: var(--weight-label);
+  line-height: var(--leading-heading);
+  white-space: nowrap;
+}
+
+.fc-pill--added {
+  background: var(--diagram-added-fill);
+  color: var(--diagram-added-text);
+  font-family: var(--font-mono);
+}
+
+.fc-pill--removed {
+  background: var(--diagram-removed-fill);
+  color: var(--diagram-removed-text);
+  font-family: var(--font-mono);
+}
+
+.fc-pill--changed {
+  background: var(--diagram-changed-fill);
+  color: var(--diagram-changed-text);
+  font-family: var(--font-mono);
+}
+
+/* Modal sheet: dimmed backdrop, centred dialog */
+
+.fc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-text) 38%, transparent);
+}
+
+.fc-modal__dialog {
+  position: relative;
+  display: grid;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  width: 520px;
+  max-width: 100%;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fc-modal__dialog:focus {
+  outline: none;
+}
+
+.fc-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fc-modal__title {
+  margin: 0;
+  font-size: var(--text-h2);
+  font-weight: var(--weight-heading);
+  line-height: var(--leading-heading);
+}
+
+.fc-modal__close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--btn-height-sm);
+  height: var(--btn-height-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  cursor: pointer;
+}
